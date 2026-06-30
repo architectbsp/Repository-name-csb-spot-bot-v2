@@ -1,3 +1,12 @@
+import random
+
+
 class MarketData:
     def get_price(self, symbol: str):
-        return {"symbol": symbol, "price": 0.0}
+        base = 42000  # fake BTC base price
+        fluctuation = random.uniform(-500, 500)
+
+        return {
+            "symbol": symbol,
+            "price": round(base + fluctuation, 2)
+        }
