@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QPushButt
 
 from app.core.bot_engine import BotEngine
 from app.core.market_data import MarketData
+from app.core.strategy import Strategy
 
 
 class MainWindow(QMainWindow):
@@ -10,6 +11,7 @@ class MainWindow(QMainWindow):
 
         self.engine = BotEngine()
         self.data = MarketData()
+        self.strategy = Strategy()
 
         self.setWindowTitle("CSB Spot Bot v2")
 
@@ -18,6 +20,7 @@ class MainWindow(QMainWindow):
 
         self.status_label = QLabel("Status: Stopped")
         self.price_label = QLabel("BTC: 0.0")
+        self.signal_label = QLabel("Signal: None")
 
         start_btn = QPushButton("Start Bot")
         stop_btn = QPushButton("Stop Bot")
@@ -29,6 +32,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.status_label)
         layout.addWidget(self.price_label)
+        layout.addWidget(self.signal_label)
         layout.addWidget(start_btn)
         layout.addWidget(stop_btn)
         layout.addWidget(refresh_btn)
@@ -46,4 +50,13 @@ class MainWindow(QMainWindow):
 
     def refresh_price(self):
         data = self.data.get_price("BTCUSDT")
-        self.price_label.setText(f"BTC: {data['price']}")
+        price = data["price"]
+
+        self.price_label.setText(f"BTC: {price}")
+
+        if self.strategy.should_buy(price):
+            self.signal_label.setText("Signal: BUY")
+        elif self.strategy.should_sell(price):
+            self.signal_label.setText("Signal: SELL")
+        else:
+            self.signal_label.setText("Signal: WAIT")
