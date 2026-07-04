@@ -20,3 +20,6 @@ class Timer:
             return timedelta()
 
         return datetime.now() - self._started_at
+
+    def is_expired(self) -> bool:
+        return self.elapsed() >= self._duration
