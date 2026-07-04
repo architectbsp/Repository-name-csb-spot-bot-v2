@@ -77,6 +77,9 @@ class MarketScanner:
     def initialize(self) -> None:
         pass
 
+    def shutdown(self) -> None:
+        pass
+
     def reset(self) -> None:
         pass
 
