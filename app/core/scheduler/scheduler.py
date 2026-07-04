@@ -8,6 +8,7 @@ from .job import Job
 class Scheduler:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
+        self._running = False
 
     def register(self, job: Job) -> None:
         self._jobs[job.name] = job
@@ -20,6 +21,16 @@ class Scheduler:
 
     def has_job(self, name: str) -> bool:
         return name in self._jobs
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    def start(self) -> None:
+        self._running = True
+
+    def stop(self) -> None:
+        self._running = False
 
     def schedule(self, job: Job) -> None:
         job.next_run = datetime.now() + timedelta(seconds=job.interval)
@@ -47,6 +58,9 @@ class Scheduler:
             job.running = False
 
     def tick(self) -> None:
+        if not self._running:
+            return
+
         for job in self._jobs.values():
             if self.is_due(job):
                 self.run_job(job)
