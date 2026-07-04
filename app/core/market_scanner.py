@@ -82,7 +82,9 @@ class MarketScanner:
         self._initialized = False
 
     def reset(self) -> None:
-        pass
+        self.stop()
+        self.shutdown()
+        self.clear_all()
 
     def run(self) -> None:
         pass
