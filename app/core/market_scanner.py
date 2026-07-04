@@ -15,6 +15,9 @@ class MarketScanner:
     def set_exchange(self, exchange) -> None:
         self._exchange = exchange
 
+    def get_exchange(self):
+        return self._exchange
+
     def scan(self) -> None:
         pass
 
