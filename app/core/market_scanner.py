@@ -140,7 +140,7 @@ class MarketScanner:
         return self.configured_dependency_count()
 
     def __call__(self) -> None:
-        self.scan()
+        self.tick()
 
     def has_exchange(self) -> bool:
         return self._exchange is not None
