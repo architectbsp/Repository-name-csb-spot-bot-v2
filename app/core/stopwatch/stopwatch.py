@@ -15,3 +15,9 @@ class Stopwatch:
 
     def reset(self) -> None:
         self._started_at = None
+
+    def elapsed(self) -> float:
+        if self._started_at is None:
+            return 0.0
+
+        return (datetime.now() - self._started_at).total_seconds()
