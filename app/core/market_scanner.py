@@ -98,6 +98,9 @@ class MarketScanner:
         self._initialized = True
 
     def shutdown(self) -> None:
+        if not self.is_initialized():
+            return
+
         self.stop()
         self._initialized = False
 
