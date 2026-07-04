@@ -86,6 +86,9 @@ class MarketScanner:
     def run(self) -> None:
         pass
 
+    def tick(self) -> None:
+        pass
+
     def scan(self) -> None:
         pass
 
