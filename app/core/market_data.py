@@ -11,6 +11,9 @@ class MarketData:
     def get_exchange(self):
         return self._exchange
 
+    def has_exchange(self) -> bool:
+        return self._exchange is not None
+
     def get_price(self, symbol: str):
         base = 42000  # fake BTC base price
         fluctuation = random.uniform(-500, 500)
