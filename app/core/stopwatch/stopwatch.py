@@ -26,3 +26,6 @@ class Stopwatch:
         elapsed = self.elapsed()
         self.reset()
         return elapsed
+
+    def __repr__(self) -> str:
+        return f"Stopwatch(running={self.is_running()})"
