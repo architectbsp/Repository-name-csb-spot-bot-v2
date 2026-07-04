@@ -46,6 +46,11 @@ class Scheduler:
         finally:
             job.running = False
 
+    def tick(self) -> None:
+        for job in self._jobs.values():
+            if self.is_due(job):
+                self.run_job(job)
+
     @property
     def jobs(self) -> dict[str, Job]:
         return self._jobs.copy()
