@@ -130,7 +130,8 @@ class MarketScanner:
         )
 
     def __str__(self) -> str:
-        return "MarketScanner"
+        state = "running" if self.is_running() else "stopped"
+        return f"MarketScanner[{state}]"
 
     def __bool__(self) -> bool:
         return self._running
