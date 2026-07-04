@@ -14,3 +14,9 @@ class Timer:
 
     def is_started(self) -> bool:
         return self._started_at is not None
+
+    def elapsed(self) -> timedelta:
+        if self._started_at is None:
+            return timedelta()
+
+        return datetime.now() - self._started_at
