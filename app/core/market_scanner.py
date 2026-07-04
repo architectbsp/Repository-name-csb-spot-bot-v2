@@ -22,6 +22,9 @@ class MarketScanner:
     def set_scheduler(self, scheduler) -> None:
         self._scheduler = scheduler
 
+    def get_scheduler(self):
+        return self._scheduler
+
     def scan(self) -> None:
         pass
 
