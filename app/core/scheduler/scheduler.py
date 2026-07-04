@@ -36,6 +36,16 @@ class Scheduler:
 
         return datetime.now() >= job.next_run
 
+    def run_job(self, job: Job) -> None:
+        job.running = True
+
+        try:
+            job.callback()
+            job.last_run = datetime.now()
+            self.schedule(job)
+        finally:
+            job.running = False
+
     @property
     def jobs(self) -> dict[str, Job]:
         return self._jobs.copy()
