@@ -232,3 +232,6 @@ class MarketScanner:
             for name, value in self.dependencies().items()
             if value is not None
         ]
+
+    def dependency_names(self) -> list[str]:
+        return list(self.dependencies().keys())
