@@ -57,6 +57,9 @@ class Timer:
     def is_finished(self) -> bool:
         return self.is_expired()
 
+    def is_pending(self) -> bool:
+        return not self.is_started()
+
     def __len__(self) -> int:
         return int(self.remaining().total_seconds())
 
