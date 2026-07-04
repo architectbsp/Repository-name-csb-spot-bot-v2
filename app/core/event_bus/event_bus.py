@@ -44,3 +44,6 @@ class EventBus:
 
     def has_subscribers(self, event: str) -> bool:
         return bool(self._subscribers.get(event))
+
+    def clear(self) -> None:
+        self._subscribers.clear()
