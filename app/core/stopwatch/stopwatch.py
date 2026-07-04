@@ -9,3 +9,6 @@ class Stopwatch:
 
     def start(self) -> None:
         self._started_at = datetime.now()
+
+    def is_running(self) -> bool:
+        return self._started_at is not None
