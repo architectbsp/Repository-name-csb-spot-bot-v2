@@ -172,3 +172,14 @@ class MarketScanner:
 
     def clear_config(self) -> None:
         self._config = None
+
+    def clear_all(self) -> None:
+        self.clear_exchange()
+        self.clear_scheduler()
+        self.clear_event_bus()
+        self.clear_rate_limiter()
+        self.clear_retry_policy()
+        self.clear_timeout()
+        self.clear_timer()
+        self.clear_stopwatch()
+        self.clear_config()
