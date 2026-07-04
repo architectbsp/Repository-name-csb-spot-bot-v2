@@ -183,3 +183,16 @@ class MarketScanner:
         self.clear_timer()
         self.clear_stopwatch()
         self.clear_config()
+
+    def is_empty(self) -> bool:
+        return (
+            not self.has_exchange()
+            and not self.has_scheduler()
+            and not self.has_event_bus()
+            and not self.has_rate_limiter()
+            and not self.has_retry_policy()
+            and not self.has_timeout()
+            and not self.has_timer()
+            and not self.has_stopwatch()
+            and not self.has_config()
+        )
