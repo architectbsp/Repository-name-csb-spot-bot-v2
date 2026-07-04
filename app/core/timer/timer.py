@@ -6,6 +6,10 @@ class Timer:
         self._duration = duration
         self._started_at: datetime | None = None
 
+    @property
+    def duration(self) -> timedelta:
+        return self._duration
+
     def start(self) -> None:
         self._started_at = datetime.now()
 
@@ -29,5 +33,5 @@ class Timer:
         return self.elapsed() >= self._duration
 
     @property
-    def duration(self) -> timedelta:
-        return self._duration
+    def started_at(self) -> datetime | None:
+        return self._started_at
