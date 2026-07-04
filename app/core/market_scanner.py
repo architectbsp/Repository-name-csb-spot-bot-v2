@@ -176,7 +176,11 @@ class MarketScanner:
         return self._running
 
     def is_ready(self) -> bool:
-        return self.has_exchange() and self.has_config()
+        return (
+            self.is_initialized()
+            and self.has_exchange()
+            and self.has_config()
+        )
 
     def clear_exchange(self) -> None:
         self._exchange = None
