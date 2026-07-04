@@ -17,6 +17,9 @@ class Timer:
     def start(self) -> None:
         self._started_at = datetime.now()
 
+    def stop(self) -> None:
+        self.reset()
+
     def reset(self) -> None:
         self._started_at = None
 
@@ -42,8 +45,8 @@ class Timer:
     def has_remaining(self) -> bool:
         return not self.is_expired()
 
-    def stop(self) -> None:
-        self.reset()
+    def __str__(self) -> str:
+        return str(self.remaining())
 
     def __repr__(self) -> str:
         return (
