@@ -6,7 +6,10 @@ class MarketScanner:
         self._running = True
 
     def stop(self) -> None:
-        self._running =False
+        self._running = False
 
     def is_running(self) -> bool:
         return self._running
+
+    def scan(self) -> None:
+        pass
