@@ -225,3 +225,10 @@ class MarketScanner:
 
     def is_fully_configured(self) -> bool:
         return not self.missing_dependencies()
+
+    def configured_dependencies(self) -> list[str]:
+        return [
+            name
+            for name, value in self.dependencies().items()
+            if value is not None
+        ]
