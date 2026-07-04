@@ -13,3 +13,6 @@ class MarketScanner:
 
     def scan(self) -> None:
         pass
+
+    def scan_once(self) -> None:
+        pass
