@@ -30,6 +30,9 @@ class RateLimiter:
         self._cleanup()
         return len(self._requests)
 
+    def clear(self) -> None:
+        self._requests.clear()
+
     def _cleanup(self) -> None:
         threshold = datetime.now() - timedelta(seconds=self._period)
 
