@@ -250,3 +250,6 @@ class MarketScanner:
 
     def dependency_items(self):
         return self.dependencies().items()
+
+    def dependency_values(self):
+        return self.dependencies().values()
