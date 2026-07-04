@@ -42,6 +42,9 @@ class Timer:
     def has_remaining(self) -> bool:
         return not self.is_expired()
 
+    def stop(self) -> None:
+        self.reset()
+
     def __repr__(self) -> str:
         return (
             f"Timer(duration={self._duration}, "
