@@ -241,3 +241,6 @@ class MarketScanner:
 
     def set_dependency(self, name: str, value) -> None:
         setattr(self, f"_{name}", value)
+
+    def clear_dependency(self, name: str) -> None:
+        setattr(self, f"_{name}", None)
