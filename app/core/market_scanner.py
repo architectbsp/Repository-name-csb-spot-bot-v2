@@ -91,3 +91,6 @@ class MarketScanner:
 
     def __repr__(self) -> str:
         return "MarketScanner()"
+
+    def __str__(self) -> str:
+        return "MarketScanner"
