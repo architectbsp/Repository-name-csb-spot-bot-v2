@@ -230,15 +230,8 @@ class MarketScanner:
 
     def dependencies(self) -> dict:
         return {
-            "exchange": self._exchange,
-            "scheduler": self._scheduler,
-            "event_bus": self._event_bus,
-            "rate_limiter": self._rate_limiter,
-            "retry_policy": self._retry_policy,
-            "timeout": self._timeout,
-            "timer": self._timer,
-            "stopwatch": self._stopwatch,
-            "config": self._config,
+            name: getattr(self, f"_{name}")
+            for name in self._DEPENDENCY_NAMES
         }
 
     def dependency_count(self) -> int:
