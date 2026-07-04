@@ -151,3 +151,6 @@ class MarketScanner:
 
     def clear_scheduler(self) -> None:
         self._scheduler = None
+
+    def clear_event_bus(self) -> None:
+        self._event_bus = None
