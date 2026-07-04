@@ -109,3 +109,6 @@ class MarketScanner:
 
     def __call__(self) -> None:
         self.scan()
+
+    def has_exchange(self) -> bool:
+        return self._exchange is not None
