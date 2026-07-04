@@ -18,3 +18,6 @@ class RetryPolicy:
 
     def is_last_attempt(self, attempt: int) -> bool:
         return attempt >= self._max_attempts
+
+    def reset(self) -> None:
+        pass
