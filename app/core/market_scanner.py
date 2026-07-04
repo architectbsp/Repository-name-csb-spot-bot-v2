@@ -74,6 +74,9 @@ class MarketScanner:
     def get_config(self):
         return self._config
 
+    def reset(self) -> None:
+        pass
+
     def scan(self) -> None:
         pass
 
