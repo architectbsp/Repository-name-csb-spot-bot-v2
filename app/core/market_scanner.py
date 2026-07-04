@@ -212,3 +212,6 @@ class MarketScanner:
 
     def dependency_count(self) -> int:
         return sum(value is not None for value in self.dependencies().values())
+
+    def has_dependencies(self) -> bool:
+        return self.dependency_count() > 0
