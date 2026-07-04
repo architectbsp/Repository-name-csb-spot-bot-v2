@@ -101,7 +101,11 @@ class MarketScanner:
         self.clear_all()
 
     def run(self) -> None:
+        if not self.is_ready():
+            raise RuntimeError("MarketScanner is not ready.")
+
         self.start()
+
         while self.is_running():
             self.tick()
 
