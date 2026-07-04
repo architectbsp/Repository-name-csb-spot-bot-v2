@@ -1,3 +1,3 @@
 class MarketScanner:
     def __init__(self):
-        pass
+        self._running = False
