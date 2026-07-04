@@ -100,7 +100,13 @@ class MarketScanner:
         return None
 
     def __repr__(self) -> str:
-        return "MarketScanner()"
+        return (
+            f"MarketScanner("
+            f"running={self._running}, "
+            f"initialized={self._initialized}, "
+            f"dependencies={self.configured_dependency_count()}"
+            f")"
+        )
 
     def __str__(self) -> str:
         return "MarketScanner"
