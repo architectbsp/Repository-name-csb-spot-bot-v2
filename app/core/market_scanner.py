@@ -76,6 +76,7 @@ class MarketScanner:
         return self._config
 
     def initialize(self) -> None:
+        self.stop()
         self._initialized = True
 
     def shutdown(self) -> None:
