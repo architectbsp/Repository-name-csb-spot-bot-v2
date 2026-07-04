@@ -5,7 +5,13 @@ from datetime import datetime
 
 
 class RateLimiter:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_requests: int,
+        period: float,
+    ) -> None:
+        self._max_requests = max_requests
+        self._period = period
         self._requests: deque[datetime] = deque()
 
     def record_request(self) -> None:
