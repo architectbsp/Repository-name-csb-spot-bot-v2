@@ -26,6 +26,10 @@ class Scheduler:
     def running(self) -> bool:
         return self._running
 
+    @property
+    def jobs(self) -> dict[str, Job]:
+        return self._jobs.copy()
+
     def start(self) -> None:
         self._running = True
 
@@ -57,14 +61,13 @@ class Scheduler:
         finally:
             job.running = False
 
-    def tick(self) -> None:
-        if not self._running:
-            return
-
+    def run_pending(self) -> None:
         for job in self._jobs.values():
             if self.is_due(job):
                 self.run_job(job)
 
-    @property
-    def jobs(self) -> dict[str, Job]:
-        return self._jobs.copy()
+    def tick(self) -> None:
+        if not self._running:
+            return
+
+        self.run_pending()
