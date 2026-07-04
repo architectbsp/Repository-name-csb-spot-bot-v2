@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QPushButt
 from app.core.bot_engine import BotEngine
 from app.core.market_data import MarketData
 from app.core.strategy import Strategy
+from app.core.worker import Worker
 
 
 class MainWindow(QMainWindow):
@@ -12,6 +13,8 @@ class MainWindow(QMainWindow):
         self.engine = BotEngine()
         self.data = MarketData()
         self.strategy = Strategy()
+
+        self.worker = Worker(self.refresh_price)
 
         self.setWindowTitle("CSB Spot Bot v2")
 
@@ -24,28 +27,27 @@ class MainWindow(QMainWindow):
 
         start_btn = QPushButton("Start Bot")
         stop_btn = QPushButton("Stop Bot")
-        refresh_btn = QPushButton("Refresh Price")
 
         start_btn.clicked.connect(self.start_bot)
         stop_btn.clicked.connect(self.stop_bot)
-        refresh_btn.clicked.connect(self.refresh_price)
 
         layout.addWidget(self.status_label)
         layout.addWidget(self.price_label)
         layout.addWidget(self.signal_label)
         layout.addWidget(start_btn)
         layout.addWidget(stop_btn)
-        layout.addWidget(refresh_btn)
 
         central.setLayout(layout)
         self.setCentralWidget(central)
 
     def start_bot(self):
         self.engine.start()
+        self.worker.start()
         self.status_label.setText("Status: Running")
 
     def stop_bot(self):
         self.engine.stop()
+        self.worker.stop()
         self.status_label.setText("Status: Stopped")
 
     def refresh_price(self):
