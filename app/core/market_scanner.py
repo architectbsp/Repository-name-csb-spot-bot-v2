@@ -130,3 +130,6 @@ class MarketScanner:
 
     def has_timer(self) -> bool:
         return self._timer is not None
+
+    def has_stopwatch(self) -> bool:
+        return self._stopwatch is not None
