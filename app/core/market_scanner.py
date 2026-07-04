@@ -94,3 +94,6 @@ class MarketScanner:
 
     def __str__(self) -> str:
         return "MarketScanner"
+
+    def __bool__(self) -> bool:
+        return self._running
