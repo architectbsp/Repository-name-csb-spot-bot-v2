@@ -92,7 +92,13 @@ class MarketScanner:
             self.tick()
 
     def tick(self) -> None:
+        if self.has_stopwatch():
+            self._stopwatch.start()
+
         self.scan_once()
+
+        if self.has_stopwatch():
+            self._stopwatch.stop()
 
     def scan(self) -> None:
         self.scan_once()
