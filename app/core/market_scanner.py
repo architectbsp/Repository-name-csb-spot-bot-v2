@@ -112,3 +112,6 @@ class MarketScanner:
 
     def has_exchange(self) -> bool:
         return self._exchange is not None
+
+    def has_scheduler(self) -> bool:
+        return self._scheduler is not None
