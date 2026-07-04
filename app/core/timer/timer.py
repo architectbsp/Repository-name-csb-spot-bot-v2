@@ -51,6 +51,9 @@ class Timer:
     def is_running(self) -> bool:
         return self.is_started() and not self.is_expired()
 
+    def is_idle(self) -> bool:
+        return self._started_at is None
+
     def __len__(self) -> int:
         return int(self.remaining().total_seconds())
 
