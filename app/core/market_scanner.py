@@ -234,6 +234,10 @@ class MarketScanner:
             for name in self._DEPENDENCY_NAMES
         }
 
+    def _validate_dependency_name(self, name: str) -> None:
+        if name not in self._DEPENDENCY_NAMES:
+            raise KeyError(name)
+
     def dependency_count(self) -> int:
         return sum(value is not None for value in self.dependencies().values())
 
