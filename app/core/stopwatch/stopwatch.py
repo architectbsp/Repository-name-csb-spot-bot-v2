@@ -21,3 +21,8 @@ class Stopwatch:
             return 0.0
 
         return (datetime.now() - self._started_at).total_seconds()
+
+    def stop(self) -> float:
+        elapsed = self.elapsed()
+        self.reset()
+        return elapsed
