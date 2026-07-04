@@ -29,6 +29,9 @@ class MarketScanner:
     def set_event_bus(self, event_bus) -> None:
         self._event_bus = event_bus
 
+    def get_event_bus(self):
+        return self._event_bus
+
     def scan(self) -> None:
         pass
 
