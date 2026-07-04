@@ -29,3 +29,6 @@ class Stopwatch:
 
     def __repr__(self) -> str:
         return f"Stopwatch(running={self.is_running()})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
