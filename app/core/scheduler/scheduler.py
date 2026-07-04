@@ -24,6 +24,18 @@ class Scheduler:
     def schedule(self, job: Job) -> None:
         job.next_run = datetime.now() + timedelta(seconds=job.interval)
 
+    def is_due(self, job: Job) -> bool:
+        if not job.enabled:
+            return False
+
+        if job.running:
+            return False
+
+        if job.next_run is None:
+            return False
+
+        return datetime.now() >= job.next_run
+
     @property
     def jobs(self) -> dict[str, Job]:
         return self._jobs.copy()
