@@ -166,3 +166,6 @@ class MarketScanner:
 
     def clear_timer(self) -> None:
         self._timer = None
+
+    def clear_stopwatch(self) -> None:
+        self._stopwatch = None
