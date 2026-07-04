@@ -206,6 +206,8 @@ class MarketScanner:
         self._config = None
 
     def clear_all(self) -> None:
+        self.stop()
+        self._initialized = False
         self.clear_exchange()
         self.clear_scheduler()
         self.clear_event_bus()
