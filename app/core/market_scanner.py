@@ -163,3 +163,6 @@ class MarketScanner:
 
     def clear_timeout(self) -> None:
         self._timeout = None
+
+    def clear_timer(self) -> None:
+        self._timer = None
