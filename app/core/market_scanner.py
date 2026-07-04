@@ -1,4 +1,16 @@
 class MarketScanner:
+    _DEPENDENCY_NAMES = (
+        "exchange",
+        "scheduler",
+        "event_bus",
+        "rate_limiter",
+        "retry_policy",
+        "timeout",
+        "timer",
+        "stopwatch",
+        "config",
+    )
+
     def __init__(self) -> None:
         self._running = False
         self._exchange = None
