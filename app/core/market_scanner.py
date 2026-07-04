@@ -2,6 +2,7 @@ class MarketScanner:
     def __init__(self) -> None:
         self._running = False
         self._exchange = None
+        self._scheduler = None
 
     def start(self) -> None:
         self._running = True
@@ -17,6 +18,9 @@ class MarketScanner:
 
     def get_exchange(self):
         return self._exchange
+
+    def set_scheduler(self, scheduler) -> None:
+        self._scheduler = scheduler
 
     def scan(self) -> None:
         pass
