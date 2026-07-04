@@ -25,6 +25,9 @@ class MarketScanner:
         self._initialized = False
 
     def start(self) -> None:
+        if not self.is_initialized():
+            raise RuntimeError("MarketScanner is not initialized.")
+
         self._running = True
 
     def stop(self) -> None:
