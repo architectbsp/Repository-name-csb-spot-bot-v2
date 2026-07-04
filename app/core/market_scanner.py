@@ -121,3 +121,6 @@ class MarketScanner:
 
     def has_rate_limiter(self) -> bool:
         return self._rate_limiter is not None
+
+    def has_retry_policy(self) -> bool:
+        return self._retry_policy is not None
