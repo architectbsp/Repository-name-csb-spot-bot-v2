@@ -68,6 +68,9 @@ class Timer:
             and self._started_at == other._started_at
         )
 
+    def __hash__(self) -> int:
+        return hash((self._duration, self._started_at))
+
     def __len__(self) -> int:
         return int(self.remaining().total_seconds())
 
