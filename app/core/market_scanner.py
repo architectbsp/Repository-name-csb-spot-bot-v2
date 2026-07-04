@@ -215,3 +215,10 @@ class MarketScanner:
 
     def has_dependencies(self) -> bool:
         return self.dependency_count() > 0
+
+    def missing_dependencies(self) -> list[str]:
+        return [
+            name
+            for name, value in self.dependencies().items()
+            if value is None
+        ]
