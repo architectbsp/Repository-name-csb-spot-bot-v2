@@ -20,6 +20,9 @@ class Timer:
     def reset(self) -> None:
         self._started_at = None
 
+    def restart(self) -> None:
+        self.start()
+
     def is_started(self) -> bool:
         return self._started_at is not None
 
