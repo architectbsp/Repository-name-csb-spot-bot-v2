@@ -83,6 +83,9 @@ class MarketScanner:
     def reset(self) -> None:
         pass
 
+    def run(self) -> None:
+        pass
+
     def scan(self) -> None:
         pass
 
