@@ -1,9 +1,12 @@
 class MarketScanner:
-    def __init__(self):
+    def __init__(self) -> None:
         self._running = False
 
     def start(self) -> None:
         self._running = True
 
     def stop(self) -> None:
-        self._running = False
+        self._running =False
+
+    def is_running(self) -> bool:
+        return self._running
