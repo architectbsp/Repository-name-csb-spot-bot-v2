@@ -154,3 +154,6 @@ class MarketScanner:
 
     def clear_event_bus(self) -> None:
         self._event_bus = None
+
+    def clear_rate_limiter(self) -> None:
+        self._rate_limiter = None
