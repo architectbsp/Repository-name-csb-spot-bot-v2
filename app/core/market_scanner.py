@@ -43,6 +43,9 @@ class MarketScanner:
     def set_retry_policy(self, retry_policy) -> None:
         self._retry_policy = retry_policy
 
+    def get_retry_policy(self):
+        return self._retry_policy
+
     def scan(self) -> None:
         pass
 
