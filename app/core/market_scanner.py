@@ -123,6 +123,9 @@ class MarketScanner:
                 self._stopwatch.stop()
 
     def scan(self) -> None:
+        if not self.is_ready():
+            raise RuntimeError("MarketScanner is not ready.")
+
         self.scan_once()
 
     def scan_once(self) -> None:
