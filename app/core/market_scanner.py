@@ -88,3 +88,6 @@ class MarketScanner:
 
     def scan_once(self) -> None:
         pass
+
+    def __repr__(self) -> str:
+        return "MarketScanner()"
