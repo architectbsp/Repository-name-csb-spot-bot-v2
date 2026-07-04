@@ -91,6 +91,9 @@ class MarketScanner:
         return self._config
 
     def initialize(self) -> None:
+        if self.is_initialized():
+            return
+
         self.stop()
         self._initialized = True
 
