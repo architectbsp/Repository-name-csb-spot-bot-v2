@@ -36,6 +36,9 @@ class MarketScanner:
     def set_rate_limiter(self, rate_limiter) -> None:
         self._rate_limiter = rate_limiter
 
+    def get_rate_limiter(self):
+        return self._rate_limiter
+
     def scan(self) -> None:
         pass
 
