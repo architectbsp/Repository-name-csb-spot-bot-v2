@@ -160,3 +160,6 @@ class MarketScanner:
 
     def clear_retry_policy(self) -> None:
         self._retry_policy = None
+
+    def clear_timeout(self) -> None:
+        self._timeout = None
