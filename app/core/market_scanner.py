@@ -4,6 +4,7 @@ class MarketScanner:
         self._exchange = None
         self._scheduler = None
         self._event_bus = None
+        self._rate_limiter = None
 
     def start(self) -> None:
         self._running = True
@@ -31,6 +32,9 @@ class MarketScanner:
 
     def get_event_bus(self):
         return self._event_bus
+
+    def set_rate_limiter(self, rate_limiter) -> None:
+        self._rate_limiter = rate_limiter
 
     def scan(self) -> None:
         pass
