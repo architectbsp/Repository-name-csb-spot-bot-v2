@@ -124,3 +124,6 @@ class MarketScanner:
 
     def has_retry_policy(self) -> bool:
         return self._retry_policy is not None
+
+    def has_timeout(self) -> bool:
+        return self._timeout is not None
