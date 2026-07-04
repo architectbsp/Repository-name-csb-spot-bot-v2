@@ -2,4 +2,8 @@ from __future__ import annotations
 
 
 class Timeout:
-    pass
+    def __init__(
+        self,
+        seconds: float,
+    ) -> None:
+        self._seconds = seconds
