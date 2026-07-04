@@ -5,6 +5,7 @@ class MarketScanner:
         self._scheduler = None
         self._event_bus = None
         self._rate_limiter = None
+        self._retry_policy = None
 
     def start(self) -> None:
         self._running = True
@@ -38,6 +39,9 @@ class MarketScanner:
 
     def get_rate_limiter(self):
         return self._rate_limiter
+
+    def set_retry_policy(self, retry_policy) -> None:
+        self._retry_policy = retry_policy
 
     def scan(self) -> None:
         pass
