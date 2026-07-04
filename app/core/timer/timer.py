@@ -8,3 +8,6 @@ class Timer:
 
     def start(self) -> None:
         self._started_at = datetime.now()
+
+    def reset(self) -> None:
+        self._started_at = None
