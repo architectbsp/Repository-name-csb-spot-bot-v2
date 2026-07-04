@@ -50,6 +50,9 @@ class MarketScanner:
     def set_timeout(self, timeout) -> None:
         self._timeout = timeout
 
+    def get_timeout(self):
+        return self._timeout
+
     def scan(self) -> None:
         pass
 
