@@ -10,6 +10,10 @@ class Timer:
     def duration(self) -> timedelta:
         return self._duration
 
+    @property
+    def started_at(self) -> datetime | None:
+        return self._started_at
+
     def start(self) -> None:
         self._started_at = datetime.now()
 
@@ -32,6 +36,8 @@ class Timer:
     def is_expired(self) -> bool:
         return self.elapsed() >= self._duration
 
-    @property
-    def started_at(self) -> datetime | None:
-        return self._started_at
+    def __repr__(self) -> str:
+        return (
+            f"Timer(duration={self._duration}, "
+            f"started_at={self._started_at})"
+        )
