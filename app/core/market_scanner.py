@@ -7,6 +7,7 @@ class MarketScanner:
         self._rate_limiter = None
         self._retry_policy = None
         self._timeout = None
+        self._timer = None
 
     def start(self) -> None:
         self._running = True
@@ -52,6 +53,9 @@ class MarketScanner:
 
     def get_timeout(self):
         return self._timeout
+
+    def set_timer(self, timer) -> None:
+        self._timer = timer
 
     def scan(self) -> None:
         pass
