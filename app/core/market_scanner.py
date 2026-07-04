@@ -157,3 +157,6 @@ class MarketScanner:
 
     def clear_rate_limiter(self) -> None:
         self._rate_limiter = None
+
+    def clear_retry_policy(self) -> None:
+        self._retry_policy = None
