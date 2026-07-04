@@ -133,3 +133,6 @@ class MarketScanner:
 
     def has_stopwatch(self) -> bool:
         return self._stopwatch is not None
+
+    def has_config(self) -> bool:
+        return self._config is not None
