@@ -7,3 +7,6 @@ class Timeout:
         seconds: float,
     ) -> None:
         self._seconds = seconds
+
+    def seconds(self) -> float:
+        return self._seconds
