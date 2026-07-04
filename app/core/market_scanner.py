@@ -10,6 +10,7 @@ class MarketScanner:
         self._timer = None
         self._stopwatch = None
         self._config = None
+        self._initialized = False
 
     def start(self) -> None:
         self._running = True
@@ -75,10 +76,10 @@ class MarketScanner:
         return self._config
 
     def initialize(self) -> None:
-        pass
+        self._initialized = True
 
     def shutdown(self) -> None:
-        pass
+        self._initialized = False
 
     def reset(self) -> None:
         pass
