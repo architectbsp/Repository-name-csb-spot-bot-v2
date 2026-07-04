@@ -100,3 +100,6 @@ class MarketScanner:
 
     def __len__(self) -> int:
         return 0
+
+    def __call__(self) -> None:
+        self.scan()
