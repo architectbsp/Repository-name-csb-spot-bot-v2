@@ -169,3 +169,6 @@ class MarketScanner:
 
     def clear_stopwatch(self) -> None:
         self._stopwatch = None
+
+    def clear_config(self) -> None:
+        self._config = None
