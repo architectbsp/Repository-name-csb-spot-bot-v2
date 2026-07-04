@@ -14,5 +14,6 @@ class BotEngine:
 
     def stop(self):
         self.market_scanner.stop()
+        self.market_scanner.shutdown()
         self.running = False
         print("Bot stopped")
