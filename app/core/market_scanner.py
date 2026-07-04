@@ -272,7 +272,10 @@ class MarketScanner:
         setattr(self, f"_{name}", None)
 
     def has_dependency(self, name: str) -> bool:
-        return self.get_dependency(name) is not None
+        dependencies = self.dependencies()
+        if name not in dependencies:
+            raise KeyError(name)
+        return dependencies[name] is not None
 
     def dependency_items(self):
         return self.dependencies().items()
