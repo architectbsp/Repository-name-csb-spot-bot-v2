@@ -7,9 +7,12 @@ class BotEngine:
         self.market_scanner = MarketScanner()
 
     def start(self):
+        self.market_scanner.initialize()
+        self.market_scanner.start()
         self.running = True
         print("Bot started")
 
     def stop(self):
+        self.market_scanner.stop()
         self.running = False
         print("Bot stopped")
