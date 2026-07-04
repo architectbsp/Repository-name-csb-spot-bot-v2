@@ -64,6 +64,9 @@ class MarketScanner:
     def set_stopwatch(self, stopwatch) -> None:
         self._stopwatch = stopwatch
 
+    def get_stopwatch(self):
+        return self._stopwatch
+
     def scan(self) -> None:
         pass
 
