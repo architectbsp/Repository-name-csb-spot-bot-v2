@@ -10,3 +10,6 @@ class Timeout:
 
     def seconds(self) -> float:
         return self._seconds
+
+    def is_disabled(self) -> bool:
+        return self._seconds <= 0
