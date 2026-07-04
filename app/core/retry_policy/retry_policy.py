@@ -9,3 +9,6 @@ class RetryPolicy:
     ) -> None:
         self._max_attempts = max_attempts
         self._delay = delay
+
+    def max_attempts(self) -> int:
+        return self._max_attempts
