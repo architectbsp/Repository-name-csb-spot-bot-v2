@@ -97,3 +97,6 @@ class MarketScanner:
 
     def __bool__(self) -> bool:
         return self._running
+
+    def __len__(self) -> int:
+        return 0
