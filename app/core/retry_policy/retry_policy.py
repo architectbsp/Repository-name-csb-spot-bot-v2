@@ -12,3 +12,6 @@ class RetryPolicy:
 
     def max_attempts(self) -> int:
         return self._max_attempts
+
+    def delay(self) -> float:
+        return self._delay
