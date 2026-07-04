@@ -27,3 +27,7 @@ class Timer:
 
     def is_expired(self) -> bool:
         return self.elapsed() >= self._duration
+
+    @property
+    def duration(self) -> timedelta:
+        return self._duration
