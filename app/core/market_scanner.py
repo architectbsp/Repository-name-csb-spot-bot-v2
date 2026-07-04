@@ -109,7 +109,7 @@ class MarketScanner:
         return self._running
 
     def __len__(self) -> int:
-        return 0
+        return self.configured_dependency_count()
 
     def __call__(self) -> None:
         self.scan()
