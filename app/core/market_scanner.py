@@ -256,3 +256,6 @@ class MarketScanner:
 
     def iter_dependencies(self):
         yield from self.dependencies().items()
+
+    def configured_dependency_count(self) -> int:
+        return len(self.configured_dependencies())
