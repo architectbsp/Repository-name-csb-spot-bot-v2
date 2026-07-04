@@ -30,3 +30,14 @@ class EventBus:
 
         if not subscribers:
             self._subscribers.pop(event, None)
+
+    def publish(
+        self,
+        event: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        subscribers = self._subscribers.get(event, [])
+
+        for callback in tuple(subscribers):
+            callback(*args, **kwargs)
