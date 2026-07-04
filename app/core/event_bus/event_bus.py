@@ -41,3 +41,6 @@ class EventBus:
 
         for callback in tuple(subscribers):
             callback(*args, **kwargs)
+
+    def has_subscribers(self, event: str) -> bool:
+        return bool(self._subscribers.get(event))
