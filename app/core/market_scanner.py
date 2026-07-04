@@ -148,3 +148,6 @@ class MarketScanner:
 
     def clear_exchange(self) -> None:
         self._exchange = None
+
+    def clear_scheduler(self) -> None:
+        self._scheduler = None
