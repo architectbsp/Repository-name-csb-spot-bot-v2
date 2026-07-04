@@ -209,3 +209,6 @@ class MarketScanner:
             "stopwatch": self._stopwatch,
             "config": self._config,
         }
+
+    def dependency_count(self) -> int:
+        return sum(value is not None for value in self.dependencies().values())
