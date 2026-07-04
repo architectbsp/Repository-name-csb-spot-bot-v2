@@ -208,15 +208,9 @@ class MarketScanner:
     def clear_all(self) -> None:
         self.stop()
         self._initialized = False
-        self.clear_exchange()
-        self.clear_scheduler()
-        self.clear_event_bus()
-        self.clear_rate_limiter()
-        self.clear_retry_policy()
-        self.clear_timeout()
-        self.clear_timer()
-        self.clear_stopwatch()
-        self.clear_config()
+
+        for name in self._DEPENDENCY_NAMES:
+            setattr(self, f"_{name}", None)
 
     def is_empty(self) -> bool:
         return (
