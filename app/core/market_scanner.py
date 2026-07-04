@@ -88,7 +88,8 @@ class MarketScanner:
 
     def run(self) -> None:
         self.start()
-        self.scan()
+        while self.is_running():
+            self.tick()
 
     def tick(self) -> None:
         self.scan_once()
