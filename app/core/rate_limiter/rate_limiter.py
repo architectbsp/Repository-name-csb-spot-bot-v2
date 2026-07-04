@@ -15,7 +15,12 @@ class RateLimiter:
         self._requests: deque[datetime] = deque()
 
     def record_request(self) -> None:
+        self._cleanup()
         self._requests.append(datetime.now())
+
+    def can_request(self) -> bool:
+        self._cleanup()
+        return len(self._requests) < self._max_requests
 
     def _cleanup(self) -> None:
         threshold = datetime.now() - timedelta(seconds=self._period)
