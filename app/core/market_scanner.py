@@ -80,6 +80,7 @@ class MarketScanner:
         self._initialized = True
 
     def shutdown(self) -> None:
+        self.stop()
         self._initialized = False
 
     def reset(self) -> None:
