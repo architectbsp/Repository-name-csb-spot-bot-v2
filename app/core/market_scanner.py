@@ -256,7 +256,10 @@ class MarketScanner:
         return list(self.dependencies().keys())
 
     def get_dependency(self, name: str):
-        return self.dependencies().get(name)
+        dependencies = self.dependencies()
+        if name not in dependencies:
+            raise KeyError(name)
+        return dependencies[name]
 
     def set_dependency(self, name: str, value) -> None:
         if name not in self.dependencies():
