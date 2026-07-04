@@ -129,7 +129,8 @@ class MarketScanner:
         self.scan_once()
 
     def scan_once(self) -> None:
-        return None
+        if not self.is_running():
+            return
 
     def __repr__(self) -> str:
         return (
