@@ -4,3 +4,6 @@ class MarketScanner:
 
     def start(self) -> None:
         self._running = True
+
+    def stop(self) -> None:
+        self._running = False
