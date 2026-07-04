@@ -127,3 +127,6 @@ class MarketScanner:
 
     def has_timeout(self) -> bool:
         return self._timeout is not None
+
+    def has_timer(self) -> bool:
+        return self._timer is not None
