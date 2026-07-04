@@ -235,3 +235,6 @@ class MarketScanner:
 
     def dependency_names(self) -> list[str]:
         return list(self.dependencies().keys())
+
+    def get_dependency(self, name: str):
+        return self.dependencies().get(name)
