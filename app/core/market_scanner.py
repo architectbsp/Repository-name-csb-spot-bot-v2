@@ -3,6 +3,7 @@ class MarketScanner:
         self._running = False
         self._exchange = None
         self._scheduler = None
+        self._event_bus = None
 
     def start(self) -> None:
         self._running = True
@@ -24,6 +25,9 @@ class MarketScanner:
 
     def get_scheduler(self):
         return self._scheduler
+
+    def set_event_bus(self, event_bus) -> None:
+        self._event_bus = event_bus
 
     def scan(self) -> None:
         pass
