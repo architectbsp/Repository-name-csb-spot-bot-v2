@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from .job import Job
 
 
@@ -18,6 +20,9 @@ class Scheduler:
 
     def has_job(self, name: str) -> bool:
         return name in self._jobs
+
+    def schedule(self, job: Job) -> None:
+        job.next_run = datetime.now() + timedelta(seconds=job.interval)
 
     @property
     def jobs(self) -> dict[str, Job]:
