@@ -118,3 +118,6 @@ class MarketScanner:
 
     def has_event_bus(self) -> bool:
         return self._event_bus is not None
+
+    def has_rate_limiter(self) -> bool:
+        return self._rate_limiter is not None
