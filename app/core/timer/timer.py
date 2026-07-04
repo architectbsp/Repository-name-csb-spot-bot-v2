@@ -21,5 +21,9 @@ class Timer:
 
         return datetime.now() - self._started_at
 
+    def remaining(self) -> timedelta:
+        remaining = self._duration - self.elapsed()
+        return max(remaining, timedelta())
+
     def is_expired(self) -> bool:
         return self.elapsed() >= self._duration
