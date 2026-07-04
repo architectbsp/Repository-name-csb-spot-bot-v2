@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 
 class Stopwatch:
-    pass
+    def __init__(self) -> None:
+        self._started_at: datetime | None = None
