@@ -136,3 +136,6 @@ class MarketScanner:
 
     def has_config(self) -> bool:
         return self._config is not None
+
+    def is_initialized(self) -> bool:
+        return self._initialized
