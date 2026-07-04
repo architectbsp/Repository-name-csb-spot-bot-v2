@@ -16,3 +16,6 @@ class Timeout:
 
     def __repr__(self) -> str:
         return f"Timeout(seconds={self._seconds})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
