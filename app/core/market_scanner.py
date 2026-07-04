@@ -9,6 +9,7 @@ class MarketScanner:
         self._timeout = None
         self._timer = None
         self._stopwatch = None
+        self._config = None
 
     def start(self) -> None:
         self._running = True
@@ -66,6 +67,9 @@ class MarketScanner:
 
     def get_stopwatch(self):
         return self._stopwatch
+
+    def set_config(self, config) -> None:
+        self._config = config
 
     def scan(self) -> None:
         pass
