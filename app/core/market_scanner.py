@@ -253,3 +253,6 @@ class MarketScanner:
 
     def dependency_values(self):
         return self.dependencies().values()
+
+    def iter_dependencies(self):
+        yield from self.dependencies().items()
