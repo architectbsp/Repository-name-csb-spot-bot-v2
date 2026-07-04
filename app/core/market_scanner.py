@@ -57,6 +57,9 @@ class MarketScanner:
     def set_timer(self, timer) -> None:
         self._timer = timer
 
+    def get_timer(self):
+        return self._timer
+
     def scan(self) -> None:
         pass
 
