@@ -139,3 +139,6 @@ class MarketScanner:
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def is_scanning(self) -> bool:
+        return self._running
