@@ -6,6 +6,7 @@ class MarketScanner:
         self._event_bus = None
         self._rate_limiter = None
         self._retry_policy = None
+        self._timeout = None
 
     def start(self) -> None:
         self._running = True
@@ -45,6 +46,9 @@ class MarketScanner:
 
     def get_retry_policy(self):
         return self._retry_policy
+
+    def set_timeout(self, timeout) -> None:
+        self._timeout = timeout
 
     def scan(self) -> None:
         pass
