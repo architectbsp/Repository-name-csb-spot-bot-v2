@@ -12,3 +12,6 @@ class Stopwatch:
 
     def is_running(self) -> bool:
         return self._started_at is not None
+
+    def reset(self) -> None:
+        self._started_at = None
