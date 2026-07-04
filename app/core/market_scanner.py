@@ -87,7 +87,8 @@ class MarketScanner:
         self.clear_all()
 
     def run(self) -> None:
-        pass
+        self.start()
+        self.scan()
 
     def tick(self) -> None:
         pass
