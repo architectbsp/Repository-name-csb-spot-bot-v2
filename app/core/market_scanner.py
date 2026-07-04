@@ -115,3 +115,6 @@ class MarketScanner:
 
     def has_scheduler(self) -> bool:
         return self._scheduler is not None
+
+    def has_event_bus(self) -> bool:
+        return self._event_bus is not None
