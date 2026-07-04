@@ -110,13 +110,17 @@ class MarketScanner:
             self.tick()
 
     def tick(self) -> None:
+        if not self.is_ready():
+            raise RuntimeError("MarketScanner is not ready.")
+
         if self.has_stopwatch():
             self._stopwatch.start()
 
-        self.scan_once()
-
-        if self.has_stopwatch():
-            self._stopwatch.stop()
+        try:
+            self.scan_once()
+        finally:
+            if self.has_stopwatch():
+                self._stopwatch.stop()
 
     def scan(self) -> None:
         self.scan_once()
