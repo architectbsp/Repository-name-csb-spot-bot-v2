@@ -13,3 +13,6 @@ class Timeout:
 
     def is_disabled(self) -> bool:
         return self._seconds <= 0
+
+    def __repr__(self) -> str:
+        return f"Timeout(seconds={self._seconds})"
