@@ -247,3 +247,6 @@ class MarketScanner:
 
     def has_dependency(self, name: str) -> bool:
         return self.get_dependency(name) is not None
+
+    def dependency_items(self):
+        return self.dependencies().items()
