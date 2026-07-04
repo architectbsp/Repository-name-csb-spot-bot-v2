@@ -45,6 +45,9 @@ class Timer:
     def has_remaining(self) -> bool:
         return not self.is_expired()
 
+    def __bool__(self) -> bool:
+        return self.is_started()
+
     def __str__(self) -> str:
         return str(self.remaining())
 
