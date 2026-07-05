@@ -147,7 +147,17 @@ class MarketScanner:
 
         symbols = self.fetch_symbols()
         eligible_symbols = self.filter_symbols(symbols)
+        self.publish_scan_result(eligible_symbols)
         return eligible_symbols
+
+    def publish_scan_result(self, symbols):
+        if not self.has_event_bus():
+            return
+
+        self._event_bus.emit(
+            "market_scanner.scan_completed",
+            symbols,
+        )
 
     def fetch_symbols(self):
         return self._exchange.fetch_symbols()
