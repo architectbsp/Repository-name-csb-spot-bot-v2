@@ -145,6 +145,22 @@ class MarketScanner:
         if not self.is_running():
             return
 
+        symbols = self.fetch_symbols()
+        eligible_symbols = self.filter_symbols(symbols)
+        return eligible_symbols
+
+    def fetch_symbols(self):
+        return self._exchange.fetch_symbols()
+
+    def filter_symbols(self, symbols):
+        minimum_volume = self._config.minimum_volume_usd
+
+        return [
+            symbol
+            for symbol in symbols
+            if symbol["volume_24h"] >= minimum_volume
+        ]
+
     def __repr__(self) -> str:
         return (
             f"MarketScanner("
