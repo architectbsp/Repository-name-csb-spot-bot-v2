@@ -22,6 +22,7 @@ class MarketScanner:
         self._timer = None
         self._stopwatch = None
         self._config = None
+        self._last_scan_result = []
         self._initialized = False
 
     def start(self) -> None:
@@ -147,6 +148,7 @@ class MarketScanner:
 
         symbols = self.fetch_symbols()
         eligible_symbols = self.filter_symbols(symbols)
+        self._last_scan_result = eligible_symbols
         self.publish_scan_result(eligible_symbols)
         return eligible_symbols
 
@@ -158,6 +160,10 @@ class MarketScanner:
             "market_scanner.scan_completed",
             symbols,
         )
+
+
+    def last_scan_result(self):
+        return list(self._last_scan_result)
 
     def fetch_symbols(self):
         return self._exchange.fetch_symbols()
