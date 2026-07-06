@@ -134,6 +134,8 @@ class MarketScanner:
         if not self.is_ready():
             raise RuntimeError("MarketScanner is not ready.")
 
+        elapsed = None
+
         if self.has_stopwatch():
             self._stopwatch.start()
 
@@ -141,7 +143,13 @@ class MarketScanner:
             self.scan_once()
         finally:
             if self.has_stopwatch():
-                self._stopwatch.stop()
+                elapsed = self._stopwatch.stop()
+
+        if self.has_event_bus():
+            self._event_bus.emit(
+                "market_scanner.tick_completed",
+                {"elapsed": elapsed},
+            )
 
     def scan(self) -> None:
         if not self.is_ready():
