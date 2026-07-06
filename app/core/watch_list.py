@@ -27,21 +27,18 @@ class WatchList:
     def add(self, symbol: str, data: dict[str, Any] | None = None) -> bool:
         if symbol in self._coins:
             return False
-
         self._coins[symbol] = deepcopy(data) if data else {}
         return True
 
     def update(self, symbol: str, data: dict[str, Any]) -> bool:
         if symbol not in self._coins:
             return False
-
         self._coins[symbol].update(data)
         return True
 
     def replace(self, symbol: str, data: dict[str, Any]) -> bool:
         if symbol not in self._coins:
             return False
-
         self._coins[symbol] = deepcopy(data)
         return True
 
@@ -52,13 +49,11 @@ class WatchList:
     def get_value(self, symbol: str, key: str, default: Any = None) -> Any:
         if symbol not in self._coins:
             return default
-
         return self._coins[symbol].get(key, default)
 
     def set_value(self, symbol: str, key: str, value: Any) -> bool:
         if symbol not in self._coins:
             return False
-
         self._coins[symbol][key] = value
         return True
 
@@ -69,7 +64,6 @@ class WatchList:
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
-
         del self._coins[symbol]
         return True
 
@@ -80,6 +74,13 @@ class WatchList:
         return sorted(
             symbol
             for symbol, data in self._coins.items()
+            if data.get(key) == value
+        )
+
+    def count_by(self, key: str, value: Any) -> int:
+        return sum(
+            1
+            for data in self._coins.values()
             if data.get(key) == value
         )
 
