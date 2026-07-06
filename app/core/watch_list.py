@@ -84,6 +84,12 @@ class WatchList:
             if data.get(key) == value
         )
 
+    def snapshot(self) -> list[tuple[str, dict[str, Any]]]:
+        return [
+            (symbol, deepcopy(data))
+            for symbol, data in sorted(self._coins.items())
+        ]
+
     def clear(self) -> None:
         self._coins.clear()
 
