@@ -1,9 +1,10 @@
 from copy import deepcopy
+from typing import Any
 
 
 class WatchList:
     def __init__(self) -> None:
-        self._coins: dict[str, dict] = {}
+        self._coins: dict[str, dict[str, Any]] = {}
         self._initialized = False
         self._running = False
 
@@ -23,30 +24,43 @@ class WatchList:
     def stop(self) -> None:
         self._running = False
 
-    def add(self, symbol: str, data: dict | None = None) -> bool:
+    def add(self, symbol: str, data: dict[str, Any] | None = None) -> bool:
         if symbol in self._coins:
             return False
 
         self._coins[symbol] = deepcopy(data) if data else {}
         return True
 
-    def update(self, symbol: str, data: dict) -> bool:
+    def update(self, symbol: str, data: dict[str, Any]) -> bool:
         if symbol not in self._coins:
             return False
 
         self._coins[symbol].update(data)
         return True
 
-    def replace(self, symbol: str, data: dict) -> bool:
+    def replace(self, symbol: str, data: dict[str, Any]) -> bool:
         if symbol not in self._coins:
             return False
 
         self._coins[symbol] = deepcopy(data)
         return True
 
-    def get(self, symbol: str) -> dict | None:
+    def get(self, symbol: str) -> dict[str, Any] | None:
         coin = self._coins.get(symbol)
         return deepcopy(coin) if coin is not None else None
+
+    def get_value(self, symbol: str, key: str, default: Any = None) -> Any:
+        if symbol not in self._coins:
+            return default
+
+        return self._coins[symbol].get(key, default)
+
+    def set_value(self, symbol: str, key: str, value: Any) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol][key] = value
+        return True
 
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
@@ -67,7 +81,7 @@ class WatchList:
     def symbols(self) -> list[str]:
         return sorted(self._coins.keys())
 
-    def items(self) -> dict[str, dict]:
+    def items(self) -> dict[str, dict[str, Any]]:
         return deepcopy(self._coins)
 
     def is_initialized(self) -> bool:
