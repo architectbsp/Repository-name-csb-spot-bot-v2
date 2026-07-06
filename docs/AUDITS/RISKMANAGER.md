@@ -6,7 +6,7 @@ PASS
 
 Last Verified Commit
 
-6ec27ee
+731832a
 
 Responsibilities
 
@@ -30,15 +30,14 @@ NOT_IMPLEMENTED
 
 Known Limitations
 
-Business rules are not implemented.
+Business rules implemented.
 
 Technical Debt
 
-- Daily loss
-- Position sizing
-- Balance validation
-- Trade permission
+- Exchange integration
+- Strategy integration
+- Event publishing
 
 Next Review Trigger
 
-Risk rule implementation.
+Strategy integration.
