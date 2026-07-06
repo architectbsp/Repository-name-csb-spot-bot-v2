@@ -199,6 +199,42 @@ class WatchList:
 
         return now < cooldown_until
 
+
+    def cooldown_expired(
+        self,
+        symbol: str,
+        now: datetime,
+    ) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        cooldown_until = self._coins[symbol]["cooldown_until"]
+
+        if cooldown_until is None:
+            return True
+
+        return now >= cooldown_until
+
+    def remaining_cooldown(
+        self,
+        symbol: str,
+        now: datetime,
+    ):
+        if symbol not in self._coins:
+            return None
+
+        cooldown_until = self._coins[symbol]["cooldown_until"]
+
+        if cooldown_until is None:
+            return None
+
+        remaining = cooldown_until - now
+
+        if remaining.total_seconds() <= 0:
+            return None
+
+        return remaining
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
