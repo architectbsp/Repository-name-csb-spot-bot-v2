@@ -40,6 +40,11 @@ class BotEngine:
             module.set_timer(self.timer)
             module.set_stopwatch(self.stopwatch)
 
+        self.event_bus.subscribe(
+            "market_scanner.scan_completed",
+            self.watch_list.handle_scan_result,
+        )
+
         self.market_scanner.initialize()
         self.watch_list.initialize()
         self.position_manager.initialize()
