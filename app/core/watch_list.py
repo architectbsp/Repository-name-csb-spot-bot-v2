@@ -90,6 +90,12 @@ class WatchList:
             for symbol, data in sorted(self._coins.items())
         ]
 
+    def values(self) -> list[dict[str, Any]]:
+        return [
+            deepcopy(data)
+            for _, data in sorted(self._coins.items())
+        ]
+
     def clear(self) -> None:
         self._coins.clear()
 
