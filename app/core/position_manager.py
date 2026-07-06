@@ -97,6 +97,21 @@ class PositionManager:
             if position.state == PositionState.OPEN
         )
 
+
+    def get_open_positions(self) -> list[Position]:
+        return [
+            position
+            for position in self._positions.values()
+            if position.state == PositionState.OPEN
+        ]
+
+    def get_closed_positions(self) -> list[Position]:
+        return [
+            position
+            for position in self._positions.values()
+            if position.state == PositionState.CLOSED
+        ]
+
     def clear(self) -> None:
         self._positions.clear()
 
