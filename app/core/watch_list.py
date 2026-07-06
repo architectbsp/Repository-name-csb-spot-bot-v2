@@ -178,6 +178,23 @@ class WatchList:
 
         return True
 
+
+    def promote_to_position_open(
+        self,
+        symbol: str,
+        entry_price: float,
+        stop_price: float,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.POSITION_OPEN):
+            return False
+
+        coin = self._coins[symbol]
+        coin["entry_price"] = entry_price
+        coin["stop_price"] = stop_price
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
