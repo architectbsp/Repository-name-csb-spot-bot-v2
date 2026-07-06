@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -75,6 +76,8 @@ class WatchList:
         if symbol in self._coins:
             return False
 
+        now = datetime.utcnow()
+
         self._coins[symbol] = {
             "state": WatchState.IDLE,
             "lowest_price": None,
@@ -83,6 +86,8 @@ class WatchList:
             "stop_price": None,
             "trailing_price": None,
             "cooldown_until": None,
+            "created_at": now,
+            "updated_at": now,
         }
         return True
 
@@ -107,11 +112,14 @@ class WatchList:
             return False
 
         self._coins[symbol]["state"] = target
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
         return True
 
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
+
+        created_at = self._coins[symbol]["created_at"]
 
         self._coins[symbol] = {
             "state": WatchState.IDLE,
@@ -121,6 +129,8 @@ class WatchList:
             "stop_price": None,
             "trailing_price": None,
             "cooldown_until": None,
+            "created_at": created_at,
+            "updated_at": datetime.utcnow(),
         }
         return True
 
