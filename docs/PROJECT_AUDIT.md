@@ -5,13 +5,13 @@ Status: ACTIVE
 ## Project Status
 
 Current Commit:
-08ad135
+c9eba44
 
 Current Branch:
 main
 
 Current Stage:
-Audit Completed
+Feature Development
 
 Backend Progress:
 65%
@@ -34,6 +34,7 @@ Overall MVP Progress:
 | PositionManager | PARTIAL |
 | RiskManager | COMPLETE |
 | Strategy | PASS |
+| Trading | PARTIAL |
 
 ## Architecture Findings
 
@@ -41,17 +42,18 @@ Overall MVP Progress:
 - PositionManager acts as the position repository.
 - MarketData is not part of the runtime flow.
 - Strategy delegates trade permission to RiskManager.
+- Trading domain now defines shared trade request models.
 
 ## Technical Debt
 
-- Strategy now supports ExchangeManager dependency injection.
 - Complete PositionManager behavior.
 - Define MarketData runtime role.
+- Integrate TradeRequest into Strategy execution flow.
 - Add unit and integration tests.
 
 ## Next Logical Task
 
-Implement trade execution through ExchangeManager.
+Integrate TradeRequest into the Strategy → ExchangeManager execution flow.
 
 ## Last Validation
 

@@ -1,43 +1,3 @@
-## 08ad135
-
-### Strategy
-
-- Added ExchangeManager dependency injection.
-- No behavioral changes.
-- Trade execution remains pending.
-
-## 2026-07-07
-
-Commit
-
-8a39ce6
-
-Task
-
-RiskManager business rule API implemented.
-
-Status
-
-PASS
-
----
-
-## 2026-07-07
-
-Commit
-
-6ec27ee
-
-Task
-
-RiskManager service skeleton implemented.
-
-Status
-
-PASS
-
----
-
 # AUDIT HISTORY
 
 ## Status Legend
@@ -47,6 +7,37 @@ PASS
 - FAIL
 - NOT_IMPLEMENTED
 - DEFERRED
+
+---
+
+## c9eba44
+
+Module:
+Trading
+
+Changes:
+- Added TradeSide enum.
+- Added immutable TradeRequest domain model.
+
+Validation:
+- Compile PASS
+- Runtime PASS
+
+---
+
+## 08ad135
+
+Module:
+Strategy
+
+Changes:
+- Added ExchangeManager dependency injection.
+- No behavioral changes.
+- Trade execution remains pending.
+
+Validation:
+- Compile PASS
+- Runtime PASS
 
 ---
 
@@ -73,6 +64,8 @@ Summary
 
 Initial architecture audit completed.
 Current implementation baseline established.
+
+---
 
 ## 696f984
 
