@@ -96,6 +96,13 @@ class WatchList:
             for _, data in sorted(self._coins.items())
         ]
 
+    def __len__(self) -> int:
+        return len(self._coins)
+
+    def __iter__(self):
+        for symbol in sorted(self._coins.keys()):
+            yield symbol, deepcopy(self._coins[symbol])
+
     def clear(self) -> None:
         self._coins.clear()
 
