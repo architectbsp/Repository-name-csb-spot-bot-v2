@@ -190,6 +190,9 @@ class MarketScanner:
         def operation():
             return self._exchange.fetch_symbols()
 
+        if self.has_rate_limiter():
+            operation = self._rate_limiter.wrap(operation)
+
         if self.has_timeout():
             operation = self._timeout.wrap(operation)
 
