@@ -37,6 +37,13 @@ class WatchList:
         self._coins[symbol].update(data)
         return True
 
+    def replace(self, symbol: str, data: dict) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol] = deepcopy(data)
+        return True
+
     def get(self, symbol: str) -> dict | None:
         coin = self._coins.get(symbol)
         return deepcopy(coin) if coin is not None else None
@@ -58,7 +65,7 @@ class WatchList:
         return len(self._coins)
 
     def symbols(self) -> list[str]:
-        return list(self._coins.keys())
+        return sorted(self._coins.keys())
 
     def items(self) -> dict[str, dict]:
         return deepcopy(self._coins)
