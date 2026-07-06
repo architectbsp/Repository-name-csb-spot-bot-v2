@@ -130,6 +130,39 @@ class WatchList:
 
         return True
 
+
+    def record_falling_price(
+        self,
+        symbol: str,
+        price: float,
+    ) -> bool:
+        if self.get_state(symbol) != WatchState.WATCH_FALLING:
+            return False
+
+        coin = self._coins[symbol]
+
+        if price < coin["lowest_price"]:
+            coin["lowest_price"] = price
+
+        coin["updated_at"] = datetime.utcnow()
+        return True
+
+    def record_rising_price(
+        self,
+        symbol: str,
+        price: float,
+    ) -> bool:
+        if self.get_state(symbol) != WatchState.WATCH_RISING:
+            return False
+
+        coin = self._coins[symbol]
+
+        if price > coin["highest_price"]:
+            coin["highest_price"] = price
+
+        coin["updated_at"] = datetime.utcnow()
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
