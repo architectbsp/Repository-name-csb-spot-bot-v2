@@ -18,6 +18,9 @@ class Position:
     state: PositionState = PositionState.OPEN
 
 
+MAX_OPEN_POSITIONS = 10
+
+
 class PositionManager:
     def __init__(self) -> None:
         self._positions: dict[str, Position] = {}
@@ -42,6 +45,9 @@ class PositionManager:
 
     def add(self, position: Position) -> bool:
         if position.symbol in self._positions:
+            return False
+
+        if len(self._positions) >= MAX_OPEN_POSITIONS:
             return False
 
         self._positions[position.symbol] = position
