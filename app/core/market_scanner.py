@@ -105,6 +105,12 @@ class MarketScanner:
         self.stop()
         self._initialized = True
 
+        if self.has_scheduler():
+            self._scheduler.schedule(
+                self.tick,
+                name="market_scanner",
+            )
+
     def shutdown(self) -> None:
         if not self.is_initialized():
             return
