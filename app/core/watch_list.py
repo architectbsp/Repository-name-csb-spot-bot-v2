@@ -209,6 +209,29 @@ class WatchList:
 
         return True
 
+
+    def activate_trailing(
+        self,
+        symbol: str,
+        highest_price: float,
+        trailing_price: float,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.TRAILING_ACTIVE):
+            return False
+
+        coin = self._coins[symbol]
+
+        if (
+            coin["highest_price"] is None
+            or highest_price > coin["highest_price"]
+        ):
+            coin["highest_price"] = highest_price
+
+        coin["trailing_price"] = trailing_price
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
