@@ -235,6 +235,34 @@ class WatchList:
 
         return remaining
 
+
+    def set_lowest_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol]["lowest_price"] = price
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
+    def set_highest_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol]["highest_price"] = price
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
+    def clear_price_tracking(self, symbol: str) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+        coin["lowest_price"] = None
+        coin["highest_price"] = None
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
