@@ -3,6 +3,7 @@ import asyncio
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.models import ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.trading.models import TradeRequest, TradeSide
 
 
 class ExchangeManager:
@@ -57,3 +58,21 @@ class ExchangeManager:
     ):
         exchange = self._get_exchange(exchange_type)
         return await exchange.place_market_sell(symbol, amount)
+
+    async def execute_trade(
+        self,
+        exchange_type: ExchangeType,
+        trade: TradeRequest,
+    ):
+        if trade.side == TradeSide.BUY:
+            return await self.place_market_buy(
+                exchange_type,
+                trade.symbol,
+                float(trade.quantity),
+            )
+
+        return await self.place_market_sell(
+            exchange_type,
+            trade.symbol,
+            float(trade.quantity),
+        )
