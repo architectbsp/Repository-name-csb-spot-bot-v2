@@ -15,6 +15,40 @@ class WatchState(StrEnum):
     COOLDOWN = "COOLDOWN"
 
 
+_ALLOWED_TRANSITIONS: dict[WatchState, set[WatchState]] = {
+    WatchState.IDLE: {
+        WatchState.WATCH_FALLING,
+        WatchState.WATCH_RISING,
+    },
+    WatchState.WATCH_FALLING: {
+        WatchState.WATCH_RISING,
+    },
+    WatchState.WATCH_RISING: {
+        WatchState.BUY_PENDING,
+    },
+    WatchState.BUY_PENDING: {
+        WatchState.POSITION_OPEN,
+    },
+    WatchState.POSITION_OPEN: {
+        WatchState.BREAK_EVEN,
+        WatchState.POSITION_CLOSED,
+    },
+    WatchState.BREAK_EVEN: {
+        WatchState.TRAILING_ACTIVE,
+        WatchState.POSITION_CLOSED,
+    },
+    WatchState.TRAILING_ACTIVE: {
+        WatchState.POSITION_CLOSED,
+    },
+    WatchState.POSITION_CLOSED: {
+        WatchState.COOLDOWN,
+    },
+    WatchState.COOLDOWN: {
+        WatchState.IDLE,
+    },
+}
+
+
 class WatchList:
     def __init__(self) -> None:
         self._coins: dict[str, dict[str, Any]] = {}
@@ -61,11 +95,18 @@ class WatchList:
             return None
         return self._coins[symbol]["state"]
 
-    def set_state(self, symbol: str, state: WatchState) -> bool:
+    def can_transition(self, symbol: str, target: WatchState) -> bool:
         if symbol not in self._coins:
             return False
 
-        self._coins[symbol]["state"] = state
+        current = self._coins[symbol]["state"]
+        return target in _ALLOWED_TRANSITIONS[current]
+
+    def transition(self, symbol: str, target: WatchState) -> bool:
+        if not self.can_transition(symbol, target):
+            return False
+
+        self._coins[symbol]["state"] = target
         return True
 
     def remove(self, symbol: str) -> bool:
