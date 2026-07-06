@@ -1,3 +1,6 @@
+from copy import deepcopy
+
+
 class WatchList:
     def __init__(self) -> None:
         self._coins: dict[str, dict] = {}
@@ -24,7 +27,7 @@ class WatchList:
         if symbol in self._coins:
             return False
 
-        self._coins[symbol] = data or {}
+        self._coins[symbol] = deepcopy(data) if data else {}
         return True
 
     def update(self, symbol: str, data: dict) -> bool:
@@ -35,7 +38,8 @@ class WatchList:
         return True
 
     def get(self, symbol: str) -> dict | None:
-        return self._coins.get(symbol)
+        coin = self._coins.get(symbol)
+        return deepcopy(coin) if coin is not None else None
 
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
@@ -55,6 +59,9 @@ class WatchList:
 
     def symbols(self) -> list[str]:
         return list(self._coins.keys())
+
+    def items(self) -> dict[str, dict]:
+        return deepcopy(self._coins)
 
     def is_initialized(self) -> bool:
         return self._initialized
