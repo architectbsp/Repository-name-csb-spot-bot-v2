@@ -181,6 +181,11 @@ class MarketScanner:
         return list(self._last_scan_result)
 
     def fetch_symbols(self):
+        if self.has_retry_policy():
+            return self._retry_policy.execute(
+                self._exchange.fetch_symbols
+            )
+
         return self._exchange.fetch_symbols()
 
     def filter_symbols(self, symbols):
