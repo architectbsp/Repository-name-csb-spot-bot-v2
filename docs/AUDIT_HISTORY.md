@@ -1,3 +1,11 @@
+## 08ad135
+
+### Strategy
+
+- Added ExchangeManager dependency injection.
+- No behavioral changes.
+- Trade execution remains pending.
+
 ## 2026-07-07
 
 Commit

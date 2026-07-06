@@ -5,7 +5,7 @@ Status: ACTIVE
 ## Project Status
 
 Current Commit:
-696f984
+08ad135
 
 Current Branch:
 main
@@ -44,14 +44,14 @@ Overall MVP Progress:
 
 ## Technical Debt
 
-- Integrate Strategy → Exchange.
+- Strategy now supports ExchangeManager dependency injection.
 - Complete PositionManager behavior.
 - Define MarketData runtime role.
 - Add unit and integration tests.
 
 ## Next Logical Task
 
-Integrate Strategy → Exchange flow.
+Implement trade execution through ExchangeManager.
 
 ## Last Validation
 

@@ -6,7 +6,7 @@ PASS
 
 Last Verified Commit
 
-696f984
+08ad135
 
 Responsibilities
 
@@ -21,6 +21,7 @@ Constructor
 Dependency Injection
 
 - RiskManager
+- ExchangeManager
 - Config
 
 Lifecycle
@@ -36,14 +37,14 @@ Events
 
 Known Limitations
 
-- Does not execute trades.
-- Exchange integration not implemented.
+- ExchangeManager injected.
+- Trade execution not yet invoked.
 
 Technical Debt
 
-- Integrate Strategy output with Exchange.
+- Invoke ExchangeManager from Strategy trade flow.
 - Replace placeholder price logic with real signal generation.
 
 Next Review Trigger
 
-Strategy → Exchange integration.
+Trade execution implementation.
