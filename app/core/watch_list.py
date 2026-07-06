@@ -109,6 +109,31 @@ class WatchList:
         coin["updated_at"] = datetime.utcnow()
         return True
 
+
+    def update_lowest_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+
+        if coin["lowest_price"] is None or price < coin["lowest_price"]:
+            coin["lowest_price"] = price
+            coin["updated_at"] = datetime.utcnow()
+
+        return True
+
+    def update_highest_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+
+        if coin["highest_price"] is None or price > coin["highest_price"]:
+            coin["highest_price"] = price
+            coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
