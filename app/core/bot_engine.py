@@ -3,6 +3,7 @@ from datetime import timedelta
 from app.core.market_scanner import MarketScanner
 from app.core.position_manager import PositionManager
 from app.core.watch_list import WatchList
+from app.core.risk_manager import RiskManager
 
 from app.core.config.settings import AppSettings
 from app.core.event_bus.event_bus import EventBus
@@ -44,9 +45,10 @@ class BotEngine:
         self.market_scanner = MarketScanner()
         self.watch_list = WatchList()
         self.position_manager = PositionManager()
+        self.risk_manager = RiskManager()
 
     def initialize(self):
-        for module in (self.market_scanner, self.watch_list):
+        for module in (self.market_scanner, self.watch_list, self.risk_manager):
             module.set_config(self.config)
             module.set_event_bus(self.event_bus)
             module.set_scheduler(self.scheduler)
@@ -65,11 +67,13 @@ class BotEngine:
         self.market_scanner.initialize()
         self.watch_list.initialize()
         self.position_manager.initialize()
+        self.risk_manager.initialize()
 
     def shutdown(self):
         self.market_scanner.shutdown()
         self.watch_list.shutdown()
         self.position_manager.shutdown()
+        self.risk_manager.shutdown()
 
     def start(self):
         self.initialize()
@@ -77,6 +81,7 @@ class BotEngine:
         self.market_scanner.start()
         self.watch_list.start()
         self.position_manager.start()
+        self.risk_manager.start()
 
         self.running = True
         print("Bot started")
@@ -85,6 +90,7 @@ class BotEngine:
         self.market_scanner.stop()
         self.watch_list.stop()
         self.position_manager.stop()
+        self.risk_manager.stop()
 
         self.shutdown()
 

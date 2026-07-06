@@ -5,7 +5,7 @@ Status: ACTIVE
 ## Project Status
 
 Current Commit:
-3964099
+6ec27ee
 
 Current Branch:
 main
@@ -32,7 +32,7 @@ Overall MVP Progress:
 | MarketData | PARTIAL |
 | WatchList | PASS |
 | PositionManager | PARTIAL |
-| RiskManager | NOT_IMPLEMENTED |
+| RiskManager | PASS |
 
 ## Architecture Findings
 
@@ -51,17 +51,16 @@ Overall MVP Progress:
 
 ## Next Logical Task
 
-Create RiskManager service skeleton and integrate it into BotEngine.
+Implement RiskManager business rules.
 
 Scope
 
-- Constructor
-- Dependency Injection
-- Lifecycle
+- Daily loss validation
+- Position sizing
+- Balance validation
+- Trade permission
 - Compile
 - Runtime Validation
-
-Business rules are intentionally excluded.
 
 ## Last Validation
 
