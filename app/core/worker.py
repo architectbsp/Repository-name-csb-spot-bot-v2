@@ -1,25 +1,33 @@
 import threading
 import time
 
+from app.core.scheduler.scheduler import Scheduler
+
 
 class Worker:
-    def __init__(self, callback):
-        self.callback = callback
-        self.running = False
-        self.thread = None
+    def __init__(self, scheduler: Scheduler, interval: float = 0.1):
+        self._scheduler = scheduler
+        self._interval = interval
+        self._running = False
+        self._thread: threading.Thread | None = None
 
-    def start(self):
-        if self.running:
+    def start(self) -> None:
+        if self._running:
             return
 
-        self.running = True
-        self.thread = threading.Thread(target=self.run, daemon=True)
-        self.thread.start()
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
 
-    def run(self):
-        while self.running:
-            self.callback()
-            time.sleep(2)
+    def _run(self) -> None:
+        while self._running:
+            self._scheduler.tick()
+            time.sleep(self._interval)
 
-    def stop(self):
-        self.running = False
+    def stop(self) -> None:
+        self._running = False
+
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+
+        self._thread = None
