@@ -1,5 +1,7 @@
 import asyncio
 
+from app.core.exchange.base import BaseExchange
+from app.core.exchange.models import ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 
 
@@ -24,3 +26,34 @@ class ExchangeManager:
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _get_exchange(
+        self,
+        exchange_type: ExchangeType,
+    ) -> BaseExchange:
+        exchange = self._registry.get(exchange_type)
+
+        if exchange is None:
+            raise ValueError(
+                f"Exchange not registered: {exchange_type.name}"
+            )
+
+        return exchange
+
+    async def place_market_buy(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+        amount: float,
+    ):
+        exchange = self._get_exchange(exchange_type)
+        return await exchange.place_market_buy(symbol, amount)
+
+    async def place_market_sell(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+        amount: float,
+    ):
+        exchange = self._get_exchange(exchange_type)
+        return await exchange.place_market_sell(symbol, amount)
