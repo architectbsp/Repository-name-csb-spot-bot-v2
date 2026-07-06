@@ -109,6 +109,21 @@ class WatchList:
         self._coins[symbol]["state"] = target
         return True
 
+    def reset(self, symbol: str) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol] = {
+            "state": WatchState.IDLE,
+            "lowest_price": None,
+            "highest_price": None,
+            "entry_price": None,
+            "stop_price": None,
+            "trailing_price": None,
+            "cooldown_until": None,
+        }
+        return True
+
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
