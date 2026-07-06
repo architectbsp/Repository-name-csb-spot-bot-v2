@@ -188,7 +188,7 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
-            return self._exchange.fetch_symbols()
+            return self._exchange.fetch_markets()
 
         if self.has_rate_limiter():
             operation = self._rate_limiter.wrap(operation)
