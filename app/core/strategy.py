@@ -38,8 +38,25 @@ class Strategy:
     def set_config(self, config) -> None:
         self._config = config
 
-    def should_buy(self, price: float) -> bool:
-        return price > 42000
+    def should_buy(
+        self,
+        price: float,
+        *,
+        balance: float = 0.0,
+        daily_loss_percent: float = 0.0,
+        open_positions: int = 0,
+    ) -> bool:
+        if price <= 42000:
+            return False
+
+        if self._risk_manager is None:
+            return True
+
+        return self._risk_manager.can_open_trade(
+            balance=balance,
+            daily_loss_percent=daily_loss_percent,
+            open_positions=open_positions,
+        )
 
     def should_sell(self, price: float) -> bool:
         return price < 42000
