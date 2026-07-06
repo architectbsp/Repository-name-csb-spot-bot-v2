@@ -163,6 +163,21 @@ class WatchList:
         coin["updated_at"] = datetime.utcnow()
         return True
 
+
+    def promote_to_buy_pending(
+        self,
+        symbol: str,
+        entry_price: float,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.BUY_PENDING):
+            return False
+
+        coin = self._coins[symbol]
+        coin["entry_price"] = entry_price
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
