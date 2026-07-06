@@ -66,6 +66,37 @@ class PositionManager:
         del self._positions[symbol]
         return True
 
+
+    def close(
+        self,
+        symbol: str,
+    ) -> bool:
+        position = self._positions.get(symbol)
+
+        if position is None:
+            return False
+
+        position.state = PositionState.CLOSED
+        return True
+
+    def is_open(
+        self,
+        symbol: str,
+    ) -> bool:
+        position = self._positions.get(symbol)
+
+        if position is None:
+            return False
+
+        return position.state == PositionState.OPEN
+
+    def open_count(self) -> int:
+        return sum(
+            1
+            for position in self._positions.values()
+            if position.state == PositionState.OPEN
+        )
+
     def clear(self) -> None:
         self._positions.clear()
 
