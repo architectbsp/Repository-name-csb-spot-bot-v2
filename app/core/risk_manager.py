@@ -72,3 +72,38 @@ class RiskManager:
 
     def set_config(self, config):
         self._config = config
+
+    @property
+    def _risk(self):
+        if self._config is None:
+            raise RuntimeError("RiskManager config dependency is not set.")
+        return self._config.risk
+
+    def calculate_position_size(self, balance: float) -> float:
+        if balance <= 0:
+            return 0.0
+        return balance * (self._risk.capital_per_trade_percent / 100.0)
+
+    def has_sufficient_balance(self, balance: float) -> bool:
+        return self.calculate_position_size(balance) > 0.0
+
+    def is_daily_loss_limit_reached(self, daily_loss_percent: float) -> bool:
+        return daily_loss_percent >= self._risk.max_daily_loss_percent
+
+    def can_open_trade(
+        self,
+        *,
+        balance: float,
+        daily_loss_percent: float,
+        open_positions: int,
+    ) -> bool:
+        if self.is_daily_loss_limit_reached(daily_loss_percent):
+            return False
+
+        if open_positions >= self._risk.max_open_positions:
+            return False
+
+        if not self.has_sufficient_balance(balance):
+            return False
+
+        return True
