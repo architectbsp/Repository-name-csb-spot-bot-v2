@@ -1,3 +1,5 @@
+from app.core.scheduler.job import Job
+
 class MarketScanner:
     _DEPENDENCY_NAMES = (
         "exchange",
@@ -106,10 +108,13 @@ class MarketScanner:
         self._initialized = True
 
         if self.has_scheduler():
-            self._scheduler.schedule(
-                self.tick,
+            job = Job(
                 name="market_scanner",
+                interval=self._config.strategy.scan_interval_seconds,
+                callback=self.tick,
             )
+            self._scheduler.register(job)
+            self._scheduler.schedule(job)
 
     def shutdown(self) -> None:
         if not self.is_initialized():
@@ -202,7 +207,7 @@ class MarketScanner:
         return operation()
 
     def filter_symbols(self, symbols):
-        minimum_volume = self._config.minimum_volume_usd
+        minimum_volume = self._config.strategy.min_volume_usd
 
         return [
             symbol

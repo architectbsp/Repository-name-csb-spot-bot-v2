@@ -18,6 +18,7 @@ class StrategySettings:
     trailing_percent: float = 5.0
     min_volume_usd: float = 250_000.0
     max_position_hours: int = 24
+    scan_interval_seconds: int = 300
 
 
 @dataclass(slots=True)
