@@ -1,5 +1,18 @@
 from copy import deepcopy
+from enum import StrEnum
 from typing import Any
+
+
+class WatchState(StrEnum):
+    IDLE = "IDLE"
+    WATCH_FALLING = "WATCH_FALLING"
+    WATCH_RISING = "WATCH_RISING"
+    BUY_PENDING = "BUY_PENDING"
+    POSITION_OPEN = "POSITION_OPEN"
+    BREAK_EVEN = "BREAK_EVEN"
+    TRAILING_ACTIVE = "TRAILING_ACTIVE"
+    POSITION_CLOSED = "POSITION_CLOSED"
+    COOLDOWN = "COOLDOWN"
 
 
 class WatchList:
@@ -24,96 +37,52 @@ class WatchList:
     def stop(self) -> None:
         self._running = False
 
-    def add(self, symbol: str, data: dict[str, Any] | None = None) -> bool:
+    def add(self, symbol: str) -> bool:
         if symbol in self._coins:
             return False
-        self._coins[symbol] = deepcopy(data) if data else {}
-        return True
 
-    def update(self, symbol: str, data: dict[str, Any]) -> bool:
-        if symbol not in self._coins:
-            return False
-        self._coins[symbol].update(data)
-        return True
-
-    def replace(self, symbol: str, data: dict[str, Any]) -> bool:
-        if symbol not in self._coins:
-            return False
-        self._coins[symbol] = deepcopy(data)
+        self._coins[symbol] = {
+            "state": WatchState.IDLE,
+            "lowest_price": None,
+            "highest_price": None,
+            "entry_price": None,
+            "stop_price": None,
+            "trailing_price": None,
+            "cooldown_until": None,
+        }
         return True
 
     def get(self, symbol: str) -> dict[str, Any] | None:
         coin = self._coins.get(symbol)
-        return deepcopy(coin) if coin is not None else None
+        return deepcopy(coin) if coin else None
 
-    def get_value(self, symbol: str, key: str, default: Any = None) -> Any:
+    def get_state(self, symbol: str) -> WatchState | None:
         if symbol not in self._coins:
-            return default
-        return self._coins[symbol].get(key, default)
+            return None
+        return self._coins[symbol]["state"]
 
-    def set_value(self, symbol: str, key: str, value: Any) -> bool:
+    def set_state(self, symbol: str, state: WatchState) -> bool:
         if symbol not in self._coins:
             return False
-        self._coins[symbol][key] = value
-        return True
 
-    def pop(self, symbol: str) -> dict[str, Any] | None:
-        coin = self._coins.pop(symbol, None)
-        return deepcopy(coin) if coin is not None else None
+        self._coins[symbol]["state"] = state
+        return True
 
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
+
         del self._coins[symbol]
         return True
 
     def contains(self, symbol: str) -> bool:
         return symbol in self._coins
 
-    def find_by(self, key: str, value: Any) -> list[str]:
-        return sorted(
-            symbol
-            for symbol, data in self._coins.items()
-            if data.get(key) == value
-        )
-
-    def count_by(self, key: str, value: Any) -> int:
-        return sum(
-            1
-            for data in self._coins.values()
-            if data.get(key) == value
-        )
-
-    def snapshot(self) -> list[tuple[str, dict[str, Any]]]:
-        return [
-            (symbol, deepcopy(data))
-            for symbol, data in sorted(self._coins.items())
-        ]
-
-    def values(self) -> list[dict[str, Any]]:
-        return [
-            deepcopy(data)
-            for _, data in sorted(self._coins.items())
-        ]
-
-    def __len__(self) -> int:
-        return len(self._coins)
-
-    def __iter__(self):
-        for symbol in sorted(self._coins.keys()):
-            yield symbol, deepcopy(self._coins[symbol])
-
     def clear(self) -> None:
         self._coins.clear()
 
     def size(self) -> int:
         return len(self._coins)
-
-    def symbols(self) -> list[str]:
-        return sorted(self._coins.keys())
-
-    def items(self) -> dict[str, dict[str, Any]]:
-        return deepcopy(self._coins)
 
     def is_initialized(self) -> bool:
         return self._initialized
