@@ -94,6 +94,42 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.utcnow()
         return True
 
+
+    def begin_falling_watch(
+        self,
+        symbol: str,
+        price: float,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.WATCH_FALLING):
+            return False
+
+        coin = self._coins[symbol]
+        coin["lowest_price"] = price
+        coin["highest_price"] = price
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
+    def begin_rising_watch(
+        self,
+        symbol: str,
+        price: float,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.WATCH_RISING):
+            return False
+
+        coin = self._coins[symbol]
+
+        if coin["lowest_price"] is None:
+            coin["lowest_price"] = price
+
+        if coin["highest_price"] is None or price > coin["highest_price"]:
+            coin["highest_price"] = price
+
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
