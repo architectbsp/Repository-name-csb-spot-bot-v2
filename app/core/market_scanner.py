@@ -181,12 +181,16 @@ class MarketScanner:
         return list(self._last_scan_result)
 
     def fetch_symbols(self):
-        if self.has_retry_policy():
-            return self._retry_policy.execute(
-                self._exchange.fetch_symbols
-            )
+        def operation():
+            return self._exchange.fetch_symbols()
 
-        return self._exchange.fetch_symbols()
+        if self.has_timeout():
+            operation = self._timeout.wrap(operation)
+
+        if self.has_retry_policy():
+            return self._retry_policy.execute(operation)
+
+        return operation()
 
     def filter_symbols(self, symbols):
         minimum_volume = self._config.minimum_volume_usd
