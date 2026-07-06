@@ -195,6 +195,20 @@ class WatchList:
 
         return True
 
+
+    def activate_break_even(
+        self,
+        symbol: str,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.BREAK_EVEN):
+            return False
+
+        coin = self._coins[symbol]
+        coin["stop_price"] = coin["entry_price"]
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
