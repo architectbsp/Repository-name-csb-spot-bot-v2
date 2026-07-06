@@ -232,6 +232,17 @@ class WatchList:
 
         return True
 
+
+    def close_position(
+        self,
+        symbol: str,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.POSITION_CLOSED):
+            return False
+
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
