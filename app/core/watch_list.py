@@ -159,6 +159,46 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.utcnow()
         return True
 
+
+    def start_cooldown(
+        self,
+        symbol: str,
+        cooldown_until: datetime,
+    ) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+        coin["cooldown_until"] = cooldown_until
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
+    def clear_cooldown(self, symbol: str) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+        coin["cooldown_until"] = None
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
+    def is_in_cooldown(
+        self,
+        symbol: str,
+        now: datetime,
+    ) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        cooldown_until = self._coins[symbol]["cooldown_until"]
+
+        if cooldown_until is None:
+            return False
+
+        return now < cooldown_until
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
