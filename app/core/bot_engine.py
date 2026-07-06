@@ -10,6 +10,7 @@ from app.core.timeout.timeout import Timeout
 from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
+from app.core.exchange.manager import ExchangeManager
 
 
 class BotEngine:
@@ -24,6 +25,7 @@ class BotEngine:
         self.rate_limiter = RateLimiter()
         self.timer = Timer()
         self.stopwatch = Stopwatch()
+        self.exchange = ExchangeManager()
 
         self.market_scanner = MarketScanner()
         self.watch_list = WatchList()
@@ -39,6 +41,7 @@ class BotEngine:
             module.set_rate_limiter(self.rate_limiter)
             module.set_timer(self.timer)
             module.set_stopwatch(self.stopwatch)
+            module.set_exchange(self.exchange)
 
         self.event_bus.subscribe(
             "market_scanner.scan_completed",
