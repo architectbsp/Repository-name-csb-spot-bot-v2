@@ -487,6 +487,22 @@ class WatchList:
         }
         return True
 
+
+    def handle_scan_result(self, symbols) -> int:
+        added = 0
+
+        for symbol in symbols:
+            if isinstance(symbol, dict):
+                symbol = symbol.get("symbol")
+
+            if not symbol:
+                continue
+
+            if self.add(symbol):
+                added += 1
+
+        return added
+
     def remove(self, symbol: str) -> bool:
         return self._coins.pop(symbol, None) is not None
 
