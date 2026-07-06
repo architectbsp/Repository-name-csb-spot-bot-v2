@@ -20,12 +20,22 @@ class WatchList:
     def stop(self) -> None:
         self._running = False
 
-    def add(self, symbol: str) -> bool:
+    def add(self, symbol: str, data: dict | None = None) -> bool:
         if symbol in self._coins:
             return False
 
-        self._coins[symbol] = {}
+        self._coins[symbol] = data or {}
         return True
+
+    def update(self, symbol: str, data: dict) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol].update(data)
+        return True
+
+    def get(self, symbol: str) -> dict | None:
+        return self._coins.get(symbol)
 
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
@@ -42,6 +52,9 @@ class WatchList:
 
     def size(self) -> int:
         return len(self._coins)
+
+    def symbols(self) -> list[str]:
+        return list(self._coins.keys())
 
     def is_initialized(self) -> bool:
         return self._initialized
