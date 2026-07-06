@@ -31,8 +31,15 @@ class MarketScanner:
 
         self._running = True
 
+        if self.has_event_bus():
+            self._event_bus.emit("market_scanner.started")
+
     def stop(self) -> None:
+        was_running = self._running
         self._running = False
+
+        if was_running and self.has_event_bus():
+            self._event_bus.emit("market_scanner.stopped")
 
     def is_running(self) -> bool:
         return self._running
