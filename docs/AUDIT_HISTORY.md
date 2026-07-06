@@ -65,3 +65,17 @@ Summary
 
 Initial architecture audit completed.
 Current implementation baseline established.
+
+## 696f984
+
+Module:
+Strategy
+
+Changes:
+- Added service lifecycle.
+- Added RiskManager dependency.
+- Integrated can_open_trade() into buy decision.
+
+Validation:
+- Compile PASS
+- Runtime PASS
