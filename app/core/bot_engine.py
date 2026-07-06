@@ -30,14 +30,15 @@ class BotEngine:
         self.position_manager = PositionManager()
 
     def initialize(self):
-        self.market_scanner.set_config(self.config)
-        self.market_scanner.set_event_bus(self.event_bus)
-        self.market_scanner.set_scheduler(self.scheduler)
-        self.market_scanner.set_retry_policy(self.retry_policy)
-        self.market_scanner.set_timeout(self.timeout)
-        self.market_scanner.set_rate_limiter(self.rate_limiter)
-        self.market_scanner.set_timer(self.timer)
-        self.market_scanner.set_stopwatch(self.stopwatch)
+        for module in (self.market_scanner, self.watch_list):
+            module.set_config(self.config)
+            module.set_event_bus(self.event_bus)
+            module.set_scheduler(self.scheduler)
+            module.set_retry_policy(self.retry_policy)
+            module.set_timeout(self.timeout)
+            module.set_rate_limiter(self.rate_limiter)
+            module.set_timer(self.timer)
+            module.set_stopwatch(self.stopwatch)
 
         self.market_scanner.initialize()
         self.watch_list.initialize()
