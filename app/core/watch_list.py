@@ -76,6 +76,13 @@ class WatchList:
     def contains(self, symbol: str) -> bool:
         return symbol in self._coins
 
+    def find_by(self, key: str, value: Any) -> list[str]:
+        return sorted(
+            symbol
+            for symbol, data in self._coins.items()
+            if data.get(key) == value
+        )
+
     def clear(self) -> None:
         self._coins.clear()
 
