@@ -16,37 +16,16 @@ class WatchState(StrEnum):
     COOLDOWN = "COOLDOWN"
 
 
-_ALLOWED_TRANSITIONS: dict[WatchState, set[WatchState]] = {
-    WatchState.IDLE: {
-        WatchState.WATCH_FALLING,
-        WatchState.WATCH_RISING,
-    },
-    WatchState.WATCH_FALLING: {
-        WatchState.WATCH_RISING,
-    },
-    WatchState.WATCH_RISING: {
-        WatchState.BUY_PENDING,
-    },
-    WatchState.BUY_PENDING: {
-        WatchState.POSITION_OPEN,
-    },
-    WatchState.POSITION_OPEN: {
-        WatchState.BREAK_EVEN,
-        WatchState.POSITION_CLOSED,
-    },
-    WatchState.BREAK_EVEN: {
-        WatchState.TRAILING_ACTIVE,
-        WatchState.POSITION_CLOSED,
-    },
-    WatchState.TRAILING_ACTIVE: {
-        WatchState.POSITION_CLOSED,
-    },
-    WatchState.POSITION_CLOSED: {
-        WatchState.COOLDOWN,
-    },
-    WatchState.COOLDOWN: {
-        WatchState.IDLE,
-    },
+_ALLOWED_TRANSITIONS = {
+    WatchState.IDLE: {WatchState.WATCH_FALLING, WatchState.WATCH_RISING},
+    WatchState.WATCH_FALLING: {WatchState.WATCH_RISING},
+    WatchState.WATCH_RISING: {WatchState.BUY_PENDING},
+    WatchState.BUY_PENDING: {WatchState.POSITION_OPEN},
+    WatchState.POSITION_OPEN: {WatchState.BREAK_EVEN, WatchState.POSITION_CLOSED},
+    WatchState.BREAK_EVEN: {WatchState.TRAILING_ACTIVE, WatchState.POSITION_CLOSED},
+    WatchState.TRAILING_ACTIVE: {WatchState.POSITION_CLOSED},
+    WatchState.POSITION_CLOSED: {WatchState.COOLDOWN},
+    WatchState.COOLDOWN: {WatchState.IDLE},
 }
 
 
@@ -91,11 +70,11 @@ class WatchList:
         }
         return True
 
-    def get(self, symbol: str) -> dict[str, Any] | None:
+    def get(self, symbol: str):
         coin = self._coins.get(symbol)
         return deepcopy(coin) if coin else None
 
-    def get_state(self, symbol: str) -> WatchState | None:
+    def get_state(self, symbol: str):
         if symbol not in self._coins:
             return None
         return self._coins[symbol]["state"]
@@ -115,11 +94,27 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.utcnow()
         return True
 
+    def update_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        coin = self._coins[symbol]
+
+        if coin["lowest_price"] is None or price < coin["lowest_price"]:
+            coin["lowest_price"] = price
+
+        if coin["highest_price"] is None or price > coin["highest_price"]:
+            coin["highest_price"] = price
+
+        coin["updated_at"] = datetime.utcnow()
+        return True
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
 
         created_at = self._coins[symbol]["created_at"]
+        now = datetime.utcnow()
 
         self._coins[symbol] = {
             "state": WatchState.IDLE,
@@ -130,16 +125,12 @@ class WatchList:
             "trailing_price": None,
             "cooldown_until": None,
             "created_at": created_at,
-            "updated_at": datetime.utcnow(),
+            "updated_at": now,
         }
         return True
 
     def remove(self, symbol: str) -> bool:
-        if symbol not in self._coins:
-            return False
-
-        del self._coins[symbol]
-        return True
+        return self._coins.pop(symbol, None) is not None
 
     def contains(self, symbol: str) -> bool:
         return symbol in self._coins
