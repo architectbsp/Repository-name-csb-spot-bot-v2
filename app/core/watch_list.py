@@ -62,6 +62,10 @@ class WatchList:
         self._coins[symbol][key] = value
         return True
 
+    def pop(self, symbol: str) -> dict[str, Any] | None:
+        coin = self._coins.pop(symbol, None)
+        return deepcopy(coin) if coin is not None else None
+
     def remove(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
