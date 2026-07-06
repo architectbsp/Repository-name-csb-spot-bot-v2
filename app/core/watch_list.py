@@ -243,6 +243,39 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.utcnow()
         return True
 
+
+    def enter_cooldown(
+        self,
+        symbol: str,
+        cooldown_until: datetime,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.COOLDOWN):
+            return False
+
+        coin = self._coins[symbol]
+        coin["cooldown_until"] = cooldown_until
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
+    def finish_cooldown(
+        self,
+        symbol: str,
+    ) -> bool:
+        if not self.transition(symbol, WatchState.IDLE):
+            return False
+
+        coin = self._coins[symbol]
+        coin["lowest_price"] = None
+        coin["highest_price"] = None
+        coin["entry_price"] = None
+        coin["stop_price"] = None
+        coin["trailing_price"] = None
+        coin["cooldown_until"] = None
+        coin["updated_at"] = datetime.utcnow()
+
+        return True
+
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
