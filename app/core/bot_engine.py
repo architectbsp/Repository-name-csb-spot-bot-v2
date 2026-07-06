@@ -1,8 +1,10 @@
+from datetime import timedelta
+
 from app.core.market_scanner import MarketScanner
 from app.core.position_manager import PositionManager
 from app.core.watch_list import WatchList
 
-from app.core.config.settings import Settings
+from app.core.config.settings import AppSettings
 from app.core.event_bus.event_bus import EventBus
 from app.core.scheduler.scheduler import Scheduler
 from app.core.retry_policy.retry_policy import RetryPolicy
@@ -11,21 +13,33 @@ from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
 from app.core.exchange.manager import ExchangeManager
+from app.core.exchange.registry import ExchangeRegistry
 
 
 class BotEngine:
     def __init__(self):
         self.running = False
 
-        self.config = Settings()
+        self.config = AppSettings()
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
-        self.retry_policy = RetryPolicy()
-        self.timeout = Timeout()
-        self.rate_limiter = RateLimiter()
-        self.timer = Timer()
+        self.retry_policy = RetryPolicy(
+            self.config.retry_policy.max_attempts,
+            self.config.retry_policy.delay,
+        )
+        self.timeout = Timeout(
+            self.config.timeout.seconds,
+        )
+        self.rate_limiter = RateLimiter(
+            self.config.rate_limiter.max_requests,
+            self.config.rate_limiter.period,
+        )
+        self.timer = Timer(
+            timedelta(seconds=self.config.timer.duration_seconds)
+        )
         self.stopwatch = Stopwatch()
-        self.exchange = ExchangeManager()
+        self.exchange_registry = ExchangeRegistry()
+        self.exchange = ExchangeManager(self.exchange_registry)
 
         self.market_scanner = MarketScanner()
         self.watch_list = WatchList()

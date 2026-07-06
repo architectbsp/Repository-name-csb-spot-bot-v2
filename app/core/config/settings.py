@@ -27,10 +27,37 @@ class ConnectivitySettings:
 
 
 @dataclass(slots=True)
+class RetryPolicySettings:
+    max_attempts: int = 3
+    delay: float = 60.0
+
+
+@dataclass(slots=True)
+class TimeoutSettings:
+    seconds: float = 30.0
+
+
+@dataclass(slots=True)
+class RateLimiterSettings:
+    max_requests: int = 10
+    period: float = 1.0
+
+
+@dataclass(slots=True)
+class TimerSettings:
+    duration_seconds: int = 300
+
+
+@dataclass(slots=True)
 class AppSettings:
     risk: RiskSettings = field(default_factory=RiskSettings)
     strategy: StrategySettings = field(default_factory=StrategySettings)
     connectivity: ConnectivitySettings = field(default_factory=ConnectivitySettings)
+
+    retry_policy: RetryPolicySettings = field(default_factory=RetryPolicySettings)
+    timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
+    rate_limiter: RateLimiterSettings = field(default_factory=RateLimiterSettings)
+    timer: TimerSettings = field(default_factory=TimerSettings)
 
 
 settings = AppSettings()
