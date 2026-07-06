@@ -1,6 +1,7 @@
 class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
+        "exchange_manager",
         "config",
     )
 
@@ -9,6 +10,7 @@ class Strategy:
         self._running = False
 
         self._risk_manager = None
+        self._exchange_manager = None
         self._config = None
 
     def initialize(self) -> None:
@@ -34,6 +36,9 @@ class Strategy:
 
     def set_risk_manager(self, risk_manager) -> None:
         self._risk_manager = risk_manager
+
+    def set_exchange_manager(self, exchange_manager) -> None:
+        self._exchange_manager = exchange_manager
 
     def set_config(self, config) -> None:
         self._config = config
