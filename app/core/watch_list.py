@@ -134,6 +134,31 @@ class WatchList:
 
         return True
 
+
+    def set_entry_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol]["entry_price"] = price
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
+    def set_stop_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol]["stop_price"] = price
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
+    def set_trailing_price(self, symbol: str, price: float) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        self._coins[symbol]["trailing_price"] = price
+        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        return True
+
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
