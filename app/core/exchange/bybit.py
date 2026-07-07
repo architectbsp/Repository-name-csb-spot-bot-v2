@@ -25,22 +25,45 @@ class BybitExchange(BaseExchange):
         )
 
     def connect(self) -> None:
-        self.state.status = ConnectionStatus.CONNECTED
+        self.state.status = ConnectionStatus.CONNECTING
+        self.state.last_error = None
+
+        try:
+            self.client.load_markets()
+            self.state.status = ConnectionStatus.CONNECTED
+        except Exception as exc:
+            self.state.status = ConnectionStatus.ERROR
+            self.state.last_error = str(exc)
+            raise
 
     def disconnect(self) -> None:
         self.state.status = ConnectionStatus.DISCONNECTED
 
     def fetch_balance(self):
-        return None
+        return self.client.fetch_balance()
 
     def fetch_markets(self):
-        return []
+        return self.client.load_markets()
 
     def fetch_tickers(self):
-        return {}
+        return self.client.fetch_tickers()
 
-    def place_market_buy(self, symbol: str, amount: float):
-        return None
+    def place_market_buy(
+        self,
+        symbol: str,
+        amount: float,
+    ):
+        return self.client.create_market_buy_order(
+            symbol,
+            amount,
+        )
 
-    def place_market_sell(self, symbol: str, amount: float):
-        return None
+    def place_market_sell(
+        self,
+        symbol: str,
+        amount: float,
+    ):
+        return self.client.create_market_sell_order(
+            symbol,
+            amount,
+        )
