@@ -14,7 +14,7 @@ from app.core.timeout.timeout import Timeout
 from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
-from app.core.exchange.bybit import BybitExchange
+from app.core.exchange.binance import BinanceExchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
@@ -45,10 +45,10 @@ class BotEngine:
         self.exchange_registry = ExchangeRegistry()
 
         self.exchange_registry.register(
-            ExchangeType.BYBIT,
-            BybitExchange(
+            ExchangeType.BINANCE,
+            BinanceExchange(
                 ExchangeState(
-                    exchange=ExchangeType.BYBIT,
+                    exchange=ExchangeType.BINANCE,
                     enabled=True,
                 ),
                 self.config.exchange,
