@@ -50,11 +50,17 @@ class BinanceExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
-        return None
+        return self.client.create_market_buy_order(
+            symbol,
+            amount,
+        )
 
     def place_market_sell(
         self,
         symbol: str,
         amount: float,
     ):
-        return None
+        return self.client.create_market_sell_order(
+            symbol,
+            amount,
+        )
