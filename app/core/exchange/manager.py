@@ -1,5 +1,5 @@
 from app.core.exchange.base import BaseExchange
-from app.core.exchange.models import ExchangeType
+from app.core.exchange.models import ExchangeType, MarketMetadata
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.trading.models import TradeRequest, TradeSide
 
@@ -28,6 +28,14 @@ class ExchangeManager:
             )
 
         return exchange
+
+    def get_market_metadata(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+    ) -> MarketMetadata:
+        exchange = self._get_exchange(exchange_type)
+        return exchange.get_market_metadata(symbol)
 
     def place_market_buy(
         self,
