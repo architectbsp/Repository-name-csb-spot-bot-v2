@@ -48,8 +48,22 @@ class KrakenExchange(BaseExchange):
     def fetch_tickers(self):
         return self.client.fetch_tickers()
 
-    def place_market_buy(self, symbol: str, amount: float):
-        return None
+    def place_market_buy(
+        self,
+        symbol: str,
+        amount: float,
+    ):
+        return self.client.create_market_buy_order(
+            symbol,
+            amount,
+        )
 
-    def place_market_sell(self, symbol: str, amount: float):
-        return None
+    def place_market_sell(
+        self,
+        symbol: str,
+        amount: float,
+    ):
+        return self.client.create_market_sell_order(
+            symbol,
+            amount,
+        )
