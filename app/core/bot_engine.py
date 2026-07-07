@@ -50,7 +50,8 @@ class BotEngine:
                 ExchangeState(
                     exchange=ExchangeType.BYBIT,
                     enabled=True,
-                )
+                ),
+                self.config.exchange,
             ),
         )
 
