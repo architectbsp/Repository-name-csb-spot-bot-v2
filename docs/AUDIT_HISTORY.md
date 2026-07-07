@@ -39,3 +39,8 @@ Validation:
 - Compile PASS
 - Runtime PASS
 
+## <SON_KOD_COMMIT_HASH>
+
+- Strategy now generates TradeRequest objects.
+- Compile: PASS
+- Runtime: PASS

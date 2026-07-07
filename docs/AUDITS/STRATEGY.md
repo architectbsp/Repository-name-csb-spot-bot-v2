@@ -48,3 +48,9 @@ Technical Debt
 Next Review Trigger
 
 Trade execution implementation.
+
+
+## Latest Update
+
+- Strategy can generate TradeRequest domain objects.
+- Trade execution integration is pending.
