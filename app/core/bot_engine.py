@@ -18,6 +18,7 @@ from app.core.exchange.binance import BinanceExchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.services.order_validator import OrderValidator
 
 
 class BotEngine:
@@ -56,12 +57,18 @@ class BotEngine:
         )
 
         self.exchange = ExchangeManager(self.exchange_registry)
+        self.order_validator = OrderValidator(self.exchange)
 
         self.market_scanner = MarketScanner()
         self.watch_list = WatchList()
         self.position_manager = PositionManager()
         self.risk_manager = RiskManager()
         self.strategy = Strategy()
+
+        self.strategy.set_risk_manager(self.risk_manager)
+        self.strategy.set_exchange_manager(self.exchange)
+        self.strategy.set_order_validator(self.order_validator)
+        self.watch_list.set_strategy(self.strategy)
 
     def initialize(self):
         for module in (
@@ -71,10 +78,6 @@ class BotEngine:
             self.strategy,
         ):
             module.set_config(self.config)
-
-        self.strategy.set_risk_manager(self.risk_manager)
-        self.strategy.set_exchange_manager(self.exchange)
-        self.watch_list.set_strategy(self.strategy)
 
         self.event_bus.subscribe(
             "market_scanner.scan_completed",

@@ -7,6 +7,7 @@ class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
         "exchange_manager",
+        "order_validator",
         "config",
     )
 
@@ -16,6 +17,7 @@ class Strategy:
 
         self._risk_manager = None
         self._exchange_manager = None
+        self._order_validator = None
         self._config = None
 
     def initialize(self) -> None:
@@ -44,6 +46,9 @@ class Strategy:
 
     def set_exchange_manager(self, exchange_manager) -> None:
         self._exchange_manager = exchange_manager
+
+    def set_order_validator(self, order_validator) -> None:
+        self._order_validator = order_validator
 
     def set_config(self, config) -> None:
         self._config = config
@@ -82,4 +87,26 @@ class Strategy:
             symbol=symbol,
             side=side,
             quantity=quantity,
+        )
+
+
+    def execute_trade(
+        self,
+        exchange_type,
+        trade: TradeRequest,
+    ):
+        if self._exchange_manager is None:
+            raise RuntimeError("ExchangeManager is not configured.")
+
+        if self._order_validator is None:
+            raise RuntimeError("OrderValidator is not configured.")
+
+        validated_trade = self._order_validator.validate(
+            exchange_type,
+            trade,
+        )
+
+        return self._exchange_manager.execute_trade(
+            exchange_type,
+            validated_trade,
         )
