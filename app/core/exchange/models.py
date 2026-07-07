@@ -17,6 +17,18 @@ class ConnectionStatus(Enum):
     ERROR = auto()
 
 
+@dataclass(slots=True, frozen=True)
+class MarketMetadata:
+    symbol: str
+    base: str
+    quote: str
+    price_precision: float | None
+    amount_precision: float | None
+    minimum_amount: float | None
+    minimum_cost: float | None
+    active: bool
+
+
 @dataclass(slots=True)
 class ExchangeState:
     exchange: ExchangeType

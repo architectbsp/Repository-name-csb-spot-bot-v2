@@ -2,7 +2,7 @@ import ccxt
 
 from app.core.config.settings import ExchangeSettings
 from app.core.exchange.base import BaseExchange
-from app.core.exchange.models import ConnectionStatus, ExchangeState
+from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
 
 class BybitExchange(BaseExchange):
@@ -43,10 +43,35 @@ class BybitExchange(BaseExchange):
         return self.client.fetch_balance()
 
     def fetch_markets(self):
-        return self.client.load_markets()
+        if self._markets_cache is None:
+            self._markets_cache = self.client.load_markets()
+        return self._markets_cache
 
     def fetch_tickers(self):
         return self.client.fetch_tickers()
+
+
+    def get_market_metadata(
+        self,
+        symbol: str,
+    ) -> MarketMetadata:
+        markets = self.fetch_markets()
+
+        if symbol not in markets:
+            raise ValueError(f"Market not found: {symbol}")
+
+        market = markets[symbol]
+
+        return MarketMetadata(
+            symbol=market["symbol"],
+            base=market["base"],
+            quote=market["quote"],
+            price_precision=market.get("precision", {}).get("price"),
+            amount_precision=market.get("precision", {}).get("amount"),
+            minimum_amount=market.get("limits", {}).get("amount", {}).get("min"),
+            minimum_cost=market.get("limits", {}).get("cost", {}).get("min"),
+            active=market.get("active", True),
+        )
 
     def place_market_buy(
         self,
