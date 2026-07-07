@@ -50,3 +50,9 @@ Validation:
 - Strategy integrated into BotEngine lifecycle.
 - Compile: PASS
 - Runtime: PASS
+
+## bdd98f3
+
+- Strategy injected into WatchList.
+- Compile: PASS
+- Runtime: PASS

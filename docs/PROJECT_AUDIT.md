@@ -5,7 +5,7 @@ Status: ACTIVE
 ## Project Status
 
 Current Commit:
-08aeb3c
+bdd98f3
 
 Current Branch:
 main
@@ -14,10 +14,10 @@ Current Stage:
 Feature Development
 
 Backend Progress:
-70%
+72%
 
 Overall MVP Progress:
-70%
+72%
 
 ## Module Status
 
@@ -49,12 +49,12 @@ Overall MVP Progress:
 
 - Complete PositionManager behavior.
 - Define MarketData runtime role.
-- Integrate Strategy trade requests with ExchangeManager execution.
+- Connect WatchList workflow to Strategy.
 - Add unit and integration tests.
 
 ## Next Logical Task
 
-Execute TradeRequest through ExchangeManager from Strategy.
+Invoke Strategy from WatchList workflow.
 
 ## Last Validation
 

@@ -60,3 +60,8 @@ Trade execution implementation.
 - Strategy integrated into BotEngine lifecycle.
 - Dependencies are injected during initialization.
 - Runtime lifecycle is active.
+
+## Latest Update
+
+- Strategy dependency is injected into WatchList.
+- WatchList can access Strategy during runtime.
