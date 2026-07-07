@@ -1,4 +1,3 @@
-import asyncio
 from datetime import timedelta
 
 from app.core.market_scanner import MarketScanner
@@ -112,7 +111,7 @@ class BotEngine:
         ):
             module.start()
 
-        asyncio.run(self.exchange.start())
+        self.exchange.start()
 
         self.running = True
         print("Bot started")
@@ -127,7 +126,7 @@ class BotEngine:
         ):
             module.stop()
 
-        asyncio.run(self.exchange.stop())
+        self.exchange.stop()
 
         self.shutdown()
 
