@@ -1,4 +1,9 @@
+import os
+
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 @dataclass(slots=True)
@@ -48,11 +53,21 @@ class TimerSettings:
     duration_seconds: int = 300
 
 
+
+
+@dataclass(slots=True)
+class ExchangeSettings:
+    api_key: str = os.getenv("BYBIT_API_KEY", "")
+    api_secret: str = os.getenv("BYBIT_API_SECRET", "")
+    testnet: bool = os.getenv("BYBIT_TESTNET", "true").lower() == "true"
+
+
 @dataclass(slots=True)
 class AppSettings:
     risk: RiskSettings = field(default_factory=RiskSettings)
     strategy: StrategySettings = field(default_factory=StrategySettings)
     connectivity: ConnectivitySettings = field(default_factory=ConnectivitySettings)
+    exchange: ExchangeSettings = field(default_factory=ExchangeSettings)
 
     retry_policy: RetryPolicySettings = field(default_factory=RetryPolicySettings)
     timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
