@@ -60,6 +60,7 @@ class BotEngine:
 
         self.strategy.set_risk_manager(self.risk_manager)
         self.strategy.set_exchange_manager(self.exchange)
+        self.watch_list.set_strategy(self.strategy)
 
         self.event_bus.subscribe(
             "market_scanner.scan_completed",

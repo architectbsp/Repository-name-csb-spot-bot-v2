@@ -40,6 +40,7 @@ class WatchList:
         "timer",
         "stopwatch",
         "config",
+        "strategy",
     )
 
     def __init__(self) -> None:
@@ -56,6 +57,7 @@ class WatchList:
         self._timer = None
         self._stopwatch = None
         self._config = None
+        self._strategy = None
 
     def initialize(self) -> None:
         self._initialized = True
@@ -620,6 +622,19 @@ class WatchList:
 
     def clear_stopwatch(self):
         self._stopwatch = None
+
+
+    def set_strategy(self, strategy):
+        self._strategy = strategy
+
+    def get_strategy(self):
+        return self._strategy
+
+    def has_strategy(self):
+        return self._strategy is not None
+
+    def clear_strategy(self):
+        self._strategy = None
 
     def set_config(self, config):
         self._config = config
