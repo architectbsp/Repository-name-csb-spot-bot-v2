@@ -4,6 +4,7 @@ from app.core.market_scanner import MarketScanner
 from app.core.position_manager import PositionManager
 from app.core.watch_list import WatchList
 from app.core.risk_manager import RiskManager
+from app.core.strategy import Strategy
 
 from app.core.config.settings import AppSettings
 from app.core.event_bus.event_bus import EventBus
@@ -46,51 +47,68 @@ class BotEngine:
         self.watch_list = WatchList()
         self.position_manager = PositionManager()
         self.risk_manager = RiskManager()
+        self.strategy = Strategy()
 
     def initialize(self):
-        for module in (self.market_scanner, self.watch_list, self.risk_manager):
+        for module in (
+            self.market_scanner,
+            self.watch_list,
+            self.risk_manager,
+            self.strategy,
+        ):
             module.set_config(self.config)
-            module.set_event_bus(self.event_bus)
-            module.set_scheduler(self.scheduler)
-            module.set_retry_policy(self.retry_policy)
-            module.set_timeout(self.timeout)
-            module.set_rate_limiter(self.rate_limiter)
-            module.set_timer(self.timer)
-            module.set_stopwatch(self.stopwatch)
-            module.set_exchange(self.exchange)
+
+        self.strategy.set_risk_manager(self.risk_manager)
+        self.strategy.set_exchange_manager(self.exchange)
 
         self.event_bus.subscribe(
             "market_scanner.scan_completed",
             self.watch_list.handle_scan_result,
         )
 
-        self.market_scanner.initialize()
-        self.watch_list.initialize()
-        self.position_manager.initialize()
-        self.risk_manager.initialize()
+        for module in (
+            self.market_scanner,
+            self.watch_list,
+            self.position_manager,
+            self.risk_manager,
+            self.strategy,
+        ):
+            module.initialize()
 
     def shutdown(self):
-        self.market_scanner.shutdown()
-        self.watch_list.shutdown()
-        self.position_manager.shutdown()
-        self.risk_manager.shutdown()
+        for module in (
+            self.market_scanner,
+            self.watch_list,
+            self.position_manager,
+            self.risk_manager,
+            self.strategy,
+        ):
+            module.shutdown()
 
     def start(self):
         self.initialize()
 
-        self.market_scanner.start()
-        self.watch_list.start()
-        self.position_manager.start()
-        self.risk_manager.start()
+        for module in (
+            self.market_scanner,
+            self.watch_list,
+            self.position_manager,
+            self.risk_manager,
+            self.strategy,
+        ):
+            module.start()
 
         self.running = True
         print("Bot started")
 
     def stop(self):
-        self.market_scanner.stop()
-        self.watch_list.stop()
-        self.position_manager.stop()
-        self.risk_manager.stop()
+        for module in (
+            self.market_scanner,
+            self.watch_list,
+            self.position_manager,
+            self.risk_manager,
+            self.strategy,
+        ):
+            module.stop()
 
         self.shutdown()
 
