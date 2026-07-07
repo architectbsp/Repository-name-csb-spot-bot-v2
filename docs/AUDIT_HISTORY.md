@@ -44,3 +44,9 @@ Validation:
 - Strategy now generates TradeRequest objects.
 - Compile: PASS
 - Runtime: PASS
+
+## 08aeb3c
+
+- Strategy integrated into BotEngine lifecycle.
+- Compile: PASS
+- Runtime: PASS

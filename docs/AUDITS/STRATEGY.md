@@ -54,3 +54,9 @@ Trade execution implementation.
 
 - Strategy can generate TradeRequest domain objects.
 - Trade execution integration is pending.
+
+## Latest Update
+
+- Strategy integrated into BotEngine lifecycle.
+- Dependencies are injected during initialization.
+- Runtime lifecycle is active.
