@@ -37,6 +37,14 @@ class BaseExchange(ABC):
         ...
 
     @abstractmethod
+    def normalize_amount(
+        self,
+        symbol: str,
+        amount: float,
+    ) -> float:
+        ...
+
+    @abstractmethod
     def place_market_buy(
         self,
         symbol: str,

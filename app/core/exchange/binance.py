@@ -70,6 +70,18 @@ class BinanceExchange(BaseExchange):
             active=market.get("active", True),
         )
 
+    def normalize_amount(
+        self,
+        symbol: str,
+        amount: float,
+    ) -> float:
+        return float(
+            self.client.amount_to_precision(
+                symbol,
+                amount,
+            )
+        )
+
     def place_market_buy(
         self,
         symbol: str,

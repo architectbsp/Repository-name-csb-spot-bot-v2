@@ -37,6 +37,18 @@ class ExchangeManager:
         exchange = self._get_exchange(exchange_type)
         return exchange.get_market_metadata(symbol)
 
+    def normalize_amount(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+        amount: float,
+    ) -> float:
+        exchange = self._get_exchange(exchange_type)
+        return exchange.normalize_amount(
+            symbol,
+            amount,
+        )
+
     def place_market_buy(
         self,
         exchange_type: ExchangeType,

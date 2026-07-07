@@ -27,10 +27,20 @@ class OrderValidator:
                 f"Market is inactive: {trade.symbol}"
             )
 
+        normalized_amount = self._exchange_manager.normalize_amount(
+            exchange_type,
+            trade.symbol,
+            float(trade.quantity),
+        )
+
         if metadata.minimum_amount is not None:
-            if float(trade.quantity) < metadata.minimum_amount:
+            if normalized_amount < metadata.minimum_amount:
                 raise ValueError(
                     f"Minimum amount is {metadata.minimum_amount}"
                 )
 
-        return trade
+        return TradeRequest(
+            symbol=trade.symbol,
+            side=trade.side,
+            quantity=type(trade.quantity)(str(normalized_amount)),
+        )
