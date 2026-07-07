@@ -1,0 +1,5 @@
+flet==0.85.3
+flet-desktop==0.85.3
+httpx==0.28.1
+msgpack==1.2.1
+ccxt
