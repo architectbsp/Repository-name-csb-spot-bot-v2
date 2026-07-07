@@ -1,3 +1,8 @@
+from decimal import Decimal
+
+from app.core.trading.models import TradeRequest, TradeSide
+
+
 class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
@@ -65,3 +70,16 @@ class Strategy:
 
     def should_sell(self, price: float) -> bool:
         return price < 42000
+
+    def create_trade_request(
+        self,
+        *,
+        symbol: str,
+        quantity: Decimal,
+        side: TradeSide = TradeSide.BUY,
+    ) -> TradeRequest:
+        return TradeRequest(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+        )
