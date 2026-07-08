@@ -195,6 +195,18 @@ class Strategy:
                 ticker.last_price,
             )
 
+        profit_percent = (
+            (ticker.last_price - position.entry_price)
+            / position.entry_price
+        ) * 100
+
+        if (
+            watch_list.get_state(ticker.symbol) == WatchState.POSITION_OPEN
+            and profit_percent >= self._config.take_profit_activation
+        ):
+            if watch_list.activate_break_even(ticker.symbol):
+                position.stop_price = position.entry_price
+
         if position.stop_price is None:
             return
 
