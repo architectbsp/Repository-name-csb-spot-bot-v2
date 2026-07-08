@@ -2,7 +2,6 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.core.position_manager import Position
-
 from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchState
 
@@ -62,29 +61,6 @@ class Strategy:
     def set_config(self, config) -> None:
         self._config = config
 
-    def should_buy(
-        self,
-        price: float,
-        *,
-        balance: float = 0.0,
-        daily_loss_percent: float = 0.0,
-        open_positions: int = 0,
-    ) -> bool:
-        if price <= 42000:
-            return False
-
-        if self._risk_manager is None:
-            return True
-
-        return self._risk_manager.can_open_trade(
-            balance=balance,
-            daily_loss_percent=daily_loss_percent,
-            open_positions=open_positions,
-        )
-
-    def should_sell(self, price: float) -> bool:
-        return price < 42000
-
     def on_ticker(
         self,
         watch_list,
@@ -94,6 +70,10 @@ class Strategy:
             self._position_manager is not None
             and self._position_manager.is_open(ticker.symbol)
         ):
+            self._handle_position_open(
+                watch_list,
+                ticker,
+            )
             return
 
         state = watch_list.get_state(ticker.symbol)
@@ -101,44 +81,69 @@ class Strategy:
         if state is None:
             return
 
-        if (
-            state == WatchState.IDLE
-            and ticker.change_24h <= -self._config.watch_percent
-        ):
-            watch_list.begin_falling_watch(
-                ticker.symbol,
-                ticker.last_price,
+        if state == WatchState.IDLE:
+            self._handle_idle(
+                watch_list,
+                ticker,
             )
             return
 
         if state == WatchState.WATCH_FALLING:
-            watch_list.record_falling_price(
+            self._handle_falling_watch(
+                watch_list,
+                ticker,
+            )
+            return
+
+        if state == WatchState.WATCH_RISING:
+            self._handle_rising_watch(
+                watch_list,
+                ticker,
+            )
+
+    def _handle_idle(
+        self,
+        watch_list,
+        ticker,
+    ) -> None:
+        if ticker.change_24h > -self._config.watch_percent:
+            return
+
+        watch_list.begin_falling_watch(
+            ticker.symbol,
+            ticker.last_price,
+        )
+
+    def _handle_falling_watch(
+        self,
+        watch_list,
+        ticker,
+    ) -> None:
+        watch_list.record_falling_price(
+            ticker.symbol,
+            ticker.last_price,
+        )
+
+        coin = watch_list.get(ticker.symbol)
+        lowest = coin["lowest_price"]
+
+        if ticker.last_price > lowest:
+            watch_list.begin_rising_watch(
                 ticker.symbol,
                 ticker.last_price,
             )
 
-            coin = watch_list.get(ticker.symbol)
-
-            lowest = coin["lowest_price"]
-
-            if ticker.last_price > lowest:
-                watch_list.begin_rising_watch(
-                    ticker.symbol,
-                    ticker.last_price,
-                )
-
-            return
-
-        if state != WatchState.WATCH_RISING:
-            return
-
+    def _handle_rising_watch(
+        self,
+        watch_list,
+        ticker,
+    ) -> None:
         watch_list.record_rising_price(
             ticker.symbol,
             ticker.last_price,
         )
 
         coin = watch_list.get(ticker.symbol)
-
         lowest = coin["lowest_price"]
 
         recovery = (
@@ -165,32 +170,41 @@ class Strategy:
             trade,
         )
 
-        if result:
-            stop_price = (
-                ticker.last_price
-                * (
-                    1
-                    - self._config.stop_loss_percent
-                    / 100
+        if not result:
+            return
+
+        stop_price = (
+            ticker.last_price
+            * (
+                1
+                - self._config.stop_loss_percent
+                / 100
+            )
+        )
+
+        watch_list.promote_to_position_open(
+            ticker.symbol,
+            ticker.last_price,
+            stop_price,
+        )
+
+        if self._position_manager is not None:
+            self._position_manager.add(
+                Position(
+                    symbol=ticker.symbol,
+                    entry_price=ticker.last_price,
+                    quantity=float(trade.quantity),
+                    opened_at=datetime.utcnow(),
+                    stop_price=stop_price,
                 )
             )
 
-            watch_list.promote_to_position_open(
-                ticker.symbol,
-                ticker.last_price,
-                stop_price,
-            )
-
-            if self._position_manager is not None:
-                self._position_manager.add(
-                    Position(
-                        symbol=ticker.symbol,
-                        entry_price=ticker.last_price,
-                        quantity=float(trade.quantity),
-                        opened_at=datetime.utcnow(),
-                        stop_price=stop_price,
-                    )
-                )
+    def _handle_position_open(
+        self,
+        watch_list,
+        ticker,
+    ) -> None:
+        return
 
     def create_trade_request(
         self,
