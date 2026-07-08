@@ -125,3 +125,85 @@ def test_can_transition_follows_state_machine():
         "BTCUSDT",
         WatchState.COOLDOWN,
     )
+
+
+def test_update_price_tracks_low_and_high():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+
+    assert watchlist.update_price("BTCUSDT", 100)
+    assert watchlist.update_price("BTCUSDT", 95)
+    assert watchlist.update_price("BTCUSDT", 110)
+
+    coin = watchlist.get("BTCUSDT")
+
+    assert coin["lowest_price"] == 95
+    assert coin["highest_price"] == 110
+
+
+def test_setters_update_values():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+
+    watchlist.set_entry_price("BTCUSDT", 100)
+    watchlist.set_stop_price("BTCUSDT", 95)
+    watchlist.set_trailing_price("BTCUSDT", 105)
+    watchlist.set_lowest_price("BTCUSDT", 90)
+    watchlist.set_highest_price("BTCUSDT", 120)
+
+    coin = watchlist.get("BTCUSDT")
+
+    assert coin["entry_price"] == 100
+    assert coin["stop_price"] == 95
+    assert coin["trailing_price"] == 105
+    assert coin["lowest_price"] == 90
+    assert coin["highest_price"] == 120
+
+
+def test_clear_price_tracking():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+    watchlist.set_lowest_price("BTCUSDT", 90)
+    watchlist.set_highest_price("BTCUSDT", 120)
+
+    assert watchlist.clear_price_tracking("BTCUSDT")
+
+    coin = watchlist.get("BTCUSDT")
+
+    assert coin["lowest_price"] is None
+    assert coin["highest_price"] is None
+
+
+def test_cooldown_helpers():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+
+    until = datetime.utcnow() + timedelta(minutes=10)
+
+    watchlist.start_cooldown("BTCUSDT", until)
+
+    assert watchlist.is_in_cooldown(
+        "BTCUSDT",
+        datetime.utcnow(),
+    )
+
+    assert not watchlist.cooldown_expired(
+        "BTCUSDT",
+        datetime.utcnow(),
+    )
+
+    assert watchlist.remaining_cooldown(
+        "BTCUSDT",
+        datetime.utcnow(),
+    ) is not None
+
+    watchlist.clear_cooldown("BTCUSDT")
+
+    assert not watchlist.is_in_cooldown(
+        "BTCUSDT",
+        datetime.utcnow(),
+    )
