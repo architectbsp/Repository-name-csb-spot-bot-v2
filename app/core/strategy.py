@@ -203,12 +203,30 @@ class Strategy:
             / position.entry_price
         ) * 100
 
+        state = watch_list.get_state(ticker.symbol)
+
         if (
-            watch_list.get_state(ticker.symbol) == WatchState.POSITION_OPEN
+            state == WatchState.POSITION_OPEN
             and profit_percent >= self._config.take_profit_activation
         ):
             if watch_list.activate_break_even(ticker.symbol):
                 position.stop_price = position.entry_price
+                state = WatchState.BREAK_EVEN
+
+        if state == WatchState.BREAK_EVEN:
+            coin = watch_list.get(ticker.symbol)
+
+            trailing_price = (
+                coin["highest_price"]
+                * (1 - self._config.trailing_percent / 100)
+            )
+
+            if watch_list.activate_trailing(
+                ticker.symbol,
+                coin["highest_price"],
+                trailing_price,
+            ):
+                position.stop_price = trailing_price
 
         if position.stop_price is None:
             return
