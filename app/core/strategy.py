@@ -76,6 +76,14 @@ class Strategy:
     def should_sell(self, price: float) -> bool:
         return price < 42000
 
+
+    def on_ticker(
+        self,
+        watch_list,
+        ticker,
+    ) -> None:
+        return None
+
     def create_trade_request(
         self,
         *,

@@ -497,7 +497,18 @@ class WatchList:
             if not ticker.symbol:
                 continue
 
-            if self.add(ticker.symbol):
+            created = False
+
+            if not self.contains(ticker.symbol):
+                created = self.add(ticker.symbol)
+
+            if self.has_strategy():
+                self._strategy.on_ticker(
+                    self,
+                    ticker,
+                )
+
+            if created:
                 added += 1
 
         return added
