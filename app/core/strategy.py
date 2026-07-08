@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from app.core.trading.models import TradeRequest, TradeSide
+from app.core.watch_list import WatchState
 
 
 class Strategy:
@@ -76,13 +77,91 @@ class Strategy:
     def should_sell(self, price: float) -> bool:
         return price < 42000
 
-
     def on_ticker(
         self,
         watch_list,
         ticker,
     ) -> None:
-        return None
+        state = watch_list.get_state(ticker.symbol)
+
+        if state is None:
+            return
+
+        if (
+            state == WatchState.IDLE
+            and ticker.change_24h <= -self._config.watch_percent
+        ):
+            watch_list.begin_falling_watch(
+                ticker.symbol,
+                ticker.last_price,
+            )
+            return
+
+        if state == WatchState.WATCH_FALLING:
+            watch_list.record_falling_price(
+                ticker.symbol,
+                ticker.last_price,
+            )
+
+            coin = watch_list.get(ticker.symbol)
+
+            lowest = coin["lowest_price"]
+
+            if ticker.last_price > lowest:
+                watch_list.begin_rising_watch(
+                    ticker.symbol,
+                    ticker.last_price,
+                )
+
+            return
+
+        if state != WatchState.WATCH_RISING:
+            return
+
+        watch_list.record_rising_price(
+            ticker.symbol,
+            ticker.last_price,
+        )
+
+        coin = watch_list.get(ticker.symbol)
+
+        lowest = coin["lowest_price"]
+
+        recovery = (
+            (ticker.last_price - lowest)
+            / lowest
+        ) * 100
+
+        if recovery < self._config.entry_percent:
+            return
+
+        watch_list.promote_to_buy_pending(
+            ticker.symbol,
+            ticker.last_price,
+        )
+
+        trade = self.create_trade_request(
+            symbol=ticker.symbol,
+            quantity=Decimal("1"),
+            side=TradeSide.BUY,
+        )
+
+        result = self.execute_trade(
+            ticker.exchange,
+            trade,
+        )
+
+        if result:
+            watch_list.promote_to_position_open(
+                ticker.symbol,
+                ticker.last_price,
+                ticker.last_price
+                * (
+                    1
+                    - self._config.stop_loss_percent
+                    / 100
+                ),
+            )
 
     def create_trade_request(
         self,
@@ -96,7 +175,6 @@ class Strategy:
             side=side,
             quantity=quantity,
         )
-
 
     def execute_trade(
         self,
