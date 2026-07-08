@@ -1,4 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
+
+from app.core.position_manager import Position
 
 from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchState
@@ -87,6 +90,12 @@ class Strategy:
         watch_list,
         ticker,
     ) -> None:
+        if (
+            self._position_manager is not None
+            and self._position_manager.is_open(ticker.symbol)
+        ):
+            return
+
         state = watch_list.get_state(ticker.symbol)
 
         if state is None:
@@ -157,16 +166,31 @@ class Strategy:
         )
 
         if result:
-            watch_list.promote_to_position_open(
-                ticker.symbol,
-                ticker.last_price,
+            stop_price = (
                 ticker.last_price
                 * (
                     1
                     - self._config.stop_loss_percent
                     / 100
-                ),
+                )
             )
+
+            watch_list.promote_to_position_open(
+                ticker.symbol,
+                ticker.last_price,
+                stop_price,
+            )
+
+            if self._position_manager is not None:
+                self._position_manager.add(
+                    Position(
+                        symbol=ticker.symbol,
+                        entry_price=ticker.last_price,
+                        quantity=float(trade.quantity),
+                        opened_at=datetime.utcnow(),
+                        stop_price=stop_price,
+                    )
+                )
 
     def create_trade_request(
         self,
