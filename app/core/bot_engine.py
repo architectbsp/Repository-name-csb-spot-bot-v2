@@ -69,8 +69,27 @@ class BotEngine:
         self.market_scanner.set_timer(self.timer)
         self.market_scanner.set_stopwatch(self.stopwatch)
         self.watch_list = WatchList()
+        self.watch_list.set_exchange(self.exchange)
+        self.watch_list.set_scheduler(self.scheduler)
+        self.watch_list.set_event_bus(self.event_bus)
+        self.watch_list.set_rate_limiter(self.rate_limiter)
+        self.watch_list.set_retry_policy(self.retry_policy)
+        self.watch_list.set_timeout(self.timeout)
+        self.watch_list.set_timer(self.timer)
+        self.watch_list.set_stopwatch(self.stopwatch)
+
         self.position_manager = PositionManager()
+
         self.risk_manager = RiskManager()
+        self.risk_manager.set_exchange(self.exchange)
+        self.risk_manager.set_scheduler(self.scheduler)
+        self.risk_manager.set_event_bus(self.event_bus)
+        self.risk_manager.set_rate_limiter(self.rate_limiter)
+        self.risk_manager.set_retry_policy(self.retry_policy)
+        self.risk_manager.set_timeout(self.timeout)
+        self.risk_manager.set_timer(self.timer)
+        self.risk_manager.set_stopwatch(self.stopwatch)
+
         self.strategy = Strategy()
 
         self.strategy.set_risk_manager(self.risk_manager)
