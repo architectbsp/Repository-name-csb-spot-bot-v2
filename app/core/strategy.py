@@ -189,6 +189,12 @@ class Strategy:
         if position is None:
             return
 
+        if ticker.last_price > position.entry_price:
+            watch_list.update_highest_price(
+                ticker.symbol,
+                ticker.last_price,
+            )
+
         if position.stop_price is None:
             return
 
