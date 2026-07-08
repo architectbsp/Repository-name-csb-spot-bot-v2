@@ -493,6 +493,8 @@ class WatchList:
     def handle_scan_result(self, symbols) -> int:
         added = 0
 
+        now = datetime.utcnow()
+
         for ticker in symbols:
             if not ticker.symbol:
                 continue
@@ -501,6 +503,17 @@ class WatchList:
 
             if not self.contains(ticker.symbol):
                 created = self.add(ticker.symbol)
+
+            elif self.get_state(ticker.symbol) == WatchState.COOLDOWN:
+                if self.cooldown_expired(
+                    ticker.symbol,
+                    now,
+                ):
+                    self.finish_cooldown(
+                        ticker.symbol,
+                    )
+                else:
+                    continue
 
             if self.has_strategy():
                 self._strategy.on_ticker(
