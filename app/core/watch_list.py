@@ -493,14 +493,11 @@ class WatchList:
     def handle_scan_result(self, symbols) -> int:
         added = 0
 
-        for symbol in symbols:
-            if isinstance(symbol, dict):
-                symbol = symbol.get("symbol")
-
-            if not symbol:
+        for ticker in symbols:
+            if not ticker.symbol:
                 continue
 
-            if self.add(symbol):
+            if self.add(ticker.symbol):
                 added += 1
 
         return added
