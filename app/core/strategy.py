@@ -71,7 +71,10 @@ class Strategy:
         if state is None:
             return
 
-        if state == WatchState.POSITION_OPEN:
+        if state in (
+            WatchState.POSITION_OPEN,
+            WatchState.BREAK_EVEN,
+        ):
             self._handle_position_open(
                 watch_list,
                 ticker,
