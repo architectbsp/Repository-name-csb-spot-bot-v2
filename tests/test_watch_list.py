@@ -68,3 +68,60 @@ def test_reset_restores_idle_state():
     assert coin["stop_price"] is None
     assert coin["trailing_price"] is None
     assert coin["cooldown_until"] is None
+
+
+def test_duplicate_symbol_is_rejected():
+    watchlist = WatchList()
+
+    assert watchlist.add("BTCUSDT") is True
+    assert watchlist.add("BTCUSDT") is False
+
+
+def test_unknown_symbol_operations_return_false():
+    watchlist = WatchList()
+
+    assert watchlist.transition("BTCUSDT", WatchState.WATCH_FALLING) is False
+    assert watchlist.can_transition("BTCUSDT", WatchState.WATCH_FALLING) is False
+    assert watchlist.begin_falling_watch("BTCUSDT", 100) is False
+    assert watchlist.promote_to_buy_pending("BTCUSDT", 100) is False
+
+
+def test_invalid_transition_is_rejected():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+
+    assert watchlist.transition(
+        "BTCUSDT",
+        WatchState.POSITION_OPEN,
+    ) is False
+
+    assert watchlist.get_state("BTCUSDT") == WatchState.IDLE
+
+
+def test_can_transition_follows_state_machine():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+
+    assert watchlist.can_transition(
+        "BTCUSDT",
+        WatchState.WATCH_FALLING,
+    )
+
+    assert not watchlist.can_transition(
+        "BTCUSDT",
+        WatchState.POSITION_OPEN,
+    )
+
+    watchlist.begin_falling_watch("BTCUSDT", 100)
+
+    assert watchlist.can_transition(
+        "BTCUSDT",
+        WatchState.WATCH_RISING,
+    )
+
+    assert not watchlist.can_transition(
+        "BTCUSDT",
+        WatchState.COOLDOWN,
+    )
