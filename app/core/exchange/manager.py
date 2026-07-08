@@ -1,12 +1,14 @@
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.models import ExchangeType, MarketMetadata
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.market_data.service import MarketDataService
 from app.core.trading.models import TradeRequest, TradeSide
 
 
 class ExchangeManager:
     def __init__(self, registry: ExchangeRegistry) -> None:
         self._registry = registry
+        self._market_data = MarketDataService()
 
     def start(self) -> None:
         for exchange in self._registry.enabled():
@@ -29,13 +31,28 @@ class ExchangeManager:
 
         return exchange
 
+    def enabled(self) -> list[BaseExchange]:
+        return self._registry.enabled()
+
     def get_market_metadata(
         self,
         exchange_type: ExchangeType,
         symbol: str,
     ) -> MarketMetadata:
+        return self._get_exchange(
+            exchange_type
+        ).get_market_metadata(symbol)
+
+    def get_tickers(
+        self,
+        exchange_type: ExchangeType,
+    ):
         exchange = self._get_exchange(exchange_type)
-        return exchange.get_market_metadata(symbol)
+
+        return self._market_data.normalize_tickers(
+            exchange_type,
+            exchange.fetch_tickers(),
+        )
 
     def normalize_amount(
         self,
@@ -43,8 +60,9 @@ class ExchangeManager:
         symbol: str,
         amount: float,
     ) -> float:
-        exchange = self._get_exchange(exchange_type)
-        return exchange.normalize_amount(
+        return self._get_exchange(
+            exchange_type
+        ).normalize_amount(
             symbol,
             amount,
         )
@@ -55,8 +73,12 @@ class ExchangeManager:
         symbol: str,
         amount: float,
     ):
-        exchange = self._get_exchange(exchange_type)
-        return exchange.place_market_buy(symbol, amount)
+        return self._get_exchange(
+            exchange_type
+        ).place_market_buy(
+            symbol,
+            amount,
+        )
 
     def place_market_sell(
         self,
@@ -64,8 +86,12 @@ class ExchangeManager:
         symbol: str,
         amount: float,
     ):
-        exchange = self._get_exchange(exchange_type)
-        return exchange.place_market_sell(symbol, amount)
+        return self._get_exchange(
+            exchange_type
+        ).place_market_sell(
+            symbol,
+            amount,
+        )
 
     def execute_trade(
         self,
