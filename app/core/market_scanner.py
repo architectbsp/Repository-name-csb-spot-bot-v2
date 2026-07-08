@@ -1,4 +1,5 @@
 from app.core.scheduler.job import Job
+from app.core.exchange.models import ExchangeType
 
 class MarketScanner:
     _DEPENDENCY_NAMES = (
@@ -193,7 +194,9 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
-            return self._exchange.fetch_markets()
+            return self._exchange.get_tickers(
+                ExchangeType.BINANCE,
+            )
 
         if self.has_rate_limiter():
             operation = self._rate_limiter.wrap(operation)
@@ -212,7 +215,7 @@ class MarketScanner:
         return [
             symbol
             for symbol in symbols
-            if symbol["volume_24h"] >= minimum_volume
+            if symbol.volume_24h >= minimum_volume
         ]
 
     def __repr__(self) -> str:
