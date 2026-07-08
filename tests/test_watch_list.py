@@ -26,3 +26,45 @@ def test_full_state_machine_lifecycle():
 
     assert watchlist.close_position("BTCUSDT")
     assert watchlist.get_state("BTCUSDT") == WatchState.POSITION_CLOSED
+
+from datetime import datetime, timedelta
+
+
+def test_cooldown_lifecycle():
+    watchlist = WatchList()
+
+    watchlist.add("ETHUSDT")
+    watchlist.begin_falling_watch("ETHUSDT", 100)
+    watchlist.begin_rising_watch("ETHUSDT", 101)
+    watchlist.promote_to_buy_pending("ETHUSDT", 102)
+    watchlist.promote_to_position_open("ETHUSDT", 102, 98)
+    watchlist.close_position("ETHUSDT")
+
+    until = datetime.utcnow() + timedelta(minutes=5)
+
+    assert watchlist.enter_cooldown("ETHUSDT", until)
+    assert watchlist.get_state("ETHUSDT") == WatchState.COOLDOWN
+    assert watchlist.is_in_cooldown("ETHUSDT", datetime.utcnow())
+
+    assert watchlist.finish_cooldown("ETHUSDT")
+    assert watchlist.get_state("ETHUSDT") == WatchState.IDLE
+
+
+def test_reset_restores_idle_state():
+    watchlist = WatchList()
+
+    watchlist.add("SOLUSDT")
+    watchlist.begin_falling_watch("SOLUSDT", 100)
+    watchlist.record_falling_price("SOLUSDT", 95)
+
+    assert watchlist.reset("SOLUSDT")
+
+    coin = watchlist.get("SOLUSDT")
+
+    assert coin["state"] == WatchState.IDLE
+    assert coin["lowest_price"] is None
+    assert coin["highest_price"] is None
+    assert coin["entry_price"] is None
+    assert coin["stop_price"] is None
+    assert coin["trailing_price"] is None
+    assert coin["cooldown_until"] is None
