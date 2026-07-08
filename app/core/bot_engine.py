@@ -93,6 +93,7 @@ class BotEngine:
         self.strategy = Strategy()
 
         self.strategy.set_risk_manager(self.risk_manager)
+        self.strategy.set_position_manager(self.position_manager)
         self.strategy.set_exchange_manager(self.exchange)
         self.strategy.set_order_validator(self.order_validator)
         self.watch_list.set_strategy(self.strategy)

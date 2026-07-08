@@ -7,6 +7,7 @@ from app.core.watch_list import WatchState
 class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
+        "position_manager",
         "exchange_manager",
         "order_validator",
         "config",
@@ -17,6 +18,7 @@ class Strategy:
         self._running = False
 
         self._risk_manager = None
+        self._position_manager = None
         self._exchange_manager = None
         self._order_validator = None
         self._config = None
@@ -44,6 +46,9 @@ class Strategy:
 
     def set_risk_manager(self, risk_manager) -> None:
         self._risk_manager = risk_manager
+
+    def set_position_manager(self, position_manager) -> None:
+        self._position_manager = position_manager
 
     def set_exchange_manager(self, exchange_manager) -> None:
         self._exchange_manager = exchange_manager
