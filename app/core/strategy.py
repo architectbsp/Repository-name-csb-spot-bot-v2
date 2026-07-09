@@ -300,9 +300,25 @@ class Strategy:
         self,
         ticker: dict,
     ) -> None:
-        """
-        Live websocket tick entry point.
+        symbol = ticker["symbol"]
 
-        Feature-9 will move the trading decision logic here.
+        if self._position_manager.has_position(symbol):
+            self._risk_manager.on_price_tick(ticker)
+            return
+
+        self.evaluate_live_signal(ticker)
+
+    def evaluate_live_signal(
+        self,
+        ticker: dict,
+    ) -> None:
+        """
+        Live websocket strategy entry point.
+
+        Scanner (REST):
+            eligible coin discovery
+
+        WebSocket:
+            entry timing
         """
         return
