@@ -10,10 +10,17 @@ class PriceStream(ABC):
     def start(
         self,
         symbols: list[str],
-        callback: Callable[[dict[str, Any]], None],
+        callback: Callable[[str, dict[str, Any]], None],
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def stop(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_symbols(
+        self,
+        symbols: list[str],
+    ) -> None:
         raise NotImplementedError
