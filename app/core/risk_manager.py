@@ -171,7 +171,11 @@ class RiskManager:
         if not result:
             return
 
-        self._position_manager.close(position.symbol)
+        self._position_manager.close(
+            position.symbol,
+            exit_price=last_price,
+            reason="STOP_LOSS",
+        )
 
         if self._event_bus is not None:
             self._event_bus.publish(

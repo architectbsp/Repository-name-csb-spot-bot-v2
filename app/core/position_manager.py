@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -15,6 +15,19 @@ class Position:
     quantity: float
     opened_at: datetime
     stop_price: float | None = None
+
+    highest_price: float | None = None
+
+    closed_at: datetime | None = None
+
+    exit_price: float | None = None
+
+    pnl: float | None = None
+
+    pnl_percent: float | None = None
+
+    close_reason: str | None = None
+
     state: PositionState = PositionState.OPEN
 
 
@@ -70,6 +83,9 @@ class PositionManager:
     def close(
         self,
         symbol: str,
+        *,
+        exit_price: float | None = None,
+        reason: str | None = None,
     ) -> bool:
         position = self._positions.get(symbol)
 
@@ -77,6 +93,20 @@ class PositionManager:
             return False
 
         position.state = PositionState.CLOSED
+        position.closed_at = datetime.utcnow()
+        position.exit_price = exit_price
+        position.close_reason = reason
+
+        if exit_price is not None:
+            position.pnl = (
+                exit_price - position.entry_price
+            ) * position.quantity
+
+            position.pnl_percent = (
+                (exit_price - position.entry_price)
+                / position.entry_price
+            ) * 100
+
         return True
 
     def is_open(
