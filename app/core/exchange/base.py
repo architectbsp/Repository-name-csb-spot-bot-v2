@@ -9,6 +9,7 @@ class BaseExchange(ABC):
     def __init__(self, state: ExchangeState) -> None:
         self.state = state
         self._markets_cache: dict[str, Any] | None = None
+        self._price_stream: PriceStream | None = None
 
     @abstractmethod
     def connect(self) -> None:
@@ -27,14 +28,11 @@ class BaseExchange(ABC):
         ...
 
     @abstractmethod
-
-
-    def get_price_stream(
-        self,
-    ) -> PriceStream | None:
-        return self._price_stream
     def fetch_tickers(self):
         ...
+
+    def get_price_stream(self) -> PriceStream | None:
+        return self._price_stream
 
     @abstractmethod
     def get_market_metadata(
