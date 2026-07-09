@@ -123,6 +123,9 @@ class RiskManager:
         self,
         ticker: dict,
     ) -> None:
+        if self._position_manager is None:
+            return
+
         symbol = ticker["symbol"]
 
         position = self._position_manager.get(symbol)
