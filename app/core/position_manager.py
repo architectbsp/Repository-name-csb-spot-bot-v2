@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -93,7 +93,7 @@ class PositionManager:
             return False
 
         position.state = PositionState.CLOSED
-        position.closed_at = datetime.utcnow()
+        position.closed_at = datetime.now(UTC)
         position.exit_price = exit_price
         position.close_reason = reason
 
