@@ -137,6 +137,20 @@ class ExchangeManager:
 
         stream.stop()
 
+
+
+    def update_price_stream(
+        self,
+        exchange_type: ExchangeType,
+        symbols: list[str],
+    ) -> None:
+        stream = self.get_price_stream(exchange_type)
+
+        if stream is None:
+            return
+
+        stream.update_symbols(symbols)
+
     def execute_trade(
         self,
         exchange_type: ExchangeType,

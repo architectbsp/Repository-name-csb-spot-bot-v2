@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import UTC, datetime
 from enum import StrEnum
+import threading
 from typing import Any
 
 
@@ -45,6 +46,7 @@ class WatchList:
 
     def __init__(self) -> None:
         self._coins: dict[str, dict[str, Any]] = {}
+        self._lock = threading.RLock()
         self._initialized = False
         self._running = False
 
@@ -81,7 +83,8 @@ class WatchList:
 
         now = datetime.now(UTC)
 
-        self._coins[symbol] = {
+        with self._lock:
+            self._coins[symbol] = {
             "state": WatchState.IDLE,
             "lowest_price": None,
             "highest_price": None,
@@ -92,7 +95,24 @@ class WatchList:
             "created_at": now,
             "updated_at": now,
         }
+
+        self.sync_price_stream()
         return True
+
+
+
+    def get_symbols(self) -> list[str]:
+        with self._lock:
+            return sorted(self._coins.keys())
+
+    def sync_price_stream(self) -> None:
+        if self._exchange is None:
+            return
+
+        self._exchange.update_price_stream(
+            self._config.exchange.exchange,
+            self.get_symbols(),
+        )
 
     def get(self, symbol: str):
         coin = self._coins.get(symbol)
@@ -476,7 +496,8 @@ class WatchList:
         created_at = self._coins[symbol]["created_at"]
         now = datetime.now(UTC)
 
-        self._coins[symbol] = {
+        with self._lock:
+            self._coins[symbol] = {
             "state": WatchState.IDLE,
             "lowest_price": None,
             "highest_price": None,
