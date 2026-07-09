@@ -4,3 +4,4 @@ httpx==0.28.1
 msgpack==1.2.1
 ccxt
 python-dotenv
+websocket-client
