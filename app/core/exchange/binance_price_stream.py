@@ -211,7 +211,7 @@ class BinancePriceStream(PriceStream):
         if not self._connected.is_set():
             return
 
-        if added:
+        if added and self._connected.is_set():
             self._ws.send(json.dumps({
                 "method": "SUBSCRIBE",
                 "params": [
