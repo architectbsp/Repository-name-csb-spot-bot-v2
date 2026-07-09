@@ -139,10 +139,10 @@ class RiskManager:
         if not self._running:
             return
 
-        try:
-            self.update_position(position, ticker)
-        except Exception:
-            return
+        self.update_position(
+            position,
+            ticker,
+        )
 
     def update_position(
         self,
