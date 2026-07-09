@@ -82,6 +82,9 @@ class BotEngine:
 
         self.risk_manager = RiskManager()
         self.risk_manager.set_exchange(self.exchange)
+        self.risk_manager.set_exchange_manager(
+            self.exchange,
+        )
         self.risk_manager.set_scheduler(self.scheduler)
         self.risk_manager.set_event_bus(self.event_bus)
         self.risk_manager.set_rate_limiter(self.rate_limiter)

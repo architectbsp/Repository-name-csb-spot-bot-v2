@@ -1,6 +1,7 @@
 class RiskManager:
     _DEPENDENCY_NAMES = (
         "exchange",
+        "exchange_manager",
         "scheduler",
         "event_bus",
         "rate_limiter",
@@ -17,6 +18,7 @@ class RiskManager:
         self._running = False
 
         self._exchange = None
+        self._exchange_manager = None
         self._scheduler = None
         self._event_bus = None
         self._rate_limiter = None
@@ -50,6 +52,9 @@ class RiskManager:
 
     def set_exchange(self, exchange):
         self._exchange = exchange
+
+    def set_exchange_manager(self, exchange_manager):
+        self._exchange_manager = exchange_manager
 
     def set_scheduler(self, scheduler):
         self._scheduler = scheduler
@@ -143,6 +148,27 @@ class RiskManager:
         last_price = ticker["last_price"]
 
         if last_price > position.stop_price:
+            return
+
+        from decimal import Decimal
+
+        from app.core.trading.models import (
+            TradeRequest,
+            TradeSide,
+        )
+
+        trade = TradeRequest(
+            symbol=position.symbol,
+            quantity=Decimal(str(position.quantity)),
+            side=TradeSide.SELL,
+        )
+
+        result = self._exchange_manager.execute_trade(
+            ticker["exchange"],
+            trade,
+        )
+
+        if not result:
             return
 
         self._position_manager.close(position.symbol)
