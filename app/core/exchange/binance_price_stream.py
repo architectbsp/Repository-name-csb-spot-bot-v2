@@ -209,10 +209,11 @@ class BinancePriceStream(PriceStream):
         if not self._running:
             return
 
-        if self._ws is None:
-            return
-
-        if not self._connected.is_set():
+        if (
+            self._ws is None
+            or not self._connected.is_set()
+            or not self._running
+        ):
             return
 
         if added and self._connected.is_set():
