@@ -171,12 +171,22 @@ class Strategy:
             stop_price,
         )
 
+        filled_quantity = float(result.filled_quantity)
+
+        if filled_quantity <= 0:
+            filled_quantity = float(trade.quantity)
+
+        entry_price = result.average_price
+
+        if entry_price is None or entry_price <= 0:
+            entry_price = ticker.last_price
+
         if self._position_manager is not None:
             self._position_manager.add(
                 Position(
                     symbol=ticker.symbol,
-                    entry_price=ticker.last_price,
-                    quantity=float(trade.quantity),
+                    entry_price=entry_price,
+                    quantity=filled_quantity,
                     opened_at=datetime.now(UTC),
                     stop_price=stop_price,
                 )
