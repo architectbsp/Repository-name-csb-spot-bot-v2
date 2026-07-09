@@ -113,15 +113,29 @@ class RiskManager:
         self,
         ticker: dict,
     ) -> None:
-        """
-        Live position management entry point.
+        symbol = ticker["symbol"]
 
-        Feature-10 will implement:
+        position = self._position_manager.get(symbol)
 
-        - Stop Loss
-        - Break Even
-        - Trailing Stop
+        if position is None:
+            return
 
-        using websocket ticks only.
-        """
+        self.update_position(position, ticker)
+
+    def update_position(
+        self,
+        position,
+        ticker: dict,
+    ) -> None:
+        self.check_stop_loss(position, ticker)
+        self.check_break_even(position, ticker)
+        self.check_trailing(position, ticker)
+
+    def check_stop_loss(self, position, ticker) -> None:
+        return
+
+    def check_break_even(self, position, ticker) -> None:
+        return
+
+    def check_trailing(self, position, ticker) -> None:
         return
