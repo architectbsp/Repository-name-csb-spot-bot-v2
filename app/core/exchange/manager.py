@@ -104,6 +104,39 @@ class ExchangeManager:
             amount,
         )
 
+
+
+    def start_price_stream(
+        self,
+        exchange_type,
+        symbols,
+        callback,
+    ):
+        stream = self.get_price_stream(
+            exchange_type,
+        )
+
+        if stream is None:
+            return
+
+        stream.start(
+            symbols,
+            callback,
+        )
+
+    def stop_price_stream(
+        self,
+        exchange_type,
+    ):
+        stream = self.get_price_stream(
+            exchange_type,
+        )
+
+        if stream is None:
+            return
+
+        stream.stop()
+
     def execute_trade(
         self,
         exchange_type: ExchangeType,

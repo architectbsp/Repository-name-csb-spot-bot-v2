@@ -128,7 +128,10 @@ class BinancePriceStream(PriceStream):
         }
 
         if self._callback:
-            self._callback(ticker)
+            self._callback(
+                "ticker.updated",
+                ticker,
+            )
 
     def _on_error(
         self,

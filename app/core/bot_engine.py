@@ -112,6 +112,11 @@ class BotEngine:
             self.watch_list.handle_scan_result,
         )
 
+        self.event_bus.subscribe(
+            "ticker.updated",
+            self.watch_list.handle_price_update,
+        )
+
         for module in (
             self.market_scanner,
             self.watch_list,
