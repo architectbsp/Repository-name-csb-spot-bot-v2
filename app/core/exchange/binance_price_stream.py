@@ -221,7 +221,7 @@ class BinancePriceStream(PriceStream):
                 "id": 2,
             }))
 
-        if removed:
+        if removed and self._connected.is_set():
             self._ws.send(json.dumps({
                 "method": "UNSUBSCRIBE",
                 "params": [
