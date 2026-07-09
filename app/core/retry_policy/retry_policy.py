@@ -1,5 +1,6 @@
-import time
 from __future__ import annotations
+
+import time
 
 
 class RetryPolicy:
@@ -24,7 +25,11 @@ class RetryPolicy:
         pass
 
 
+
     def execute(self, operation):
+        if not callable(operation):
+            return operation
+
         last_error = None
 
         for attempt in range(1, self._max_attempts + 1):

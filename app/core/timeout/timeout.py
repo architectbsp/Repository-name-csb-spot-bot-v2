@@ -1,5 +1,6 @@
-import concurrent.futures
 from __future__ import annotations
+
+import concurrent.futures
 
 
 class Timeout:
@@ -22,7 +23,11 @@ class Timeout:
         return self.__repr__()
 
 
+
     def wrap(self, operation):
+        if not callable(operation):
+            return operation
+
         if self.is_disabled():
             return operation()
 

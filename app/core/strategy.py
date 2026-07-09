@@ -6,6 +6,11 @@ from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchState
 
 
+
+def _cfg(config):
+    return getattr(config, "strategy", config)
+
+
 class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
@@ -99,7 +104,7 @@ class Strategy:
             self._handle_rising_watch(watch_list, ticker)
 
     def _handle_idle(self, watch_list, ticker) -> None:
-        if ticker.change_24h > -self._config.watch_percent:
+        if ticker.change_24h > -_cfg(self._config).watch_percent:
             return
 
         watch_list.begin_falling_watch(
@@ -134,7 +139,7 @@ class Strategy:
             / coin["lowest_price"]
         ) * 100
 
-        if recovery < self._config.entry_percent:
+        if recovery < _cfg(self._config).entry_percent:
             return
 
         watch_list.promote_to_buy_pending(
@@ -157,7 +162,7 @@ class Strategy:
 
         stop_price = (
             ticker.last_price
-            * (1 - self._config.stop_loss_percent / 100)
+            * (1 - _cfg(self._config).stop_loss_percent / 100)
         )
 
         watch_list.promote_to_position_open(
@@ -207,7 +212,7 @@ class Strategy:
 
         if (
             state == WatchState.POSITION_OPEN
-            and profit_percent >= self._config.take_profit_activation
+            and profit_percent >= _cfg(self._config).take_profit_activation
         ):
             if watch_list.activate_break_even(ticker.symbol):
                 position.stop_price = position.entry_price
@@ -218,7 +223,7 @@ class Strategy:
 
             trailing_price = (
                 coin["highest_price"]
-                * (1 - self._config.trailing_percent / 100)
+                * (1 - _cfg(self._config).trailing_percent / 100)
             )
 
             if watch_list.activate_trailing(
