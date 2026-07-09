@@ -17,12 +17,14 @@ class BinancePriceStream(PriceStream):
     def __init__(self) -> None:
         self._running = False
         self._symbols: list[str] = []
+        self._lock = threading.RLock()
         self._callback: Callable[[dict[str, Any]], None] | None = None
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
         self._ws: websocket.WebSocketApp | None = None
+        self._connected = threading.Event()
 
     def start(
         self,
@@ -32,7 +34,8 @@ class BinancePriceStream(PriceStream):
         if self._running:
             return
 
-        self._symbols = list(symbols)
+        with self._lock:
+            self._symbols = sorted(set(symbols))
         self._callback = callback
 
         self._stop_event.clear()
@@ -86,6 +89,7 @@ class BinancePriceStream(PriceStream):
             time.sleep(5)
 
     def _on_open(self, ws):
+        self._connected.set()
         if not self._symbols:
             return
 
@@ -138,7 +142,7 @@ class BinancePriceStream(PriceStream):
         ws,
         error,
     ):
-        pass
+        self._connected.clear()
 
     def _on_close(
         self,
@@ -146,7 +150,7 @@ class BinancePriceStream(PriceStream):
         code,
         msg,
     ):
-        pass
+        self._connected.clear()
 
     def _on_ping(
         self,
@@ -161,6 +165,49 @@ class BinancePriceStream(PriceStream):
         message,
     ):
         pass
+
+
+
+    def update_symbols(
+        self,
+        symbols: list[str],
+    ) -> None:
+        symbols = sorted(set(symbols))
+
+        with self._lock:
+            current = set(self._symbols)
+            target = set(symbols)
+
+            added = sorted(target - current)
+            removed = sorted(current - target)
+
+            self._symbols = symbols
+
+        if not self._running:
+            return
+
+        if self._ws is None:
+            return
+
+        if added:
+            self._ws.send(json.dumps({
+                "method": "SUBSCRIBE",
+                "params": [
+                    f"{s.lower()}@ticker"
+                    for s in added
+                ],
+                "id": 2,
+            }))
+
+        if removed:
+            self._ws.send(json.dumps({
+                "method": "UNSUBSCRIBE",
+                "params": [
+                    f"{s.lower()}@ticker"
+                    for s in removed
+                ],
+                "id": 3,
+            }))
 
     @property
     def running(self) -> bool:
