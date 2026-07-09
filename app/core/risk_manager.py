@@ -107,3 +107,21 @@ class RiskManager:
             return False
 
         return True
+
+
+    def on_price_tick(
+        self,
+        ticker: dict,
+    ) -> None:
+        """
+        Live position management entry point.
+
+        Feature-10 will implement:
+
+        - Stop Loss
+        - Break Even
+        - Trailing Stop
+
+        using websocket ticks only.
+        """
+        return

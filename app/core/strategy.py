@@ -302,6 +302,9 @@ class Strategy:
     ) -> None:
         symbol = ticker["symbol"]
 
+        if not self._watch_list.contains(symbol):
+            return
+
         if self._position_manager.has_position(symbol):
             self._risk_manager.on_price_tick(ticker)
             return
