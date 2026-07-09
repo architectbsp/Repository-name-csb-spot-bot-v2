@@ -72,7 +72,6 @@ class BinancePriceStream(PriceStream):
 
         self._thread = None
         self._ws = None
-        self._symbols.clear()
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
