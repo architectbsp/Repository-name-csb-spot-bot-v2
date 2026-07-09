@@ -157,6 +157,9 @@ class RiskManager:
             TradeSide,
         )
 
+        if position.state.name != "OPEN":
+            return
+
         trade = TradeRequest(
             symbol=position.symbol,
             quantity=Decimal(str(position.quantity)),
