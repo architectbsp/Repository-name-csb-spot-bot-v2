@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from app.core.exchange.models import ExchangeState, MarketMetadata
+from app.core.exchange.stream import PriceStream
 
 
 class BaseExchange(ABC):
@@ -26,6 +27,12 @@ class BaseExchange(ABC):
         ...
 
     @abstractmethod
+
+
+    def get_price_stream(
+        self,
+    ) -> PriceStream | None:
+        return self._price_stream
     def fetch_tickers(self):
         ...
 

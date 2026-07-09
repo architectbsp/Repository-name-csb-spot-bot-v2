@@ -1,6 +1,7 @@
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.models import ExchangeType, MarketMetadata
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.exchange.stream import PriceStream
 from app.core.market_data.service import MarketDataService
 from app.core.trading.models import TradeRequest, TradeSide
 
@@ -33,6 +34,16 @@ class ExchangeManager:
 
     def enabled(self) -> list[BaseExchange]:
         return self._registry.enabled()
+
+
+
+    def get_price_stream(
+        self,
+        exchange_type: ExchangeType,
+    ) -> PriceStream | None:
+        return self._get_exchange(
+            exchange_type
+        ).get_price_stream()
 
     def get_market_metadata(
         self,

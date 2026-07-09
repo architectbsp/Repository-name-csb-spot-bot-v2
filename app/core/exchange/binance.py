@@ -101,3 +101,9 @@ class BinanceExchange(BaseExchange):
             symbol,
             amount,
         )
+
+
+    def get_price_stream(
+        self,
+    ):
+        return self._price_stream
