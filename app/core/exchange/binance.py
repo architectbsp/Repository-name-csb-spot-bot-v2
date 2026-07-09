@@ -22,6 +22,9 @@ class BinanceExchange(BaseExchange):
             }
         )
 
+        if settings.testnet:
+            self.client.set_sandbox_mode(True)
+
         self._price_stream = BinancePriceStream()
 
     def connect(self) -> None:
