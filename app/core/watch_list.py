@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -79,7 +79,7 @@ class WatchList:
         if symbol in self._coins:
             return False
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         self._coins[symbol] = {
             "state": WatchState.IDLE,
@@ -115,7 +115,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["state"] = target
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -130,7 +130,7 @@ class WatchList:
         coin = self._coins[symbol]
         coin["lowest_price"] = price
         coin["highest_price"] = price
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -150,7 +150,7 @@ class WatchList:
         if coin["highest_price"] is None or price > coin["highest_price"]:
             coin["highest_price"] = price
 
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -168,7 +168,7 @@ class WatchList:
         if price < coin["lowest_price"]:
             coin["lowest_price"] = price
 
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
         return True
 
     def record_rising_price(
@@ -184,7 +184,7 @@ class WatchList:
         if price > coin["highest_price"]:
             coin["highest_price"] = price
 
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -198,7 +198,7 @@ class WatchList:
 
         coin = self._coins[symbol]
         coin["entry_price"] = entry_price
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -215,7 +215,7 @@ class WatchList:
         coin = self._coins[symbol]
         coin["entry_price"] = entry_price
         coin["stop_price"] = stop_price
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -229,7 +229,7 @@ class WatchList:
 
         coin = self._coins[symbol]
         coin["stop_price"] = coin["entry_price"]
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -252,7 +252,7 @@ class WatchList:
             coin["highest_price"] = highest_price
 
         coin["trailing_price"] = trailing_price
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -264,7 +264,7 @@ class WatchList:
         if not self.transition(symbol, WatchState.POSITION_CLOSED):
             return False
 
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -278,7 +278,7 @@ class WatchList:
 
         coin = self._coins[symbol]
         coin["cooldown_until"] = cooldown_until
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -296,7 +296,7 @@ class WatchList:
         coin["stop_price"] = None
         coin["trailing_price"] = None
         coin["cooldown_until"] = None
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -312,7 +312,7 @@ class WatchList:
         if coin["highest_price"] is None or price > coin["highest_price"]:
             coin["highest_price"] = price
 
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -324,7 +324,7 @@ class WatchList:
 
         if coin["lowest_price"] is None or price < coin["lowest_price"]:
             coin["lowest_price"] = price
-            coin["updated_at"] = datetime.utcnow()
+            coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -336,7 +336,7 @@ class WatchList:
 
         if coin["highest_price"] is None or price > coin["highest_price"]:
             coin["highest_price"] = price
-            coin["updated_at"] = datetime.utcnow()
+            coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -346,7 +346,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["entry_price"] = price
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
     def set_stop_price(self, symbol: str, price: float) -> bool:
@@ -354,7 +354,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["stop_price"] = price
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
     def set_trailing_price(self, symbol: str, price: float) -> bool:
@@ -362,7 +362,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["trailing_price"] = price
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -376,7 +376,7 @@ class WatchList:
 
         coin = self._coins[symbol]
         coin["cooldown_until"] = cooldown_until
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -386,7 +386,7 @@ class WatchList:
 
         coin = self._coins[symbol]
         coin["cooldown_until"] = None
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -447,7 +447,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["lowest_price"] = price
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
     def set_highest_price(self, symbol: str, price: float) -> bool:
@@ -455,7 +455,7 @@ class WatchList:
             return False
 
         self._coins[symbol]["highest_price"] = price
-        self._coins[symbol]["updated_at"] = datetime.utcnow()
+        self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
     def clear_price_tracking(self, symbol: str) -> bool:
@@ -465,7 +465,7 @@ class WatchList:
         coin = self._coins[symbol]
         coin["lowest_price"] = None
         coin["highest_price"] = None
-        coin["updated_at"] = datetime.utcnow()
+        coin["updated_at"] = datetime.now(UTC)
 
         return True
 
@@ -474,7 +474,7 @@ class WatchList:
             return False
 
         created_at = self._coins[symbol]["created_at"]
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         self._coins[symbol] = {
             "state": WatchState.IDLE,
@@ -493,7 +493,7 @@ class WatchList:
     def handle_scan_result(self, symbols) -> int:
         added = 0
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         for ticker in symbols:
             if not ticker.symbol:

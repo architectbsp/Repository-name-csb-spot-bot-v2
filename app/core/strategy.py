@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.core.position_manager import Position
@@ -172,7 +172,7 @@ class Strategy:
                     symbol=ticker.symbol,
                     entry_price=ticker.last_price,
                     quantity=float(trade.quantity),
-                    opened_at=datetime.utcnow(),
+                    opened_at=datetime.now(UTC),
                     stop_price=stop_price,
                 )
             )

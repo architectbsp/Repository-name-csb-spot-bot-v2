@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.core.position_manager import (
     MAX_OPEN_POSITIONS,
@@ -13,7 +13,7 @@ def make_position(symbol: str) -> Position:
         symbol=symbol,
         entry_price=100.0,
         quantity=1.0,
-        opened_at=datetime.utcnow(),
+        opened_at=datetime.now(UTC),
         stop_price=95.0,
     )
 

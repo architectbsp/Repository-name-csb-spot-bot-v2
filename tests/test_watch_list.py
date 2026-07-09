@@ -27,7 +27,7 @@ def test_full_state_machine_lifecycle():
     assert watchlist.close_position("BTCUSDT")
     assert watchlist.get_state("BTCUSDT") == WatchState.POSITION_CLOSED
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 
 def test_cooldown_lifecycle():
@@ -40,11 +40,11 @@ def test_cooldown_lifecycle():
     watchlist.promote_to_position_open("ETHUSDT", 102, 98)
     watchlist.close_position("ETHUSDT")
 
-    until = datetime.utcnow() + timedelta(minutes=5)
+    until = datetime.now(UTC) + timedelta(minutes=5)
 
     assert watchlist.enter_cooldown("ETHUSDT", until)
     assert watchlist.get_state("ETHUSDT") == WatchState.COOLDOWN
-    assert watchlist.is_in_cooldown("ETHUSDT", datetime.utcnow())
+    assert watchlist.is_in_cooldown("ETHUSDT", datetime.now(UTC))
 
     assert watchlist.finish_cooldown("ETHUSDT")
     assert watchlist.get_state("ETHUSDT") == WatchState.IDLE
@@ -182,30 +182,30 @@ def test_cooldown_helpers():
 
     watchlist.add("BTCUSDT")
 
-    until = datetime.utcnow() + timedelta(minutes=10)
+    until = datetime.now(UTC) + timedelta(minutes=10)
 
     watchlist.start_cooldown("BTCUSDT", until)
 
     assert watchlist.is_in_cooldown(
         "BTCUSDT",
-        datetime.utcnow(),
+        datetime.now(UTC),
     )
 
     assert not watchlist.cooldown_expired(
         "BTCUSDT",
-        datetime.utcnow(),
+        datetime.now(UTC),
     )
 
     assert watchlist.remaining_cooldown(
         "BTCUSDT",
-        datetime.utcnow(),
+        datetime.now(UTC),
     ) is not None
 
     watchlist.clear_cooldown("BTCUSDT")
 
     assert not watchlist.is_in_cooldown(
         "BTCUSDT",
-        datetime.utcnow(),
+        datetime.now(UTC),
     )
 
 
