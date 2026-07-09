@@ -102,14 +102,14 @@ class BotEngine:
 
     def start_price_stream(self) -> None:
         self.exchange.start_price_stream(
-            self.config.exchange.exchange,
+            self.exchange.enabled()[0].state.exchange,
             self.watch_list.get_symbols(),
             self.event_bus.publish,
         )
 
     def stop_price_stream(self) -> None:
         self.exchange.stop_price_stream(
-            self.config.exchange.exchange,
+            self.exchange.enabled()[0].state.exchange,
         )
 
     def initialize(self):
