@@ -7,8 +7,12 @@ from collections.abc import Callable
 from typing import Any
 
 import websocket
+import logging
 
 from app.core.exchange.stream import PriceStream
+
+
+logger = logging.getLogger(__name__)
 
 
 class BinancePriceStream(PriceStream):
@@ -53,6 +57,8 @@ class BinancePriceStream(PriceStream):
         if not self._running:
             return
 
+        self._connected.clear()
+
         self._running = False
 
         self._stop_event.set()
@@ -90,6 +96,7 @@ class BinancePriceStream(PriceStream):
 
     def _on_open(self, ws):
         self._connected.set()
+        logger.info("Binance websocket connected")
         if not self._symbols:
             return
 
@@ -148,6 +155,7 @@ class BinancePriceStream(PriceStream):
         error,
     ):
         self._connected.clear()
+        logger.exception("Binance websocket error: %s", error)
 
     def _on_close(
         self,
@@ -156,6 +164,11 @@ class BinancePriceStream(PriceStream):
         msg,
     ):
         self._connected.clear()
+        logger.warning(
+            "Binance websocket closed (%s): %s",
+            code,
+            msg,
+        )
 
     def _on_ping(
         self,
