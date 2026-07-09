@@ -137,10 +137,68 @@ class RiskManager:
         self.check_trailing(position, ticker)
 
     def check_stop_loss(self, position, ticker) -> None:
-        return
+        if position.stop_price is None:
+            return
+
+        last_price = ticker["last_price"]
+
+        if last_price > position.stop_price:
+            return
+
+        self._position_manager.close(position.symbol)
+
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "position.closed",
+                {
+                    "symbol": position.symbol,
+                    "reason": "STOP_LOSS",
+                    "price": last_price,
+                },
+            )
 
     def check_break_even(self, position, ticker) -> None:
-        return
+        activation = self._risk.break_even_activation_percent
+
+        profit = (
+            (ticker["last_price"] - position.entry_price)
+            / position.entry_price
+        ) * 100
+
+        if profit < activation:
+            return
+
+        if position.stop_price is None:
+            position.stop_price = position.entry_price
+            return
+
+        if position.stop_price < position.entry_price:
+            position.stop_price = position.entry_price
 
     def check_trailing(self, position, ticker) -> None:
-        return
+        activation = self._risk.trailing_activation_percent
+
+        profit = (
+            (ticker["last_price"] - position.entry_price)
+            / position.entry_price
+        ) * 100
+
+        if profit < activation:
+            return
+
+        highest_price = max(
+            ticker["last_price"],
+            getattr(position, "highest_price", ticker["last_price"]),
+        )
+
+        position.highest_price = highest_price
+
+        trailing_stop = highest_price * (
+            1 - self._risk.trailing_percent / 100
+        )
+
+        if (
+            position.stop_price is None
+            or trailing_stop > position.stop_price
+        ):
+            position.stop_price = trailing_stop
