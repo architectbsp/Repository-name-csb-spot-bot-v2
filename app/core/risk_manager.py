@@ -184,6 +184,7 @@ class RiskManager:
                     "symbol": position.symbol,
                     "reason": "STOP_LOSS",
                     "price": last_price,
+                    "position": position,
                 },
             )
 
