@@ -490,6 +490,17 @@ class WatchList:
         return True
 
 
+
+    def handle_price_update(self, ticker) -> None:
+        if not self.contains(ticker.symbol):
+            return
+
+        if self.has_strategy():
+            self._strategy.on_ticker(
+                self,
+                ticker,
+            )
+
     def handle_scan_result(self, symbols) -> int:
         added = 0
 
