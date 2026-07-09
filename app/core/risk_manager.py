@@ -137,9 +137,9 @@ class RiskManager:
         position,
         ticker: dict,
     ) -> None:
-        self.check_stop_loss(position, ticker)
         self.check_break_even(position, ticker)
         self.check_trailing(position, ticker)
+        self.check_stop_loss(position, ticker)
 
     def check_stop_loss(self, position, ticker) -> None:
         if position.stop_price is None:

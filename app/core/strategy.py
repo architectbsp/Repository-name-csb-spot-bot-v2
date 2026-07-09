@@ -203,43 +203,6 @@ class Strategy:
                 ticker.last_price,
             )
 
-        profit_percent = (
-            (ticker.last_price - position.entry_price)
-            / position.entry_price
-        ) * 100
-
-        state = watch_list.get_state(ticker.symbol)
-
-        if (
-            state == WatchState.POSITION_OPEN
-            and profit_percent >= _cfg(self._config).take_profit_activation
-        ):
-            if watch_list.activate_break_even(ticker.symbol):
-                position.stop_price = position.entry_price
-                state = WatchState.BREAK_EVEN
-
-        if state == WatchState.BREAK_EVEN:
-            coin = watch_list.get(ticker.symbol)
-
-            trailing_price = (
-                coin["highest_price"]
-                * (1 - _cfg(self._config).trailing_percent / 100)
-            )
-
-            if watch_list.activate_trailing(
-                ticker.symbol,
-                coin["highest_price"],
-                trailing_price,
-            ):
-                position.stop_price = trailing_price
-
-        # Exit lifecycle is owned by RiskManager.
-        return
-
-        watch_list.close_position(
-            ticker.symbol,
-        )
-
     def create_trade_request(
         self,
         *,
