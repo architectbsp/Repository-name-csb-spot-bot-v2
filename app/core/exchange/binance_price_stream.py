@@ -124,10 +124,15 @@ class BinancePriceStream(PriceStream):
             return
 
         ticker = {
+            "exchange": "BINANCE",
             "symbol": data["s"],
             "last_price": float(data["c"]),
+            "open_price": float(data["o"]),
+            "high_price": float(data["h"]),
+            "low_price": float(data["l"]),
             "change_percent": float(data["P"]),
             "volume": float(data["q"]),
+            "event_time": data["E"],
             "raw": data,
         }
 
