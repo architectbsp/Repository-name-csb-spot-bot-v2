@@ -21,7 +21,12 @@ class Worker:
 
     def _run(self) -> None:
         while self._running:
-            self._scheduler.tick()
+            try:
+                self._scheduler.tick()
+            except Exception:
+                # Worker must stay alive; scheduler handles retries.
+                pass
+
             time.sleep(self._interval)
 
     def stop(self) -> None:
