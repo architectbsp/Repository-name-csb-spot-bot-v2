@@ -2,6 +2,7 @@ import ccxt
 
 from app.core.config.settings import ExchangeSettings
 from app.core.exchange.base import BaseExchange
+from app.core.exchange.binance_price_stream import BinancePriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
 
@@ -20,6 +21,8 @@ class BinanceExchange(BaseExchange):
                 "sandbox": settings.testnet,
             }
         )
+
+        self._price_stream = BinancePriceStream()
 
     def connect(self) -> None:
         self.state.status = ConnectionStatus.CONNECTING
