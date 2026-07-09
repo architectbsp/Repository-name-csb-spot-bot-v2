@@ -106,9 +106,11 @@ class BinanceExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
-        return self.client.create_market_buy_order(
-            symbol,
-            amount,
+        return self._normalize_order_result(
+            self.client.create_market_buy_order(
+                symbol,
+                amount,
+            )
         )
 
     def place_market_sell(
@@ -116,9 +118,11 @@ class BinanceExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
-        return self.client.create_market_sell_order(
-            symbol,
-            amount,
+        return self._normalize_order_result(
+            self.client.create_market_sell_order(
+                symbol,
+                amount,
+            )
         )
 
 
