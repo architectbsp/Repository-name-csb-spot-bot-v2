@@ -45,6 +45,19 @@ class BinanceExchange(BaseExchange):
     def fetch_balance(self):
         return self.client.fetch_balance()
 
+    def fetch_quote_balance(
+        self,
+        quote: str = "USDT",
+    ) -> float:
+        balance = self.fetch_balance()
+
+        wallet = balance.get(quote)
+
+        if wallet is None:
+            return 0.0
+
+        return float(wallet.get("free", 0.0))
+
     def fetch_markets(self):
         if self._markets_cache is None:
             self._markets_cache = self.client.load_markets()
