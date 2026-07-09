@@ -29,6 +29,20 @@ class MarketMetadata:
     active: bool
 
 
+
+@dataclass(slots=True, frozen=True)
+class OrderResult:
+    order_id: str
+    symbol: str
+    side: str
+    status: str
+    requested_quantity: float
+    filled_quantity: float
+    average_price: float | None
+    cost: float |None
+    raw: dict
+
+
 @dataclass(slots=True)
 class ExchangeState:
     exchange: ExchangeType
