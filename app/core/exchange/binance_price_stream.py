@@ -70,6 +70,7 @@ class BinancePriceStream(PriceStream):
             self._thread.join(timeout=5)
 
         self._thread = None
+        self._ws = None
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
