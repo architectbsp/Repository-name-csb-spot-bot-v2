@@ -168,7 +168,10 @@ class RiskManager:
             trade,
         )
 
-        if not result:
+        if result is None:
+            return
+
+        if hasattr(result, "success") and not result.success:
             return
 
         self._position_manager.close(
