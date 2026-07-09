@@ -1,3 +1,4 @@
+import concurrent.futures
 from __future__ import annotations
 
 
@@ -19,3 +20,12 @@ class Timeout:
 
     def __str__(self) -> str:
         return self.__repr__()
+
+
+    def wrap(self, operation):
+        if self.is_disabled():
+            return operation()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(operation)
+            return future.result(timeout=self._seconds)

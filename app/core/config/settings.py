@@ -53,13 +53,12 @@ class TimerSettings:
     duration_seconds: int = 300
 
 
-
-
 @dataclass(slots=True)
 class ExchangeSettings:
-    api_key: str = os.getenv("BYBIT_API_KEY", "")
-    api_secret: str = os.getenv("BYBIT_API_SECRET", "")
-    testnet: bool = os.getenv("BYBIT_TESTNET", "true").lower() == "true"
+    exchange: str = os.getenv("EXCHANGE", "binance").lower()
+    api_key: str = os.getenv("EXCHANGE_API_KEY", "")
+    api_secret: str = os.getenv("EXCHANGE_API_SECRET", "")
+    testnet: bool = os.getenv("EXCHANGE_TESTNET", "true").lower() == "true"
 
 
 @dataclass(slots=True)
@@ -68,7 +67,6 @@ class AppSettings:
     strategy: StrategySettings = field(default_factory=StrategySettings)
     connectivity: ConnectivitySettings = field(default_factory=ConnectivitySettings)
     exchange: ExchangeSettings = field(default_factory=ExchangeSettings)
-
     retry_policy: RetryPolicySettings = field(default_factory=RetryPolicySettings)
     timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
     rate_limiter: RateLimiterSettings = field(default_factory=RateLimiterSettings)

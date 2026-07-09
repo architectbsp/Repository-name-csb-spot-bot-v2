@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+import time
 from datetime import datetime, timedelta
 
 
@@ -38,3 +39,10 @@ class RateLimiter:
 
         while self._requests and self._requests[0] < threshold:
             self._requests.popleft()
+
+
+    def wrap(self, operation):
+        while not self.can_request():
+            time.sleep(0.05)
+        self.record_request()
+        return operation()
