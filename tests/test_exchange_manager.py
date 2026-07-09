@@ -43,3 +43,19 @@ def test_exchange_manager_price_stream():
     assert manager.get_price_stream(
         ExchangeType.BINANCE,
     ) is not None
+
+
+def test_binance_price_stream_start_stop():
+    from app.core.exchange.binance_price_stream import BinancePriceStream
+
+    stream = BinancePriceStream()
+
+    assert stream.running is False
+
+    stream.start([], lambda _: None)
+
+    assert stream.running is True
+
+    stream.stop()
+
+    assert stream.running is False
