@@ -12,6 +12,10 @@ class RiskSettings:
     max_open_positions: int = 10
     capital_per_trade_percent: float = 10.0
     cooldown_hours: int = 4
+    break_even_activation_percent: float = 10.0
+    stop_loss_percent: float = 5.0
+    trailing_activation_percent: float = 10.0
+    trailing_percent: float = 5.0
 
 
 @dataclass(slots=True)
