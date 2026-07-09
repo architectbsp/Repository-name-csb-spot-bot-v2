@@ -133,6 +133,9 @@ class RiskManager:
         if position is None:
             return
 
+        if not self._running:
+            return
+
         self.update_position(position, ticker)
 
     def update_position(
