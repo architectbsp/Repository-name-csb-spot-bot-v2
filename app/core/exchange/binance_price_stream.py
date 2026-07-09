@@ -86,7 +86,19 @@ class BinancePriceStream(PriceStream):
             time.sleep(5)
 
     def _on_open(self, ws):
-        pass
+        if not self._symbols:
+            return
+
+        payload = {
+            "method": "SUBSCRIBE",
+            "params": [
+                f"{symbol.lower()}@ticker"
+                for symbol in self._symbols
+            ],
+            "id": 1,
+        }
+
+        ws.send(json.dumps(payload))
 
     def _on_message(
         self,
@@ -98,8 +110,25 @@ class BinancePriceStream(PriceStream):
         except Exception:
             return
 
-        if self._callback is not None:
-            self._callback(data)
+        if "result" in data:
+            return
+
+        if "e" not in data:
+            return
+
+        if data["e"] != "24hrTicker":
+            return
+
+        ticker = {
+            "symbol": data["s"],
+            "last_price": float(data["c"]),
+            "change_percent": float(data["P"]),
+            "volume": float(data["q"]),
+            "raw": data,
+        }
+
+        if self._callback:
+            self._callback(ticker)
 
     def _on_error(
         self,
