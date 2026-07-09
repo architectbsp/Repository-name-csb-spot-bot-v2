@@ -61,6 +61,8 @@ class BinancePriceStream(PriceStream):
 
         self._running = False
 
+        self._connected.clear()
+
         self._stop_event.set()
 
         if self._ws is not None:
