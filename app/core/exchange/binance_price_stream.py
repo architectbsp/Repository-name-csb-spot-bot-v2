@@ -10,6 +10,7 @@ import websocket
 import logging
 
 from app.core.exchange.stream import PriceStream
+from app.core.exchange.models import ExchangeType
 
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ class BinancePriceStream(PriceStream):
             return
 
         ticker = {
-            "exchange": "BINANCE",
+            "exchange": ExchangeType.BINANCE,
             "symbol": data["s"],
             "last_price": float(data["c"]),
             "open_price": float(data["o"]),
