@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.core.exchange.models import ExchangeState, MarketMetadata
+from app.core.exchange.models import ExchangeState, MarketMetadata, OrderResult
 from app.core.exchange.stream import PriceStream
 
 
@@ -64,3 +64,28 @@ class BaseExchange(ABC):
         amount: float,
     ):
         ...
+
+    def _normalize_order_result(
+        self,
+        order: dict,
+    ) -> OrderResult:
+        return OrderResult(
+            order_id=str(order.get("id", "")),
+            symbol=str(order.get("symbol", "")),
+            side=str(order.get("side", "")).upper(),
+            status=str(order.get("status", "")).upper(),
+            requested_quantity=float(order.get("amount") or 0.0),
+            filled_quantity=float(order.get("filled") or 0.0),
+            average_price=(
+                float(order["average"])
+                if order.get("average") is not None
+                else None
+            ),
+            cost=(
+                float(order["cost"])
+                if order.get("cost") is not None
+                else None
+            ),
+            raw=order,
+        )
+
