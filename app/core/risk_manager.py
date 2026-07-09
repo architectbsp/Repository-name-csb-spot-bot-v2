@@ -186,14 +186,23 @@ class RiskManager:
         if result is None:
             return
 
-        if hasattr(result, "success") and not result.success:
+        if result.status not in {
+            "CLOSED",
+            "FILLED",
+        }:
             return
+
+        exit_price = result.average_price
+
+        if exit_price is None or exit_price <= 0:
+            exit_price = last_price
 
         self._position_manager.close(
             position.symbol,
-            exit_price=last_price,
+            exit_price=exit_price,
             reason="STOP_LOSS",
         )
+
 
         if self._event_bus is not None:
             self._event_bus.publish(
