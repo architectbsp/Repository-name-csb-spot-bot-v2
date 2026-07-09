@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import json
+import threading
+import time
 from collections.abc import Callable
-from threading import Event, Thread
 from typing import Any
+
+import websocket
 
 from app.core.exchange.stream import PriceStream
 
 
 class BinancePriceStream(PriceStream):
+    BASE_URL = "wss://stream.binance.com:9443/ws"
+
     def __init__(self) -> None:
         self._running = False
         self._symbols: list[str] = []
         self._callback: Callable[[dict[str, Any]], None] | None = None
 
-        self._thread: Thread | None = None
-        self._stop_event = Event()
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+
+        self._ws: websocket.WebSocketApp | None = None
 
     def start(
         self,
@@ -29,8 +37,8 @@ class BinancePriceStream(PriceStream):
 
         self._stop_event.clear()
 
-        self._thread = Thread(
-            target=self._worker,
+        self._thread = threading.Thread(
+            target=self._run,
             daemon=True,
             name="BinancePriceStream",
         )
@@ -43,16 +51,84 @@ class BinancePriceStream(PriceStream):
             return
 
         self._running = False
+
         self._stop_event.set()
+
+        if self._ws is not None:
+            self._ws.close()
 
         if self._thread is not None:
             self._thread.join(timeout=5)
 
         self._thread = None
 
-    def _worker(self) -> None:
-        while not self._stop_event.wait(1):
-            pass
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+
+            self._ws = websocket.WebSocketApp(
+                self.BASE_URL,
+                on_open=self._on_open,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_close=self._on_close,
+                on_ping=self._on_ping,
+                on_pong=self._on_pong,
+            )
+
+            self._ws.run_forever(
+                ping_interval=15,
+                ping_timeout=5,
+            )
+
+            if self._stop_event.is_set():
+                break
+
+            time.sleep(5)
+
+    def _on_open(self, ws):
+        pass
+
+    def _on_message(
+        self,
+        ws,
+        message: str,
+    ):
+        try:
+            data = json.loads(message)
+        except Exception:
+            return
+
+        if self._callback is not None:
+            self._callback(data)
+
+    def _on_error(
+        self,
+        ws,
+        error,
+    ):
+        pass
+
+    def _on_close(
+        self,
+        ws,
+        code,
+        msg,
+    ):
+        pass
+
+    def _on_ping(
+        self,
+        ws,
+        message,
+    ):
+        pass
+
+    def _on_pong(
+        self,
+        ws,
+        message,
+    ):
+        pass
 
     @property
     def running(self) -> bool:
