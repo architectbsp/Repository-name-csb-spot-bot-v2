@@ -98,6 +98,20 @@ class BotEngine:
         self.strategy.set_order_validator(self.order_validator)
         self.watch_list.set_strategy(self.strategy)
 
+
+
+    def start_price_stream(self) -> None:
+        self.exchange.start_price_stream(
+            self.config.exchange.exchange,
+            self.watch_list.get_symbols(),
+            self.event_bus.publish,
+        )
+
+    def stop_price_stream(self) -> None:
+        self.exchange.stop_price_stream(
+            self.config.exchange.exchange,
+        )
+
     def initialize(self):
         for module in (
             self.market_scanner,
@@ -149,6 +163,7 @@ class BotEngine:
             module.start()
 
         self.exchange.start()
+        self.start_price_stream()
 
         self.running = True
         print("Bot started")
@@ -163,6 +178,7 @@ class BotEngine:
         ):
             module.stop()
 
+        self.stop_price_stream()
         self.exchange.stop()
 
         self.shutdown()
