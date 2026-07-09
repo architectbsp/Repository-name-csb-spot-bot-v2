@@ -142,6 +142,11 @@ class BotEngine:
             self.risk_manager.on_price_tick,
         )
 
+        self.event_bus.subscribe(
+            "position.closed",
+            self.watch_list.handle_position_closed,
+        )
+
         for module in (
             self.market_scanner,
             self.watch_list,

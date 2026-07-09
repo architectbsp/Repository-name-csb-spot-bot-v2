@@ -233,29 +233,8 @@ class Strategy:
             ):
                 position.stop_price = trailing_price
 
-        if position.stop_price is None:
-            return
-
-        if ticker.last_price > position.stop_price:
-            return
-
-        trade = self.create_trade_request(
-            symbol=ticker.symbol,
-            quantity=Decimal(str(position.quantity)),
-            side=TradeSide.SELL,
-        )
-
-        result = self.execute_trade(
-            ticker.exchange,
-            trade,
-        )
-
-        if not result:
-            return
-
-        self._position_manager.close(
-            ticker.symbol,
-        )
+        # Exit lifecycle is owned by RiskManager.
+        return
 
         watch_list.close_position(
             ticker.symbol,
