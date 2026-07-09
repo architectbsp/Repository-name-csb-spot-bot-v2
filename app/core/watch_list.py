@@ -512,6 +512,18 @@ class WatchList:
 
 
 
+
+    def handle_position_closed(
+        self,
+        event: dict,
+    ) -> None:
+        symbol = event["symbol"]
+
+        if symbol not in self._coins:
+            return
+
+        self.close_position(symbol)
+
     def handle_price_update(self, ticker) -> None:
         if not self.contains(ticker.symbol):
             return
