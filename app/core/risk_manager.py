@@ -8,6 +8,7 @@ class RiskManager:
         "timeout",
         "timer",
         "stopwatch",
+        "position_manager",
         "config",
     )
 
@@ -23,6 +24,7 @@ class RiskManager:
         self._timeout = None
         self._timer = None
         self._stopwatch = None
+        self._position_manager = None
         self._config = None
 
     def initialize(self) -> None:
@@ -69,6 +71,9 @@ class RiskManager:
 
     def set_stopwatch(self, stopwatch):
         self._stopwatch = stopwatch
+
+    def set_position_manager(self, position_manager):
+        self._position_manager = position_manager
 
     def set_config(self, config):
         self._config = config

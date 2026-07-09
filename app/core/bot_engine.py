@@ -89,6 +89,9 @@ class BotEngine:
         self.risk_manager.set_timeout(self.timeout)
         self.risk_manager.set_timer(self.timer)
         self.risk_manager.set_stopwatch(self.stopwatch)
+        self.risk_manager.set_position_manager(
+            self.position_manager,
+        )
 
         self.strategy = Strategy()
 
@@ -129,6 +132,11 @@ class BotEngine:
         self.event_bus.subscribe(
             "ticker.updated",
             self.watch_list.handle_price_update,
+        )
+
+        self.event_bus.subscribe(
+            "ticker.updated",
+            self.risk_manager.on_price_tick,
         )
 
         for module in (
