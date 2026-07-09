@@ -294,3 +294,15 @@ class Strategy:
             exchange_type,
             validated_trade,
         )
+
+
+    def on_price_tick(
+        self,
+        ticker: dict,
+    ) -> None:
+        """
+        Live websocket tick entry point.
+
+        Feature-9 will move the trading decision logic here.
+        """
+        return
