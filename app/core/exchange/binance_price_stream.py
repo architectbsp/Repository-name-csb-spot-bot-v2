@@ -40,6 +40,7 @@ class BinancePriceStream(PriceStream):
 
         with self._lock:
             self._symbols = sorted(set(symbols))
+
         self._callback = callback
 
         self._stop_event.clear()
