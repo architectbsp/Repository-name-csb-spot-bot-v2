@@ -1,58 +1,49 @@
 # AUDIT HISTORY
 
-## Status Legend
-
-- PASS
-- PARTIAL
-- FAIL
-- NOT_IMPLEMENTED
-- DEFERRED
-
----
-
-## 8f1d01b
-
-Module:
-ExchangeManager
-
-Changes:
-- Added execute_trade() API.
-- Added TradeRequest execution flow.
-- Routed BUY/SELL using TradeSide.
-
-Validation:
+## a91f3e8
+- Injected persistence repository into PositionManager.
 - Compile PASS
 - Runtime PASS
+- Pytest PASS
 
----
-
-## c9eba44
-
-Module:
-Trading
-
-Changes:
-- Added TradeSide enum.
-- Added immutable TradeRequest domain model.
-
-Validation:
+## e71fa4c
+- Extracted Position domain model.
 - Compile PASS
 - Runtime PASS
+- Pytest 57/57 PASS
 
-## <SON_KOD_COMMIT_HASH>
+## cb5e9ea
+- Restored persisted positions on startup.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
 
-- Strategy now generates TradeRequest objects.
-- Compile: PASS
-- Runtime: PASS
+## 90eef5b
+- Persisted position lifecycle.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
 
-## 08aeb3c
+## a8883d6
+- Position cleanup integrated through event bus.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
 
-- Strategy integrated into BotEngine lifecycle.
-- Compile: PASS
-- Runtime: PASS
+## 57d5992
+- Added quote balance exchange abstraction.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
 
-## bdd98f3
+## 31aeed4
+- Dynamic position sizing.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
 
-- Strategy injected into WatchList.
-- Compile: PASS
-- Runtime: PASS
+## 3667627
+- Integrated risk gate into Strategy.
+- Compile PASS
+- Runtime PASS
+- Pytest 57/57 PASS
