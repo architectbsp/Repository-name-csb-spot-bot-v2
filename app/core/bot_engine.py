@@ -19,6 +19,7 @@ from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
+from app.core.persistence.service import PersistenceService
 
 
 class BotEngine:
@@ -59,6 +60,8 @@ class BotEngine:
         self.exchange = ExchangeManager(self.exchange_registry)
         self.order_validator = OrderValidator(self.exchange)
 
+        self.persistence = PersistenceService()
+
         self.market_scanner = MarketScanner()
         self.market_scanner.set_exchange(self.exchange)
         self.market_scanner.set_scheduler(self.scheduler)
@@ -68,6 +71,7 @@ class BotEngine:
         self.market_scanner.set_timeout(self.timeout)
         self.market_scanner.set_timer(self.timer)
         self.market_scanner.set_stopwatch(self.stopwatch)
+
         self.watch_list = WatchList()
         self.watch_list.set_exchange(self.exchange)
         self.watch_list.set_scheduler(self.scheduler)
@@ -79,6 +83,9 @@ class BotEngine:
         self.watch_list.set_stopwatch(self.stopwatch)
 
         self.position_manager = PositionManager()
+        self.position_manager.set_repository(
+            self.persistence.position_repository(),
+        )
 
         self.risk_manager = RiskManager()
         self.risk_manager.set_exchange(self.exchange)
@@ -97,14 +104,12 @@ class BotEngine:
         )
 
         self.strategy = Strategy()
-
         self.strategy.set_risk_manager(self.risk_manager)
         self.strategy.set_position_manager(self.position_manager)
         self.strategy.set_exchange_manager(self.exchange)
         self.strategy.set_order_validator(self.order_validator)
+
         self.watch_list.set_strategy(self.strategy)
-
-
 
     def start_price_stream(self) -> None:
         self.exchange.start_price_stream(
