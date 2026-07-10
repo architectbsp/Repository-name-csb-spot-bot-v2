@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from app.core.position_manager import Position
+from app.core.domain.position import Position
 from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchState
 

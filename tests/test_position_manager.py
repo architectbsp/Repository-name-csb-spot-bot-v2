@@ -1,11 +1,7 @@
 from datetime import UTC, datetime
 
-from app.core.position_manager import (
-    MAX_OPEN_POSITIONS,
-    Position,
-    PositionManager,
-    PositionState,
-)
+from app.core.domain.position import Position, PositionState
+from app.core.position_manager import MAX_OPEN_POSITIONS, PositionManager
 
 
 def make_position(symbol: str) -> Position:

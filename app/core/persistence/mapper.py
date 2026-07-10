@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from app.core.persistence.models import PositionEntity
-from app.core.position_manager import Position
+from app.core.domain.position import Position
 
 
 def to_entity(position: Position) -> PositionEntity:
