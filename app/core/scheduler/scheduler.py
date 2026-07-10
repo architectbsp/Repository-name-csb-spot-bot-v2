@@ -55,7 +55,6 @@ class Scheduler:
         job.running = True
 
         try:
-            print(f"[Scheduler] running job: {job.name}")
             job.callback()
             job.last_run = datetime.now()
             self.schedule(job)

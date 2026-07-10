@@ -118,8 +118,6 @@ class BinancePriceStream(PriceStream):
             ],
             "id": 1,
         }
-
-        print("[WS OPEN SUBSCRIBE]", payload)
         ws.send(json.dumps(payload))
 
     def _on_message(
@@ -219,7 +217,6 @@ class BinancePriceStream(PriceStream):
             return
 
         if added and self._connected.is_set():
-            print("[WS ADD]", added)
             self._ws.send(json.dumps({
                 "method": "SUBSCRIBE",
                 "params": [
@@ -230,7 +227,6 @@ class BinancePriceStream(PriceStream):
             }))
 
         if removed and self._connected.is_set():
-            print("[WS REMOVE]", removed)
             self._ws.send(json.dumps({
                 "method": "UNSUBSCRIBE",
                 "params": [
