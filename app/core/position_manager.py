@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -66,6 +66,12 @@ class PositionManager:
         self._positions[position.symbol] = position
         return True
 
+    def restore(
+        self,
+        position: Position,
+    ) -> bool:
+        return self.add(position)
+
     def get(self, symbol: str) -> Position | None:
         return self._positions.get(symbol)
 
@@ -78,7 +84,6 @@ class PositionManager:
 
         del self._positions[symbol]
         return True
-
 
     def close(
         self,
@@ -126,7 +131,6 @@ class PositionManager:
             for position in self._positions.values()
             if position.state == PositionState.OPEN
         )
-
 
     def get_open_positions(self) -> list[Position]:
         return [
