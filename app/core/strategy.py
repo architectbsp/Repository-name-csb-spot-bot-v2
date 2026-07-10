@@ -147,9 +147,24 @@ class Strategy:
             ticker.last_price,
         )
 
+        balance = self._exchange_manager.get_quote_balance(
+            ticker.exchange,
+        )
+
+        position_value = (
+            self._risk_manager.calculate_position_size(
+                balance,
+            )
+        )
+
+        if position_value <= 0:
+            return
+
+        quantity = position_value / ticker.last_price
+
         trade = self.create_trade_request(
             symbol=ticker.symbol,
-            quantity=Decimal("1"),
+            quantity=Decimal(str(quantity)),
         )
 
         result = self.execute_trade(
