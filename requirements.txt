@@ -5,3 +5,4 @@ msgpack==1.2.1
 ccxt
 python-dotenv
 websocket-client
+SQLAlchemy>=2.0,<3.0
