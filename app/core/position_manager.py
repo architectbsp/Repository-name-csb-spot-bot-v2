@@ -76,6 +76,13 @@ class PositionManager:
 
         return True
 
+
+    def handle_position_closed(
+        self,
+        event: dict,
+    ) -> None:
+        self.remove(event["symbol"])
+
     def close(
         self,
         symbol: str,

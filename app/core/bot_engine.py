@@ -152,6 +152,11 @@ class BotEngine:
             self.watch_list.handle_position_closed,
         )
 
+        self.event_bus.subscribe(
+            "position.closed",
+            self.position_manager.handle_position_closed,
+        )
+
         for module in (
             self.market_scanner,
             self.watch_list,
