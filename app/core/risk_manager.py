@@ -121,7 +121,7 @@ class RiskManager:
 
     def on_price_tick(
         self,
-        ticker: dict,
+        ticker,
     ) -> None:
         if (
             self._position_manager is None
@@ -129,7 +129,7 @@ class RiskManager:
         ):
             return
 
-        symbol = ticker["symbol"]
+        symbol = ticker.symbol
 
         position = self._position_manager.get(symbol)
 
@@ -147,7 +147,7 @@ class RiskManager:
     def update_position(
         self,
         position,
-        ticker: dict,
+        ticker,
     ) -> None:
         self.check_break_even(position, ticker)
         self.check_trailing(position, ticker)
@@ -157,7 +157,7 @@ class RiskManager:
         if position.stop_price is None:
             return
 
-        last_price = ticker["last_price"]
+        last_price = ticker.last_price
 
         if last_price > position.stop_price:
             return
@@ -179,7 +179,7 @@ class RiskManager:
         )
 
         result = self._exchange_manager.execute_trade(
-            ticker["exchange"],
+            ticker.exchange,
             trade,
         )
 
@@ -219,7 +219,7 @@ class RiskManager:
         activation = self._risk.break_even_activation_percent
 
         profit = (
-            (ticker["last_price"] - position.entry_price)
+            (ticker.last_price - position.entry_price)
             / position.entry_price
         ) * 100
 
@@ -237,7 +237,7 @@ class RiskManager:
         activation = self._risk.trailing_activation_percent
 
         profit = (
-            (ticker["last_price"] - position.entry_price)
+            (ticker.last_price - position.entry_price)
             / position.entry_price
         ) * 100
 
@@ -245,8 +245,8 @@ class RiskManager:
             return
 
         highest_price = max(
-            ticker["last_price"],
-            getattr(position, "highest_price", ticker["last_price"]),
+            ticker.last_price,
+            getattr(position, "highest_price", ticker.last_price),
         )
 
         position.highest_price = highest_price

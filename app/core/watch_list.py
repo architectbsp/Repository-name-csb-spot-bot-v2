@@ -109,8 +109,13 @@ class WatchList:
         if self._exchange is None:
             return
 
+        enabled = self._exchange.enabled()
+
+        if not enabled:
+            return
+
         self._exchange.update_price_stream(
-            self._config.exchange.exchange,
+            enabled[0].state.exchange,
             self.get_symbols(),
         )
 

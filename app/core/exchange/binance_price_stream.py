@@ -11,6 +11,7 @@ import logging
 
 from app.core.exchange.stream import PriceStream
 from app.core.exchange.models import ExchangeType
+from app.core.market_data.models import NormalizedTicker
 
 
 logger = logging.getLogger(__name__)
@@ -112,12 +113,13 @@ class BinancePriceStream(PriceStream):
         payload = {
             "method": "SUBSCRIBE",
             "params": [
-                f"{symbol.lower()}@ticker"
+                f"{symbol.replace('/', '').lower()}@ticker"
                 for symbol in self._symbols
             ],
             "id": 1,
         }
 
+        print("[WS OPEN SUBSCRIBE]", payload)
         ws.send(json.dumps(payload))
 
     def _on_message(
@@ -139,18 +141,14 @@ class BinancePriceStream(PriceStream):
         if data["e"] != "24hrTicker":
             return
 
-        ticker = {
-            "exchange": ExchangeType.BINANCE,
-            "symbol": data["s"],
-            "last_price": float(data["c"]),
-            "open_price": float(data["o"]),
-            "high_price": float(data["h"]),
-            "low_price": float(data["l"]),
-            "change_percent": float(data["P"]),
-            "volume": float(data["q"]),
-            "event_time": data["E"],
-            "raw": data,
-        }
+        ticker = NormalizedTicker(
+            exchange=ExchangeType.BINANCE,
+            symbol=data["s"],
+            last_price=float(data["c"]),
+            volume_24h=float(data["q"]),
+            change_24h=float(data["P"]),
+            timestamp=int(data["E"]),
+        )
 
         if self._callback:
             self._callback(
@@ -221,20 +219,22 @@ class BinancePriceStream(PriceStream):
             return
 
         if added and self._connected.is_set():
+            print("[WS ADD]", added)
             self._ws.send(json.dumps({
                 "method": "SUBSCRIBE",
                 "params": [
-                    f"{s.lower()}@ticker"
+                    f"{s.replace('/', '').lower()}@ticker"
                     for s in added
                 ],
                 "id": 2,
             }))
 
         if removed and self._connected.is_set():
+            print("[WS REMOVE]", removed)
             self._ws.send(json.dumps({
                 "method": "UNSUBSCRIBE",
                 "params": [
-                    f"{s.lower()}@ticker"
+                    f"{s.replace('/', '').lower()}@ticker"
                     for s in removed
                 ],
                 "id": 3,

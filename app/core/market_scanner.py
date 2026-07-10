@@ -143,6 +143,7 @@ class MarketScanner:
             self.tick()
 
     def tick(self) -> None:
+        print("[MarketScanner] tick")
         if not self.is_ready():
             raise RuntimeError("MarketScanner is not ready.")
 

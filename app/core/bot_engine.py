@@ -20,6 +20,7 @@ from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
 from app.core.persistence.service import PersistenceService
+from app.core.worker import Worker
 
 
 class BotEngine:
@@ -29,6 +30,7 @@ class BotEngine:
         self.config = AppSettings()
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
+        self.worker = Worker(self.scheduler)
         self.retry_policy = RetryPolicy(
             self.config.retry_policy.max_attempts,
             self.config.retry_policy.delay,
@@ -191,7 +193,12 @@ class BotEngine:
         ):
             module.start()
 
+        self.scheduler.start()
+        self.worker.start()
         self.exchange.start()
+
+        self.market_scanner.scan_once()
+
         self.start_price_stream()
 
         self.running = True
@@ -207,6 +214,8 @@ class BotEngine:
         ):
             module.stop()
 
+        self.worker.stop()
+        self.scheduler.stop()
         self.stop_price_stream()
         self.exchange.stop()
 
