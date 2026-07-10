@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from app.core.domain.position import Position, PositionState
+from app.core.persistence.mapper import to_entity
 
 
 MAX_OPEN_POSITIONS = 10
@@ -13,10 +14,7 @@ class PositionManager:
         self._initialized = False
         self._running = False
 
-    def set_repository(
-        self,
-        repository,
-    ) -> None:
+    def set_repository(self, repository) -> None:
         self._repository = repository
 
     def initialize(self) -> None:
@@ -43,13 +41,23 @@ class PositionManager:
             return False
 
         self._positions[position.symbol] = position
+
+        if self._repository is not None:
+            self._repository.save(
+                to_entity(position),
+            )
+
         return True
 
-    def restore(
-        self,
-        position: Position,
-    ) -> bool:
-        return self.add(position)
+    def restore(self, position: Position) -> bool:
+        if position.symbol in self._positions:
+            return False
+
+        if len(self._positions) >= MAX_OPEN_POSITIONS:
+            return False
+
+        self._positions[position.symbol] = position
+        return True
 
     def get(self, symbol: str) -> Position | None:
         return self._positions.get(symbol)
@@ -62,6 +70,10 @@ class PositionManager:
             return False
 
         del self._positions[symbol]
+
+        if self._repository is not None:
+            self._repository.delete(symbol)
+
         return True
 
     def close(
@@ -91,12 +103,14 @@ class PositionManager:
                 / position.entry_price
             ) * 100
 
+        if self._repository is not None:
+            self._repository.save(
+                to_entity(position),
+            )
+
         return True
 
-    def is_open(
-        self,
-        symbol: str,
-    ) -> bool:
+    def is_open(self, symbol: str) -> bool:
         position = self._positions.get(symbol)
 
         if position is None:
