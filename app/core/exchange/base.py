@@ -1,7 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.core.exchange.models import ExchangeState, MarketMetadata, OrderResult
+from app.core.exchange.models import (
+    ExchangeState,
+    MarketMetadata,
+    OrderResult,
+    TradeFill,
+)
 from app.core.exchange.stream import PriceStream
 
 
@@ -42,6 +47,14 @@ class BaseExchange(ABC):
 
     @abstractmethod
     def fetch_tickers(self):
+        ...
+
+    @abstractmethod
+    def fetch_my_trades(
+        self,
+        symbol: str | None = None,
+        limit: int | None = None,
+    ) -> list[TradeFill]:
         ...
 
     def get_price_stream(self) -> PriceStream | None:
@@ -100,4 +113,32 @@ class BaseExchange(ABC):
                 else None
             ),
             raw=order,
+        )
+
+    def _normalize_trade(
+        self,
+        trade: dict,
+    ) -> TradeFill:
+        fee = trade.get("fee") or {}
+
+        return TradeFill(
+            trade_id=str(trade.get("id", "")),
+            order_id=(
+                str(trade["order"])
+                if trade.get("order") is not None
+                else None
+            ),
+            symbol=str(trade.get("symbol", "")),
+            side=str(trade.get("side", "")).upper(),
+            price=float(trade.get("price") or 0.0),
+            quantity=float(trade.get("amount") or 0.0),
+            cost=float(trade.get("cost") or 0.0),
+            fee_cost=(
+                float(fee["cost"])
+                if fee.get("cost") is not None
+                else None
+            ),
+            fee_currency=fee.get("currency"),
+            timestamp=trade.get("timestamp"),
+            raw=trade,
         )

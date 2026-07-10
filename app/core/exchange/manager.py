@@ -79,6 +79,19 @@ class ExchangeManager:
         )
 
 
+    def fetch_my_trades(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str | None = None,
+        limit: int | None = None,
+    ):
+        return self._get_exchange(
+            exchange_type
+        ).fetch_my_trades(
+            symbol=symbol,
+            limit=limit,
+        )
+
     def get_quote_balance(
         self,
         exchange_type: ExchangeType,

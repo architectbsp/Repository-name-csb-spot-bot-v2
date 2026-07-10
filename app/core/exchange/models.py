@@ -29,7 +29,6 @@ class MarketMetadata:
     active: bool
 
 
-
 @dataclass(slots=True, frozen=True)
 class OrderResult:
     order_id: str
@@ -39,7 +38,22 @@ class OrderResult:
     requested_quantity: float
     filled_quantity: float
     average_price: float | None
-    cost: float |None
+    cost: float | None
+    raw: dict
+
+
+@dataclass(slots=True, frozen=True)
+class TradeFill:
+    trade_id: str
+    order_id: str | None
+    symbol: str
+    side: str
+    price: float
+    quantity: float
+    cost: float
+    fee_cost: float | None
+    fee_currency: str | None
+    timestamp: int | None
     raw: dict
 
 

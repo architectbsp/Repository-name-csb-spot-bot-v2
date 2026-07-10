@@ -50,6 +50,19 @@ class BybitExchange(BaseExchange):
     def fetch_tickers(self):
         return self.client.fetch_tickers()
 
+    def fetch_my_trades(
+        self,
+        symbol: str | None = None,
+        limit: int | None = None,
+    ):
+        return [
+            self._normalize_trade(trade)
+            for trade in self.client.fetch_my_trades(
+                symbol=symbol,
+                limit=limit,
+            )
+        ]
+
 
     def get_market_metadata(
         self,
