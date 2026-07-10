@@ -37,8 +37,15 @@ MAX_OPEN_POSITIONS = 10
 class PositionManager:
     def __init__(self) -> None:
         self._positions: dict[str, Position] = {}
+        self._repository = None
         self._initialized = False
         self._running = False
+
+    def set_repository(
+        self,
+        repository,
+    ) -> None:
+        self._repository = repository
 
     def initialize(self) -> None:
         self._initialized = True
