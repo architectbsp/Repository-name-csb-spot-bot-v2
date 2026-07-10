@@ -161,6 +161,9 @@ class BotEngine:
         ):
             module.initialize()
 
+        for position in self.persistence.load_positions():
+            self.position_manager.restore(position)
+
     def shutdown(self):
         for module in (
             self.market_scanner,
