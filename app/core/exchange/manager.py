@@ -78,6 +78,18 @@ class ExchangeManager:
             amount,
         )
 
+
+    def get_quote_balance(
+        self,
+        exchange_type: ExchangeType,
+        quote: str = "USDT",
+    ) -> float:
+        return self._get_exchange(
+            exchange_type
+        ).fetch_quote_balance(
+            quote,
+        )
+
     def place_market_buy(
         self,
         exchange_type: ExchangeType,

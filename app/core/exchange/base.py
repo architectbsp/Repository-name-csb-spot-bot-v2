@@ -23,6 +23,19 @@ class BaseExchange(ABC):
     def fetch_balance(self):
         ...
 
+    def fetch_quote_balance(
+        self,
+        quote: str = "USDT",
+    ) -> float:
+        balance = self.fetch_balance()
+
+        wallet = balance.get(quote)
+
+        if wallet is None:
+            return 0.0
+
+        return float(wallet.get("free", 0.0))
+
     @abstractmethod
     def fetch_markets(self):
         ...
@@ -88,4 +101,3 @@ class BaseExchange(ABC):
             ),
             raw=order,
         )
-
