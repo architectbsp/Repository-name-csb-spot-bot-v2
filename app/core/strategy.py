@@ -151,6 +151,13 @@ class Strategy:
             ticker.exchange,
         )
 
+        if not self._risk_manager.can_open_trade(
+            balance=balance,
+            daily_loss_percent=0.0,
+            open_positions=self._position_manager.open_count(),
+        ):
+            return
+
         position_value = (
             self._risk_manager.calculate_position_size(
                 balance,
