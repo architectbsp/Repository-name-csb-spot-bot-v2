@@ -1,5 +1,9 @@
+import logging
+
 from app.core.scheduler.job import Job
 from app.core.exchange.models import ExchangeType
+
+logger = logging.getLogger(__name__)
 
 class MarketScanner:
     _DEPENDENCY_NAMES = (
@@ -176,6 +180,13 @@ class MarketScanner:
         symbols = self.fetch_symbols()
         eligible_symbols = self.filter_symbols(symbols)
         self._last_scan_result = eligible_symbols
+
+        logger.info(
+            "Market scan completed: fetched=%d eligible=%d",
+            len(symbols),
+            len(eligible_symbols),
+        )
+
         self.publish_scan_result(eligible_symbols)
         return eligible_symbols
 

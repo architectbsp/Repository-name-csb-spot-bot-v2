@@ -141,7 +141,11 @@ class BinancePriceStream(PriceStream):
 
         ticker = NormalizedTicker(
             exchange=ExchangeType.BINANCE,
-            symbol=data["s"],
+            symbol=(
+                f"{data['s'][:-4]}/USDT"
+                if data["s"].endswith("USDT")
+                else data["s"]
+            ),
             last_price=float(data["c"]),
             volume_24h=float(data["q"]),
             change_24h=float(data["P"]),
