@@ -34,11 +34,11 @@ def test_filter_symbols():
     scanner.set_config(make_config())
 
     symbols = [
-        SimpleNamespace(symbol="A", volume_24h=50),
-        SimpleNamespace(symbol="B", volume_24h=150),
+        SimpleNamespace(symbol="A/USDT", volume_24h=50),
+        SimpleNamespace(symbol="B/USDT", volume_24h=150),
     ]
 
     result = scanner.filter_symbols(symbols)
 
     assert len(result) == 1
-    assert result[0].symbol == "B"
+    assert result[0].symbol == "B/USDT"

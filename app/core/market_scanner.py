@@ -215,7 +215,10 @@ class MarketScanner:
         return [
             symbol
             for symbol in symbols
-            if symbol.volume_24h >= minimum_volume
+            if (
+                symbol.volume_24h >= minimum_volume
+                and symbol.symbol.endswith("/USDT")
+            )
         ]
 
     def __repr__(self) -> str:
