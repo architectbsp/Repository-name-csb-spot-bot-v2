@@ -15,6 +15,16 @@ def main(page: ft.Page):
 
     page.on_disconnect = lambda _: engine.stop()
 
+    page.window.prevent_close = True
+
+    async def on_window_event(e: ft.WindowEvent):
+        print(f"[WINDOW] {e.type}")
+        if e.type == ft.WindowEventType.CLOSE:
+            engine.stop()
+            await page.window.destroy()
+
+    page.window.on_event = on_window_event
+
     page.add(
         ft.Row(
             expand=True,

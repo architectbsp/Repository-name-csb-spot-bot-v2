@@ -49,7 +49,6 @@ class BinancePriceStream(PriceStream):
 
         self._thread = threading.Thread(
             target=self._run,
-            daemon=True,
             name="BinancePriceStream",
         )
 

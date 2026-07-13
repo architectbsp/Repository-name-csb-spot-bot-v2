@@ -179,6 +179,7 @@ class Strategy:
             trade,
         )
 
+
         if not result:
             return
 

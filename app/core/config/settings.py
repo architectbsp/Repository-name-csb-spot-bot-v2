@@ -9,23 +9,28 @@ load_dotenv()
 @dataclass(slots=True)
 class RiskSettings:
     max_daily_loss_percent: float = 20.0
-    max_open_positions: int = 10
+    max_open_positions: int = 15
     capital_per_trade_percent: float = 10.0
     cooldown_hours: int = 4
-    break_even_activation_percent: float = 10.0
-    stop_loss_percent: float = 5.0
-    trailing_activation_percent: float = 10.0
-    trailing_percent: float = 5.0
+
+    # Acceptance Test
+    break_even_activation_percent: float = 0.5
+    stop_loss_percent: float = 0.5
+    trailing_activation_percent: float = 1.0
+    trailing_percent: float = 0.3
 
 
 @dataclass(slots=True)
 class StrategySettings:
-    watch_percent: float = 2.5
-    entry_percent: float = 6.0
+    # Acceptance Test
+    watch_percent: float = 0.5
+    entry_percent: float = 0.3
+
     take_profit_activation: float = 10.0
-    stop_loss_percent: float = 5.0
-    trailing_percent: float = 5.0
-    min_volume_usd: float = 250_000.0
+    stop_loss_percent: float = 0.5
+    trailing_percent: float = 0.3
+
+    min_volume_usd: float = 10_000.0
     max_position_hours: int = 24
     scan_interval_seconds: int = 300
 

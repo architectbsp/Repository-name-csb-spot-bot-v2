@@ -23,3 +23,8 @@ dist/
 
 # Environment
 .env
+# Local database
+csb_spot_bot.db
+
+# Generated source dump
+project_source.txt

@@ -205,6 +205,11 @@ class BotEngine:
         print("Bot started")
 
     def stop(self):
+        if not self.running:
+            return
+
+        self.running = False
+
         for module in (
             self.market_scanner,
             self.watch_list,
@@ -221,5 +226,4 @@ class BotEngine:
 
         self.shutdown()
 
-        self.running = False
         print("Bot stopped")

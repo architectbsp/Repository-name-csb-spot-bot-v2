@@ -108,21 +108,30 @@ class RiskManager:
         open_positions: int,
     ) -> bool:
         if self.is_daily_loss_limit_reached(daily_loss_percent):
+            print("[RISK] reject: daily_loss_limit")
             return False
 
         if open_positions >= self._risk.max_open_positions:
+            print("[RISK] reject: max_open_positions")
             return False
 
         if not self.has_sufficient_balance(balance):
+            print("[RISK] reject: insufficient_balance")
             return False
 
+        print("[RISK] accept")
         return True
-
 
     def on_price_tick(
         self,
         ticker,
     ) -> None:
+        print(
+            "[DEPS]",
+            self._position_manager is None,
+            self._exchange_manager is None,
+        )
+
         if (
             self._position_manager is None
             or self._exchange_manager is None
@@ -159,15 +168,20 @@ class RiskManager:
 
         last_price = ticker.last_price
 
+        print(
+            f"[STOP CHECK] {position.symbol} "
+            f"last={last_price:.18f} "
+            f"stop={position.stop_price:.18f} "
+            f"cmp={last_price <= position.stop_price}"
+        )
+
         if last_price > position.stop_price:
             return
 
-        from decimal import Decimal
+        print(f"[SELL PATH] {position.symbol} last={last_price} stop={position.stop_price}")
 
-        from app.core.trading.models import (
-            TradeRequest,
-            TradeSide,
-        )
+        from decimal import Decimal
+        from app.core.trading.models import TradeRequest, TradeSide
 
         if position.state.name != "OPEN":
             return
@@ -178,18 +192,27 @@ class RiskManager:
             side=TradeSide.SELL,
         )
 
+        print(
+            f"[SELL TRY] {position.symbol} qty={position.quantity}"
+        )
+
         result = self._exchange_manager.execute_trade(
             ticker.exchange,
             trade,
         )
 
+        if result is not None:
+            print(
+                "[SELL STATUS]",
+                getattr(result, "status", None),
+                getattr(result, "average_price", None),
+                getattr(result, "filled_quantity", None),
+            )
+
         if result is None:
             return
 
-        if result.status not in {
-            "CLOSED",
-            "FILLED",
-        }:
+        if result.status not in {"CLOSED", "FILLED"}:
             return
 
         exit_price = result.average_price
@@ -202,7 +225,6 @@ class RiskManager:
             exit_price=exit_price,
             reason="STOP_LOSS",
         )
-
 
         if self._event_bus is not None:
             self._event_bus.publish(
@@ -244,9 +266,14 @@ class RiskManager:
         if profit < activation:
             return
 
+        current_highest = getattr(position, "highest_price", None)
+
+        if current_highest is None:
+            current_highest = ticker.last_price
+
         highest_price = max(
             ticker.last_price,
-            getattr(position, "highest_price", ticker.last_price),
+            current_highest,
         )
 
         position.highest_price = highest_price

@@ -223,14 +223,25 @@ class MarketScanner:
     def filter_symbols(self, symbols):
         minimum_volume = self._config.strategy.min_volume_usd
 
-        return [
-            symbol
-            for symbol in symbols
-            if (
-                symbol.volume_24h >= minimum_volume
-                and symbol.symbol.endswith("/USDT")
-            )
+        volume_filtered = [
+            s
+            for s in symbols
+            if s.volume_24h >= minimum_volume
         ]
+
+        usdt_filtered = [
+            s
+            for s in volume_filtered
+            if s.symbol.endswith("/USDT")
+        ]
+
+        print(
+            f"[Scanner] fetched={len(symbols)} "
+            f"volume={len(volume_filtered)} "
+            f"usdt={len(usdt_filtered)}"
+        )
+
+        return usdt_filtered
 
     def __repr__(self) -> str:
         return (

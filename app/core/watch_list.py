@@ -530,6 +530,7 @@ class WatchList:
         self.close_position(symbol)
 
     def handle_price_update(self, ticker) -> None:
+
         if not self.contains(ticker.symbol):
             return
 
@@ -572,6 +573,10 @@ class WatchList:
 
             if created:
                 added += 1
+
+        print(
+            f"[WatchList] added={added} total={self.size()}"
+        )
 
         return added
 
