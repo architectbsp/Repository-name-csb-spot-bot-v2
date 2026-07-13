@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from app.core.market_scanner import MarketScanner
@@ -21,6 +22,9 @@ from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
+
+
+logger = logging.getLogger(__name__)
 
 
 class BotEngine:
@@ -202,7 +206,7 @@ class BotEngine:
         self.start_price_stream()
 
         self.running = True
-        print("Bot started")
+        logger.info("BotEngine started successfully")
 
     def stop(self):
         if not self.running:
@@ -226,4 +230,4 @@ class BotEngine:
 
         self.shutdown()
 
-        print("Bot stopped")
+        logger.info("BotEngine stopped successfully")

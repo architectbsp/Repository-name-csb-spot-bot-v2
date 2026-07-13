@@ -1,3 +1,9 @@
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
 class RiskManager:
     _DEPENDENCY_NAMES = (
         "exchange",
@@ -108,28 +114,28 @@ class RiskManager:
         open_positions: int,
     ) -> bool:
         if self.is_daily_loss_limit_reached(daily_loss_percent):
-            print("[RISK] reject: daily_loss_limit")
+            logger.warning("[RISK] Trade rejected: daily_loss_limit reached")
             return False
 
         if open_positions >= self._risk.max_open_positions:
-            print("[RISK] reject: max_open_positions")
+            logger.warning("[RISK] Trade rejected: max_open_positions reached")
             return False
 
         if not self.has_sufficient_balance(balance):
-            print("[RISK] reject: insufficient_balance")
+            logger.warning("[RISK] Trade rejected: insufficient_balance")
             return False
 
-        print("[RISK] accept")
+        logger.debug("[RISK] Trade accepted")
         return True
 
     def on_price_tick(
         self,
         ticker,
     ) -> None:
-        print(
-            "[DEPS]",
-            self._position_manager is None,
-            self._exchange_manager is None,
+        logger.debug(
+            "[RISK] Dependencies check: position_manager=%s exchange_manager=%s",
+            self._position_manager is not None,
+            self._exchange_manager is not None,
         )
 
         if (
@@ -168,17 +174,18 @@ class RiskManager:
 
         last_price = ticker.last_price
 
-        print(
-            f"[STOP CHECK] {position.symbol} "
-            f"last={last_price:.18f} "
-            f"stop={position.stop_price:.18f} "
-            f"cmp={last_price <= position.stop_price}"
+        logger.debug(
+            "[STOP CHECK] symbol=%s last=%.8f stop=%.8f triggered=%s",
+            position.symbol,
+            last_price,
+            position.stop_price,
+            last_price <= position.stop_price,
         )
 
         if last_price > position.stop_price:
             return
 
-        print(f"[SELL PATH] {position.symbol} last={last_price} stop={position.stop_price}")
+        logger.info("[SELL TRIGGER] symbol=%s last=%.8f stop=%.8f", position.symbol, last_price, position.stop_price)
 
         from decimal import Decimal
         from app.core.trading.models import TradeRequest, TradeSide
@@ -192,9 +199,7 @@ class RiskManager:
             side=TradeSide.SELL,
         )
 
-        print(
-            f"[SELL TRY] {position.symbol} qty={position.quantity}"
-        )
+        logger.info("[SELL EXECUTE] symbol=%s quantity=%.8f", position.symbol, position.quantity)
 
         result = self._exchange_manager.execute_trade(
             ticker.exchange,
@@ -202,17 +207,19 @@ class RiskManager:
         )
 
         if result is not None:
-            print(
-                "[SELL STATUS]",
+            logger.debug(
+                "[SELL STATUS] status=%s price=%.8f filled=%.8f",
                 getattr(result, "status", None),
-                getattr(result, "average_price", None),
-                getattr(result, "filled_quantity", None),
+                getattr(result, "average_price", None) or 0.0,
+                getattr(result, "filled_quantity", None) or 0.0,
             )
 
         if result is None:
+            logger.error("[SELL FAILED] No result from exchange")
             return
 
         if result.status not in {"CLOSED", "FILLED"}:
+            logger.warning("[SELL INCOMPLETE] status=%s", result.status)
             return
 
         exit_price = result.average_price
@@ -250,10 +257,12 @@ class RiskManager:
 
         if position.stop_price is None:
             position.stop_price = position.entry_price
+            logger.debug("[BREAK-EVEN] Activated for %s", position.symbol)
             return
 
         if position.stop_price < position.entry_price:
             position.stop_price = position.entry_price
+            logger.debug("[BREAK-EVEN] Updated for %s", position.symbol)
 
     def check_trailing(self, position, ticker) -> None:
         activation = self._risk.trailing_activation_percent
@@ -287,3 +296,4 @@ class RiskManager:
             or trailing_stop > position.stop_price
         ):
             position.stop_price = trailing_stop
+            logger.debug("[TRAILING] Updated for %s to %.8f", position.symbol, trailing_stop)
