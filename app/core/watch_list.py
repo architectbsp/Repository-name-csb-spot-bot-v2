@@ -135,6 +135,23 @@ class WatchList:
         with self._lock:
             return sorted(self._coins.keys())
 
+    def list_by_states(
+        self,
+        states: set[WatchState] | frozenset[WatchState],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """
+        Sprint 12 -- Live Dashboard: returns a deep-copied snapshot of
+        every coin currently in one of `states`, sorted by symbol. The
+        UI never reads `_coins` directly; this is the only supported way
+        to bulk-enumerate watch/cooldown rows for a panel.
+        """
+        with self._lock:
+            return [
+                (symbol, deepcopy(coin))
+                for symbol, coin in sorted(self._coins.items())
+                if coin["state"] in states
+            ]
+
     def sync_price_stream(self) -> None:
         if self._exchange is None:
             return

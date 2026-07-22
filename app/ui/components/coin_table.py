@@ -2,20 +2,12 @@ import logging
 
 import flet as ft
 
+from app.core.domain.dashboard import CoinRow, DashboardSnapshot
 from app.ui.components.coin_chart import open_coin_chart_dialog
+from app.ui.formatting import signed_percent, volume_short
 
 
 logger = logging.getLogger(__name__)
-
-HEADERS = [
-    (1, "#"),
-    (4, "COIN"),
-    (3, "SON FİYAT"),
-    (2, "24H %"),
-    (3, "24H HACİM"),
-    (2, "SİNYAL"),
-    (2, "DURUM"),
-]
 
 
 def _toolbar():
@@ -71,7 +63,6 @@ def _toolbar():
     )
 
 
-
 def _cell(width, text, color, align=ft.TextAlign.LEFT):
     return ft.Container(
         width=width,
@@ -104,13 +95,14 @@ def _header():
 
 
 def _row(idx, coin, price, change, volume, signal, status, on_click=None):
-    change_color = "#22C55E" if change.startswith("+") else "#EF4444"
+    change_color = "#22C55E" if str(change).startswith("+") else "#EF4444"
 
     signal_color = {
         "BUY": "#22C55E",
         "SELL": "#EF4444",
         "WAIT": "#F59E0B",
-    }[signal]
+        "HOLD": "#3B82F6",
+    }.get(signal, "#94A3B8")
 
     return ft.Container(
         height=42,
@@ -135,12 +127,6 @@ def _row(idx, coin, price, change, volume, signal, status, on_click=None):
 
 
 def _open_chart(engine, page, symbol) -> None:
-    """
-    Sprint 6 -- "coin'e tıklayınca grafik göster". `engine` is None in
-    headless contexts (tests, or a dashboard built before BotEngine
-    finished connecting) -- silently no-ops rather than crashing the
-    click handler.
-    """
     if engine is None or page is None:
         return
 
@@ -153,17 +139,39 @@ def _open_chart(engine, page, symbol) -> None:
     open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
 
 
-def build_coin_table(engine=None, page=None):
-    rows = [
-        (1, "BTC/USDT", "66,812.50", "+23%", "25B", "BUY", "READY"),
-        (2, "ETH/USDT", "3,254.08", "+2.11%", "987M", "BUY", "READY"),
-        (3, "SOL/USDT", "159.32", "+3.45%", "456M", "BUY", "READY"),
-        (4, "XRP/USDT", "1972", "-0.45%", "345M", "SELL", "ALERT"),
-        (5, "DOGE/USDT", "0.1523", "+1.02%", "289M", "BUY", "READY"),
-        (6, "ADA/USDT", "1831", "+0.76%", "234M", "BUY", "READY"),
-        (7, "AVAX/USDT", "34.21", "+2.34%", "198M", "BUY", "READY"),
-        (8, "DOT/USDT", "6.824", "+0.18%", "176M", "BUY", "READY"),
-    ]
+def build_coin_table(
+    engine=None,
+    page=None,
+    snapshot: DashboardSnapshot | None = None,
+):
+    coins: list[CoinRow] = list(snapshot.coins) if snapshot else []
+
+    if coins:
+        row_controls = [
+            _row(
+                idx,
+                coin.symbol,
+                coin.price_display,
+                signed_percent(coin.change_24h_percent),
+                volume_short(coin.volume_24h),
+                coin.signal,
+                coin.status,
+                on_click=(
+                    (lambda _, symbol=coin.symbol: _open_chart(engine, page, symbol))
+                    if engine is not None and page is not None
+                    else None
+                ),
+            )
+            for idx, coin in enumerate(coins[:20], start=1)
+        ]
+    else:
+        row_controls = [
+            ft.Text(
+                "Henüz izlenen coin yok — scanner çalışınca dolacak.",
+                color="#64748B",
+                size=12,
+            )
+        ]
 
     return ft.Container(
         expand=True,
@@ -172,20 +180,11 @@ def build_coin_table(engine=None, page=None):
         padding=15,
         content=ft.Column(
             spacing=8,
+            scroll=ft.ScrollMode.AUTO,
             controls=[
                 _toolbar(),
                 _header(),
-                *(
-                    _row(
-                        *row,
-                        on_click=(
-                            (lambda _, symbol=row[1]: _open_chart(engine, page, symbol))
-                            if engine is not None and page is not None
-                            else None
-                        ),
-                    )
-                    for row in rows
-                ),
+                *row_controls,
             ],
         ),
     )

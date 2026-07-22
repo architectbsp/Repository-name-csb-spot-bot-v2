@@ -1,5 +1,8 @@
 import flet as ft
 
+from app.core.domain.dashboard import DashboardSnapshot, TradeHistoryRow
+from app.ui.formatting import signed_percent
+
 
 def _row(symbol, direction, pnl, result):
     color = "#22C55E" if result == "KÂR" else "#EF4444"
@@ -15,7 +18,23 @@ def _row(symbol, direction, pnl, result):
     )
 
 
-def build_trade_history():
+def build_trade_history(snapshot: DashboardSnapshot | None = None):
+    rows: list[TradeHistoryRow] = list(snapshot.trade_history) if snapshot else []
+    count = str(len(rows))
+    body = (
+        [
+            _row(
+                r.symbol,
+                "LONG",
+                signed_percent(r.pnl_percent),
+                r.result,
+            )
+            for r in rows[:8]
+        ]
+        if rows
+        else [ft.Text("Henüz kapanmış işlem yok", color="#64748B", size=12)]
+    )
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -39,20 +58,10 @@ def build_trade_history():
                             size=15,
                             weight=ft.FontWeight.BOLD,
                         ),
-                        ft.Text("10", color="#C5CDD8"),
+                        ft.Text(count, color="#C5CDD8"),
                     ],
                 ),
-                _row("EOS/USDT", "LONG", "+7.95%", "KÂR"),
-                _row("CHZ/USDT", "LONG", "+5.51%", "KÂR"),
-                _row("LDO/USDT", "LONG", "+4.71%", "KÂR"),
-                _row("FTM/USDT", "LONG", "-4.95%", "STOP"),
-                _row("ELF/USDT", "LONG", "-4.90%", "STOP"),
-                ft.Divider(height=10, color="#1B2435"),
-                ft.Text(
-                    "Tüm Geçmişi Görüntüle",
-                    color="#C5CDD8",
-                    text_align=ft.TextAlign.CENTER,
-                ),
+                *body,
             ],
         ),
     )

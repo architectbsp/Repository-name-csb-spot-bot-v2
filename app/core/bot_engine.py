@@ -20,6 +20,7 @@ from app.core.exchange.factory import create_exchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.chart_service import ChartService
+from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.performance_analytics import PerformanceAnalytics
 from app.core.services.trade_journal import TradeJournal
@@ -160,6 +161,20 @@ class BotEngine:
 
         self.watch_list.set_strategy(self.strategy)
 
+        # Sprint 12 -- Live Dashboard: read-only snapshot aggregator the
+        # Flet UI polls every couple of seconds. Also caches ticker.updated
+        # so panels never REST-fetch prices on each refresh. Wired after
+        # risk_manager/strategy so every dependency is already constructed.
+        self.dashboard_service = DashboardService()
+        self.dashboard_service.set_exchange_manager(self.exchange)
+        self.dashboard_service.set_position_manager(self.position_manager)
+        self.dashboard_service.set_watch_list(self.watch_list)
+        self.dashboard_service.set_trade_journal(self.trade_journal)
+        self.dashboard_service.set_risk_manager(self.risk_manager)
+        self.dashboard_service.set_market_scanner(self.market_scanner)
+        self.dashboard_service.set_config(self.config)
+        self.dashboard_service.set_bot_running_fn(lambda: self.running)
+
     def start_price_stream(self) -> None:
         self.exchange.start_price_stream(
             self.exchange.active_exchange_type(),
@@ -194,6 +209,11 @@ class BotEngine:
         self.event_bus.subscribe(
             "ticker.updated",
             self.risk_manager.on_price_tick,
+        )
+
+        self.event_bus.subscribe(
+            "ticker.updated",
+            self.dashboard_service.on_ticker_updated,
         )
 
         self.event_bus.subscribe(

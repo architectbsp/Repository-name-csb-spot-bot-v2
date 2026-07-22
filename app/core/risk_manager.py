@@ -283,6 +283,16 @@ class RiskManager:
         loss = max(0.0, -self._realized_pnl_today)
         return (loss / self._day_start_balance) * 100
 
+    def realized_pnl_today(self) -> float:
+        """Sprint 12 -- signed realized PnL accumulated since the UTC
+        day boundary (positive = profit, negative = loss)."""
+        return self._realized_pnl_today
+
+    def day_start_balance(self) -> float | None:
+        """Sprint 12 -- treasury snapshot taken at the start of the
+        current UTC trading day, or None before the first sync."""
+        return self._day_start_balance
+
     def _record_realized_pnl(self, pnl: float) -> None:
         self._realized_pnl_today += pnl
 

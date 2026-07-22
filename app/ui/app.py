@@ -1,27 +1,27 @@
 import logging
+import threading
 
 import ccxt
 import flet as ft
 
 from app.core.bot_engine import BotEngine
-
-from app.ui.theme import setup_page
-from app.ui.components.sidebar import DASHBOARD, SETTINGS, build_sidebar
 from app.ui.components.content import build_dashboard_view
 from app.ui.components.settings_panel import build_settings_view
+from app.ui.components.sidebar import DASHBOARD, SETTINGS, build_sidebar
+from app.ui.theme import setup_page
 
 
 logger = logging.getLogger(__name__)
 
+# How often the live dashboard rebuilds itself from DashboardService.
+# Short enough to feel real-time for positions/watch state; long enough
+# that we never REST-spam (ticker prices come from the in-memory cache
+# fed by ticker.updated, not from a balance/ticker REST call every tick
+# -- only quote_balance hits the exchange, and that is best-effort).
+_DASHBOARD_POLL_SECONDS = 2.0
+
 
 def _describe_startup_error(error: Exception) -> tuple[str, str]:
-    """
-    Maps a BotEngine.start() failure to a user-facing (title, message)
-    pair. ccxt.AuthenticationError covers bad/missing API keys;
-    ccxt.NetworkError covers DNS/connection/timeout failures talking to
-    the exchange; anything else is shown generically rather than
-    crashing the app silently (B25).
-    """
     if isinstance(error, ccxt.AuthenticationError):
         return (
             "Kimlik Doğrulama Hatası",
@@ -61,12 +61,6 @@ def _show_startup_error_dialog(page: ft.Page, error: Exception) -> None:
 
 
 def _start_engine_in_background(page: ft.Page, engine: BotEngine) -> None:
-    """
-    Runs the blocking BotEngine.start() (exchange connect + REST market
-    scan) off the Flet UI event loop (B25). Any failure is logged and
-    surfaced to the user as a dialog instead of silently freezing the UI
-    or crashing the background thread unnoticed.
-    """
     try:
         engine.start()
     except Exception as exc:
@@ -74,19 +68,26 @@ def _start_engine_in_background(page: ft.Page, engine: BotEngine) -> None:
         _show_startup_error_dialog(page, exc)
 
 
-def _build_view(view_name: str, engine: BotEngine, page: ft.Page) -> ft.Control:
+def _build_view(
+    view_name: str,
+    engine: BotEngine,
+    page: ft.Page,
+):
     if view_name == SETTINGS:
         return build_settings_view(engine.config, engine.settings_store)
 
-    return build_dashboard_view(engine, page)
+    snapshot = engine.dashboard_service.build_snapshot()
+    return build_dashboard_view(engine, page, snapshot)
 
 
 def main(page: ft.Page):
     setup_page(page)
 
     engine = BotEngine()
+    stop_event = threading.Event()
+    current_view = {"name": DASHBOARD}
 
-    page.on_disconnect = lambda _: engine.stop()
+    page.on_disconnect = lambda _: (stop_event.set(), engine.stop())
 
     page.window.prevent_close = True
 
@@ -94,6 +95,7 @@ def main(page: ft.Page):
         logger.debug("[WINDOW] Event: %s", e.type)
         if e.type == ft.WindowEventType.CLOSE:
             logger.info("[WINDOW] Close requested")
+            stop_event.set()
             engine.stop()
             await page.window.destroy()
 
@@ -107,6 +109,7 @@ def main(page: ft.Page):
     sidebar_area = ft.Container()
 
     def navigate(view_name: str) -> None:
+        current_view["name"] = view_name
         sidebar_area.content = build_sidebar(view_name, navigate)
         content_area.content = _build_view(view_name, engine, page)
         sidebar_area.update()
@@ -125,8 +128,25 @@ def main(page: ft.Page):
         )
     )
 
-    # engine.start() performs blocking network I/O (exchange connect +
-    # initial REST market scan). Running it on the page's executor thread
-    # (rather than inline here) keeps the Flet UI responsive while it
-    # happens.
+    def _refresh_dashboard_loop() -> None:
+        """
+        Sprint 12 -- Live Dashboard poller. Runs off the Flet UI thread
+        (page.run_thread). Rebuilds the dashboard view from a fresh
+        DashboardSnapshot every couple of seconds while the user is on
+        the Dashboard screen; Settings and other views are left alone.
+        """
+        while not stop_event.wait(_DASHBOARD_POLL_SECONDS):
+            if current_view["name"] != DASHBOARD:
+                continue
+
+            try:
+                snapshot = engine.dashboard_service.build_snapshot()
+                content_area.content = build_dashboard_view(
+                    engine, page, snapshot
+                )
+                content_area.update()
+            except Exception:
+                logger.exception("Live dashboard refresh failed")
+
     page.run_thread(_start_engine_in_background, page, engine)
+    page.run_thread(_refresh_dashboard_loop)

@@ -2,7 +2,9 @@ import logging
 
 import flet as ft
 
+from app.core.domain.dashboard import DashboardSnapshot, OpenPositionRow
 from app.ui.components.coin_chart import open_coin_chart_dialog
+from app.ui.formatting import signed_percent
 
 
 logger = logging.getLogger(__name__)
@@ -22,8 +24,12 @@ def _badge(text, color):
     )
 
 
-def _position(symbol, side, entry, current, pnl, on_click=None):
-    pnl_color = "#22C55E" if pnl.startswith("+") else "#EF4444"
+def _position(symbol, side, entry, current, pnl, stage, on_click=None):
+    pnl_color = (
+        "#22C55E"
+        if str(pnl).startswith("+")
+        else ("#EF4444" if str(pnl).startswith("-") else "#94A3B8")
+    )
     side_color = "#22C55E" if side == "LONG" else "#EF4444"
 
     return ft.Container(
@@ -39,7 +45,13 @@ def _position(symbol, side, entry, current, pnl, on_click=None):
                     spacing=2,
                     controls=[
                         ft.Text(symbol, color="#FFFFFF", weight=ft.FontWeight.BOLD),
-                        _badge(side, side_color),
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                _badge(side, side_color),
+                                _badge(stage, "#3B82F6"),
+                            ],
+                        ),
                     ],
                 ),
                 ft.Column(
@@ -62,9 +74,6 @@ def _position(symbol, side, entry, current, pnl, on_click=None):
 
 
 def _open_chart(engine, page, symbol) -> None:
-    """Sprint 6 -- "coin'e tıklayınca grafik göster". Silently no-ops
-    without a live `engine`/`page` (headless/tests, or before BotEngine
-    finishes connecting)."""
     if engine is None or page is None:
         return
 
@@ -77,18 +86,38 @@ def _open_chart(engine, page, symbol) -> None:
     open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
 
 
-def build_open_positions(engine=None, page=None):
-    positions = [
-        ("BTCUSDT", "LONG", "118100", "118420", "+0.27%"),
-        ("ETHUSDT", "SHORT", "3940", "3920", "+0.51%"),
-        ("SOLUSDT", "LONG", "180", "184", "+2.22%"),
-    ]
+def build_open_positions(
+    engine=None,
+    page=None,
+    snapshot: DashboardSnapshot | None = None,
+):
+    positions: list[OpenPositionRow] = (
+        list(snapshot.open_positions) if snapshot else []
+    )
 
     handler_factory = (
         (lambda symbol: (lambda _: _open_chart(engine, page, symbol)))
         if engine is not None and page is not None
         else (lambda symbol: None)
     )
+
+    if positions:
+        cards = [
+            _position(
+                p.symbol,
+                "LONG",
+                f"{p.entry_price:g}",
+                f"{p.current_price:g}" if p.current_price is not None else "-",
+                signed_percent(p.pnl_percent),
+                p.stop_stage,
+                on_click=handler_factory(p.symbol),
+            )
+            for p in positions
+        ]
+    else:
+        cards = [
+            ft.Text("Açık pozisyon yok", color="#64748B", size=12),
+        ]
 
     return ft.Container(
         expand=True,
@@ -97,6 +126,7 @@ def build_open_positions(engine=None, page=None):
         padding=18,
         content=ft.Column(
             spacing=10,
+            scroll=ft.ScrollMode.AUTO,
             controls=[
                 ft.Text(
                     "OPEN POSITIONS",
@@ -104,10 +134,7 @@ def build_open_positions(engine=None, page=None):
                     weight=ft.FontWeight.BOLD,
                     color="#FFFFFF",
                 ),
-                *(
-                    _position(*position, on_click=handler_factory(position[0]))
-                    for position in positions
-                ),
+                *cards,
             ],
         ),
     )

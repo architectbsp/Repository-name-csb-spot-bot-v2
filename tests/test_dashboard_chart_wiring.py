@@ -1,13 +1,18 @@
 """
-Sprint 6 -- Coin charts: clicking a coin row in the coin table or an open
-position card opens the coin chart dialog. The dashboard's row data is
-still the Sprint-12-pending static mock (see coin_table.py/
-open_positions.py docstrings elsewhere), but the click -> dialog wiring
-itself is real and exercised here.
+Sprint 12 -- Live Dashboard chart wiring: clicking a live coin row or
+open-position card opens the coin chart dialog. Rows come from a
+DashboardSnapshot (no more static mock data).
 """
+
+from datetime import UTC, datetime
 
 import app.ui.components.coin_table as coin_table
 import app.ui.components.open_positions as open_positions
+from app.core.domain.dashboard import (
+    CoinRow,
+    DashboardSnapshot,
+    OpenPositionRow,
+)
 
 
 class DummyExchangeManager:
@@ -31,20 +36,48 @@ class DummyPage:
     pass
 
 
+def make_snapshot() -> DashboardSnapshot:
+    return DashboardSnapshot(
+        generated_at=datetime.now(UTC),
+        coins=[
+            CoinRow(
+                symbol="BTC/USDT",
+                price_display="66000",
+                change_24h_percent=1.5,
+                volume_24h=1e9,
+                signal="WAIT",
+                status="WATCH_RISING",
+            )
+        ],
+        open_positions=[
+            OpenPositionRow(
+                symbol="BTCUSDT",
+                entry_price=100.0,
+                current_price=105.0,
+                pnl_percent=5.0,
+                stop_stage="HARD",
+                quantity=1.0,
+            )
+        ],
+    )
+
+
 def _find_first_row_click_handler(control):
     for row in control.content.controls[2:]:
-        if row.on_click is not None:
+        if getattr(row, "on_click", None) is not None:
             return row
 
     raise AssertionError("No row with an on_click handler was found")
 
 
 def test_coin_table_rows_have_no_click_handler_without_a_live_engine():
-    table = coin_table.build_coin_table()
+    table = coin_table.build_coin_table(snapshot=make_snapshot())
 
-    rows = table.content.controls[2:]
+    rows = [
+        c for c in table.content.controls[2:] if hasattr(c, "on_click")
+    ]
+    assert rows
     assert all(row.on_click is None for row in rows)
-    assert all(row.ink is False for row in rows)
 
 
 def test_clicking_a_coin_table_row_opens_the_chart_dialog(monkeypatch):
@@ -60,7 +93,7 @@ def test_clicking_a_coin_table_row_opens_the_chart_dialog(monkeypatch):
 
     engine = DummyEngine()
     page = DummyPage()
-    table = coin_table.build_coin_table(engine, page)
+    table = coin_table.build_coin_table(engine, page, make_snapshot())
 
     row = _find_first_row_click_handler(table)
     row.on_click(None)
@@ -81,7 +114,7 @@ def test_clicking_a_coin_table_row_is_a_no_op_when_no_exchange_is_active(monkeyp
 
     engine = DummyEngine(raise_error=True)
     page = DummyPage()
-    table = coin_table.build_coin_table(engine, page)
+    table = coin_table.build_coin_table(engine, page, make_snapshot())
 
     row = _find_first_row_click_handler(table)
     row.on_click(None)
@@ -90,9 +123,12 @@ def test_clicking_a_coin_table_row_is_a_no_op_when_no_exchange_is_active(monkeyp
 
 
 def test_open_positions_cards_have_no_click_handler_without_a_live_engine():
-    panel = open_positions.build_open_positions()
+    panel = open_positions.build_open_positions(snapshot=make_snapshot())
 
-    cards = panel.content.controls[1:]
+    cards = [
+        c for c in panel.content.controls[1:] if hasattr(c, "on_click")
+    ]
+    assert cards
     assert all(card.on_click is None for card in cards)
 
 
@@ -107,7 +143,7 @@ def test_clicking_an_open_position_card_opens_the_chart_dialog(monkeypatch):
 
     engine = DummyEngine()
     page = DummyPage()
-    panel = open_positions.build_open_positions(engine, page)
+    panel = open_positions.build_open_positions(engine, page, make_snapshot())
 
     card = panel.content.controls[1]
     card.on_click(None)

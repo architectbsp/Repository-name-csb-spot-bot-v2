@@ -1,4 +1,12 @@
+from datetime import datetime
+
 import flet as ft
+
+from app.core.domain.dashboard import DashboardSnapshot
+from app.core.exchange.models import ExchangeType
+
+
+_EXCHANGES = [e.name for e in ExchangeType]
 
 
 def _status_box(title, value, color="#22C55E"):
@@ -88,7 +96,29 @@ def _exchange(name, active=False):
     )
 
 
-def build_top_bar():
+def build_top_bar(snapshot: DashboardSnapshot | None = None):
+    if snapshot is None:
+        bot = "OFFLINE"
+        bot_color = "#EF4444"
+        api = "DISCONNECTED"
+        api_color = "#EF4444"
+        exchange = "-"
+        # Until a real probe exists, mirror API connectivity as a
+        # best-effort "internet" signal (no separate connectivity check).
+        internet = "UNKNOWN"
+        internet_color = "#94A3B8"
+    else:
+        bot = "ONLINE" if snapshot.bot_running else "OFFLINE"
+        bot_color = "#22C55E" if snapshot.bot_running else "#EF4444"
+        api = "CONNECTED" if snapshot.api_connected else "DISCONNECTED"
+        api_color = "#22C55E" if snapshot.api_connected else "#EF4444"
+        exchange = snapshot.exchange_name
+        internet = "ONLINE" if snapshot.api_connected else "CHECK"
+        internet_color = "#22C55E" if snapshot.api_connected else "#F59E0B"
+
+    now = datetime.now().strftime("%H:%M")
+    active_exchange = (snapshot.exchange_name if snapshot else "").upper()
+
     return ft.Column(
         spacing=12,
         controls=[
@@ -98,11 +128,11 @@ def build_top_bar():
                     ft.Row(
                         spacing=10,
                         controls=[
-                            _status_box("BOT", "READY"),
-                            _status_box("INTERNET", "ONLINE"),
-                            _status_box("API", "CONNECTED"),
-                            _status_box("EXCHANGE", "BYBIT", "#FFFFFF"),
-                            _status_box("TIME", "16:53", "#FFFFFF"),
+                            _status_box("BOT", bot, bot_color),
+                            _status_box("INTERNET", internet, internet_color),
+                            _status_box("API", api, api_color),
+                            _status_box("EXCHANGE", exchange, "#FFFFFF"),
+                            _status_box("TIME", now, "#FFFFFF"),
                         ],
                     ),
                     ft.Row(
@@ -122,11 +152,8 @@ def build_top_bar():
                     ft.Row(
                         spacing=10,
                         controls=[
-                            _exchange("BINANCE"),
-                            _exchange("KRAKEN"),
-                            _exchange("MEXC"),
-                            _exchange("BYBIT", True),
-                            _exchange("OKX"),
+                            _exchange(name, active=(name == active_exchange))
+                            for name in _EXCHANGES
                         ],
                     ),
                 ],

@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.6
+Version: 2.7
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -62,6 +62,13 @@ activation) / Trailing-shadow overlay levels and Entry/Exit point
 markers, sourced from the open Position or, once closed, the most
 recent Trade Journal entry for that symbol. Read-only, drawn with Flet's
 built-in canvas (no new charting dependency).
+
+Changelog (2.6 -> 2.7): replaced every hardcoded mock panel on the
+desktop dashboard with a live `DashboardSnapshot` (§8) rebuilt every
+~2s from BotEngine modules (positions, watch/cooldown, trade journal,
+daily PnL, quote balance, in-memory log tail). Ticker prices for the UI
+come from an in-memory cache fed by `ticker.updated` (plus the last
+MarketScanner result) -- the poll never REST-fetches every coin's price.
 
 ---
 
@@ -626,6 +633,40 @@ Entry/Exit point markers) using Flet's built-in `flet.canvas` -- no
 external charting/plotting dependency was added, consistent with the
 minimal pinned-dependency policy (§10/B29). Clicking a coin row in the
 coin table or an open-position card opens this chart in a modal dialog.
+
+## Live Dashboard
+
+`DashboardService` (`app/core/services/dashboard_service.py`) assembles
+a single read-only `DashboardSnapshot` for the Flet UI. Panels never
+poke PositionManager / WatchList / RiskManager directly -- they only
+render this DTO.
+
+Snapshot contents:
+
+- **Account / top bar**: active exchange name, testnet vs live, quote
+  balance, bot running flag, API connection status
+  (`ConnectionStatus.CONNECTED` on the enabled exchange).
+- **Cards**: portfolio balance, signed daily realized PnL % (from
+  RiskManager's UTC day-start balance + realized PnL today), open
+  position count, active watch-signal count.
+- **Coin table / open positions**: watch-list coins + open positions,
+  enriched with last-known ticker (raw price string preferred, §9).
+  Unrealized PnL % = `(last - entry) / entry * 100`. Spot side is
+  always LONG.
+- **Watch list / cooldown**: coins in `WATCH_FALLING` /
+  `WATCH_RISING` / `BUY_PENDING`, and coins in `COOLDOWN` with
+  remaining time.
+- **Trade history / 24h report**: closed Trade Journal entries
+  (history panel) and a 24-hour window aggregate (wins/losses/net PnL).
+- **Live log**: tail of an in-memory ring buffer (`MemoryLogHandler`)
+  attached to the root logger -- no disk re-read on every poll.
+
+Refresh model: a background Flet `page.run_thread` poll (~2s) rebuilds
+the Dashboard view while the user is on that screen. High-frequency
+`ticker.updated` events only update the DashboardService ticker cache
+(never mutate UI controls from the WebSocket thread). Quote balance is
+the only REST call on a poll tick and is best-effort (failures leave
+the previous/None value).
 
 ---
 
