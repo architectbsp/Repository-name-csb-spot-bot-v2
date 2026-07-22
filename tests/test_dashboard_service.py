@@ -208,7 +208,7 @@ def test_build_snapshot_report_24h_only_counts_recent_closed_trades():
         status=STATUS_CLOSED,
         exit_time=now - timedelta(minutes=30),
         exit_price=9.0,
-        exit_reason="HARD_STOP",
+        exit_reason="STOP_LOSS",
         pnl=-2.0,
         pnl_percent=-10.0,
     )

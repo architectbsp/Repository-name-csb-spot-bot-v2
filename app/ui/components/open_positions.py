@@ -92,6 +92,50 @@ def _open_chart(engine, page, symbol, exchange_name: str | None = None) -> None:
     open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
 
 
+def _emergency_exit(engine, page) -> None:
+    if engine is None or page is None:
+        return
+
+    def _confirm(_):
+        try:
+            closed = engine.risk_manager.emergency_exit_all()
+            page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Emergency Exit: {closed} pozisyon kapatıldı"),
+            )
+        except Exception:
+            logger.exception("Emergency Exit failed")
+            page.snack_bar = ft.SnackBar(
+                content=ft.Text("Emergency Exit başarısız — loglara bakın"),
+            )
+        page.snack_bar.open = True
+        dialog.open = False
+        page.update()
+
+    def _cancel(_):
+        dialog.open = False
+        page.update()
+
+    dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Emergency Exit"),
+        content=ft.Text(
+            "Tüm açık pozisyonlar pazar emriyle kapatılacak. Emin misiniz?"
+        ),
+        actions=[
+            ft.TextButton("İptal", on_click=_cancel),
+            ft.TextButton(
+                "Kapat",
+                on_click=_confirm,
+                style=ft.ButtonStyle(color="#EF4444"),
+            ),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+    page.overlay.append(dialog)
+    dialog.open = True
+    page.update()
+
+
 def build_open_positions(
     engine=None,
     page=None,
@@ -129,6 +173,30 @@ def build_open_positions(
             ft.Text("Açık pozisyon yok", color="#64748B", size=12),
         ]
 
+    header = ft.Row(
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Text(
+                "OPEN POSITIONS",
+                size=18,
+                weight=ft.FontWeight.BOLD,
+                color="#FFFFFF",
+            ),
+            ft.OutlinedButton(
+                "Emergency Exit",
+                icon=ft.Icons.WARNING_AMBER,
+                style=ft.ButtonStyle(color="#EF4444"),
+                disabled=engine is None or page is None or not positions,
+                on_click=(
+                    (lambda _: _emergency_exit(engine, page))
+                    if engine is not None and page is not None
+                    else None
+                ),
+            ),
+        ],
+    )
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -138,12 +206,7 @@ def build_open_positions(
             spacing=10,
             scroll=ft.ScrollMode.AUTO,
             controls=[
-                ft.Text(
-                    "OPEN POSITIONS",
-                    size=18,
-                    weight=ft.FontWeight.BOLD,
-                    color="#FFFFFF",
-                ),
+                header,
                 *cards,
             ],
         ),

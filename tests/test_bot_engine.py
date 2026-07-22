@@ -9,3 +9,5 @@ def test_bot_engine_creation():
     assert engine.watch_list is not None
     assert engine.risk_manager is not None
     assert engine.strategy is not None
+    assert engine.position_reconciler is not None
+    assert engine.retry_policy.backoff_factor() == 2.0

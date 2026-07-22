@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 _STOP_REASONS = frozenset(
     {
-        "HARD_STOP",
+        "STOP_LOSS",
+        "HARD_STOP",  # legacy alias
         "BREAK_EVEN_STOP",
         "TRAILING_STOP",
-        "STOP_LOSS",
     }
 )
 

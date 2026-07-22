@@ -24,6 +24,7 @@ from app.core.services.chart_service import ChartService
 from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.performance_analytics import PerformanceAnalytics
+from app.core.services.position_reconciler import PositionReconciler
 from app.core.services.telegram_client import TelegramClient
 from app.core.services.telegram_notifier import TelegramNotifier
 from app.core.services.trade_journal import TradeJournal
@@ -67,6 +68,8 @@ class BotEngine:
         self.retry_policy = RetryPolicy(
             self.config.retry_policy.max_attempts,
             self.config.retry_policy.delay,
+            backoff_factor=2.0,
+            max_delay=300.0,
         )
         self.timeout = Timeout(
             self.config.timeout.seconds,
@@ -200,6 +203,13 @@ class BotEngine:
         self.telegram_notifier.set_risk_manager(self.risk_manager)
         self.telegram_notifier.set_position_manager(self.position_manager)
 
+        # Balance ↔ local OPEN positions sync (Unknown Order / DB drift).
+        self.position_reconciler = PositionReconciler()
+        self.position_reconciler.set_exchange_manager(self.exchange)
+        self.position_reconciler.set_position_manager(self.position_manager)
+        self.position_reconciler.set_event_bus(self.event_bus)
+        self.position_reconciler.set_scheduler(self.scheduler)
+
     def start_price_stream(self) -> None:
         # Per-venue streams only (isolation): never subscribe exchange A's
         # symbols on exchange B's websocket.
@@ -279,6 +289,11 @@ class BotEngine:
             self.risk_manager.on_config_updated,
         )
 
+        # OrderExecution is built lazily; attach it before reconciler init.
+        self.position_reconciler.set_order_execution(
+            self.risk_manager.order_execution,
+        )
+
         for module in (
             self.market_scanner,
             self.watch_list,
@@ -286,6 +301,7 @@ class BotEngine:
             self.risk_manager,
             self.strategy,
             self.telegram_notifier,
+            self.position_reconciler,
         ):
             module.initialize()
 
@@ -294,6 +310,7 @@ class BotEngine:
 
     def shutdown(self):
         for module in (
+            self.position_reconciler,
             self.telegram_notifier,
             self.market_scanner,
             self.watch_list,
@@ -313,6 +330,7 @@ class BotEngine:
             self.risk_manager,
             self.strategy,
             self.telegram_notifier,
+            self.position_reconciler,
         ):
             module.start()
 
@@ -334,6 +352,7 @@ class BotEngine:
         self.running = False
 
         for module in (
+            self.position_reconciler,
             self.telegram_notifier,
             self.market_scanner,
             self.watch_list,

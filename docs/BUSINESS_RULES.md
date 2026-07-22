@@ -32,8 +32,8 @@ Changelog (2.2 -> 2.3): added Position Lifecycle management (§8) --
 Partial Take Profit / Scale Out (configurable, disabled by default),
 Manual Close and Emergency Exit, all routed through the same
 OrderExecutionService pipeline as every other exit; close_reason is now
-stage-aware (HARD_STOP/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL_CLOSE/
-EMERGENCY_EXIT/MAX_DURATION) instead of a single generic "STOP_LOSS"
+stage-aware (STOP_LOSS/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL/
+EMERGENCY/MAX_DURATION) via the `CloseReason` enum
 label; `position.pnl` on a fully-closed position now reflects the total
 realized PnL across all partial exits plus the final exit, not just the
 last chunk; added a lightweight additive SQLite schema-sync so a
@@ -555,13 +555,18 @@ guarantees:
 - **Retry policy**: only transient network errors and insufficient-balance
   rejections are retried (see "Insufficient Balance" above for the exact
   numbers); any other exchange rejection (invalid order, generic exchange
-  error) is never retried.
+  error) is never retried. Waits use exponential backoff
+  (`delay * 2^(attempt-1)`, capped) for submit and cancel retries.
 - **Timeout**: the blocking exchange call is bounded; a call that never
   returns cannot hang the bot forever.
-- **Pending order reconciliation**: market orders are expected to fill
-  immediately. If the exchange instead reports one as still open, it is
-  polled a bounded number of times, then cancellation is attempted (with
-  its own retries) before giving up.
+- **Pending order timeout**: open/limit-style orders are polled for ~30s
+  (configurable via `pending_timeout_seconds`), then cancellation is
+  attempted (with its own retries) before giving up / quarantining.
+- **Balance reconciliation** (`PositionReconciler`): on a scheduler
+  interval, each OPEN local position's quantity is compared to the
+  exchange free base-asset balance. A clear shortfall publishes
+  `position.reconcile_mismatch` + `order.needs_manual_review` and
+  quarantines that market (Unknown Order / DB drift).
 - **Unknown order status handling**: a status this module does not
   recognize as filled/open/terminal is never guessed at (never silently
   treated as filled or as safe to ignore).
@@ -593,19 +598,19 @@ reconciliation, quarantine) described above -- there is no separate
   loss/profit tracked for the circuit breaker.
 - **Manual Close** (`close_position_manually(symbol)`): an
   operator-initiated full close, independent of any price trigger.
-  Recorded with `close_reason="MANUAL_CLOSE"`.
+  Recorded with `close_reason="MANUAL"`.
 - **Emergency Exit** (`emergency_exit_all()`): force-closes every open
   position immediately regardless of price or state -- an operator
   "panic button" distinct from the daily loss breaker (which only
   blocks *new* entries; this actively exits existing ones). Recorded
-  with `close_reason="EMERGENCY_EXIT"`.
-- **Close reason is stop-stage-aware**: when the ordinary stop-loss
-  check closes a position, the recorded `close_reason` reflects which
-  stop was actually active at the time --
-  `HARD_STOP`/`BREAK_EVEN_STOP`/`TRAILING_STOP` -- instead of a single
-  generic `STOP_LOSS` string, so the Trade Journal (see below) can tell
-  these apart. The Maximum Position Duration force-close is recorded as
-  `MAX_DURATION`.
+  with `close_reason="EMERGENCY"`. UI: Open Positions → Emergency Exit.
+- **Close reason (`CloseReason` enum)**: every exit records one of
+  `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` / `PARTIAL_TP` /
+  `MANUAL` / `EMERGENCY` / `MAX_DURATION` / `MAX_DAILY_LOSS`. Hard stop
+  uses `STOP_LOSS` (stage-aware extras distinguish break-even / trailing).
+  `MAX_DAILY_LOSS` is reserved for a future force-close path; today the
+  daily-loss breaker only blocks *new* entries. Maximum Position Duration
+  force-close is recorded as `MAX_DURATION`.
 
 ---
 
@@ -839,7 +844,7 @@ Alert types:
 |---|---|
 | **BUY** | `position.opened` after a filled market buy |
 | **SELL** | `position.closed` / `position.partial_exit` (non-stop reasons) |
-| **STOP** | `position.closed` with `HARD_STOP` / `BREAK_EVEN_STOP` / `TRAILING_STOP` |
+| **STOP** | `position.closed` with `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` |
 | **ERROR** | `order.needs_manual_review`, `risk.daily_loss_limit` |
 | **API Disconnect** | websocket close/error or exchange `ConnectionStatus` flip |
 | **Internet Disconnect** | periodic probe of `api.telegram.org` (state-change only) |

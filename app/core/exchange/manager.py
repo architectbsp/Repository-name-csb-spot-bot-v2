@@ -138,6 +138,13 @@ class ExchangeManager:
             quote,
         )
 
+    def get_base_balance(
+        self,
+        exchange_type: ExchangeType,
+        base: str,
+    ) -> float:
+        return self._get_exchange(exchange_type).fetch_base_balance(base)
+
     def place_market_buy(
         self,
         exchange_type: ExchangeType,

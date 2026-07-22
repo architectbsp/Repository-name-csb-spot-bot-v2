@@ -101,7 +101,7 @@ def test_build_coin_chart_marks_the_exit_point_for_a_closed_trade():
         entry_time=datetime.fromtimestamp(1 * 60, UTC),
         exit_price=95.0,
         exit_time=datetime.fromtimestamp(8 * 60, UTC),
-        exit_reason="HARD_STOP",
+        exit_reason="STOP_LOSS",
     )
 
     control = build_coin_chart(chart_data)

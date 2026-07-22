@@ -123,7 +123,7 @@ def test_buy_sell_stop_and_error_messages():
         "position.closed",
         {
             "symbol": "SOL/USDT",
-            "reason": "MANUAL_CLOSE",
+            "reason": "MANUAL",
             "price": 50.0,
             "position": SimpleNamespace(pnl=-1.0, pnl_percent=-2.0),
         },
@@ -141,7 +141,7 @@ def test_buy_sell_stop_and_error_messages():
     joined = "\n---\n".join(client.messages)
     assert "BUY" in joined and "BTC/USDT" in joined
     assert "STOP" in joined and "TRAILING_STOP" in joined
-    assert "SELL" in joined and "MANUAL_CLOSE" in joined
+    assert "SELL" in joined and "MANUAL" in joined
     assert "ERROR" in joined and "manual review" in joined
 
 

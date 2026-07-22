@@ -2,7 +2,7 @@ import logging
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from app.core.domain.position import Position
+from app.core.domain.position import CloseReason, Position
 from app.core.scheduler.job import Job
 from app.core.services.order_execution import ExecutionOutcome, OrderExecutionService
 from app.core.services.volatility import (
@@ -31,14 +31,12 @@ _SIZING_MODE_HYBRID = 1
 _VOL_SCALE_MIN = 0.25
 _VOL_SCALE_MAX = 1.0
 
-# Sprint 3: which close_reason to record depending on which stop level
-# actually triggered, instead of a single generic "STOP_LOSS" label that
-# couldn't distinguish a hard-stop crash from a break-even or trailing
-# exit (needed for an accurate Trade Journal down the line).
+# Sprint 3: which CloseReason to record depending on which stop level
+# actually triggered (hard vs break-even vs trailing).
 _STOP_STAGE_CLOSE_REASONS = {
-    "HARD": "HARD_STOP",
-    "BREAK_EVEN": "BREAK_EVEN_STOP",
-    "TRAILING": "TRAILING_STOP",
+    "HARD": CloseReason.STOP_LOSS,
+    "BREAK_EVEN": CloseReason.BREAK_EVEN_STOP,
+    "TRAILING": CloseReason.TRAILING_STOP,
 }
 
 
@@ -189,8 +187,13 @@ class RiskManager:
                 self._exchange_manager,
                 retry_policy=self._retry_policy,
                 timeout=self._timeout,
+                pending_timeout_seconds=30.0,
             )
         return self._order_execution
+
+    @property
+    def order_execution(self) -> OrderExecutionService:
+        return self._get_order_execution()
 
     def set_config(self, config):
         self._config = config
@@ -865,7 +868,7 @@ class RiskManager:
             position.symbol,
             sell_quantity=filled_quantity,
             exit_price=exit_price,
-            reason="PARTIAL_TP",
+            reason=CloseReason.PARTIAL_TP,
             exchange=position.exchange,
         )
 
@@ -888,7 +891,7 @@ class RiskManager:
                 exit_price=exit_price,
                 quantity=filled_quantity,
                 realized_pnl=realized,
-                reason="PARTIAL_TP",
+                reason=CloseReason.PARTIAL_TP,
                 exchange=position.exchange,
             )
 
@@ -988,7 +991,7 @@ class RiskManager:
             position,
             exchange_type=exchange_type,
             fallback_price=position.entry_price,
-            reason="MANUAL_CLOSE",
+            reason=CloseReason.MANUAL,
         )
 
         return not self._position_manager.is_open(
@@ -1036,7 +1039,7 @@ class RiskManager:
                 position,
                 exchange_type=exchange_type,
                 fallback_price=position.entry_price,
-                reason="EMERGENCY_EXIT",
+                reason=CloseReason.EMERGENCY,
             )
 
             if not self._position_manager.is_open(
@@ -1103,7 +1106,7 @@ class RiskManager:
                 position,
                 exchange_type=exchange_type,
                 fallback_price=position.entry_price,
-                reason="MAX_DURATION",
+                reason=CloseReason.MAX_DURATION,
             )
 
     def _close_position_with_market_sell(
