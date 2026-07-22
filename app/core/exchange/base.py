@@ -4,6 +4,7 @@ from typing import Any
 
 import ccxt
 
+from app.core.domain.candle import Candle
 from app.core.exchange.models import (
     ExchangeState,
     MarketMetadata,
@@ -210,6 +211,38 @@ class BaseExchange(ABC):
         return self._normalize_order_result(
             self.client.cancel_order(order_id, symbol)
         )
+
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "15m",
+        limit: int = 200,
+    ) -> list[Candle]:
+        """
+        Sprint 6 (coin charts): fetches recent candles for `symbol` from
+        this exchange's own REST API via ccxt. Only ever called for the
+        currently-active exchange -- see ExchangeManager.active_exchange_type
+        and docs/BUSINESS_RULES.md's data-isolation rule -- so a chart never
+        mixes candles from one exchange with a position opened on another.
+
+        Returns an empty list (never raises) on any network/API failure;
+        the chart UI already renders a friendly "no data" state for that.
+        """
+        try:
+            raw_rows = self.client.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
+        except Exception:
+            logger.exception(
+                "fetch_ohlcv failed for %s (timeframe=%s)",
+                symbol,
+                timeframe,
+            )
+            return []
+
+        return [Candle.from_ccxt_row(row) for row in raw_rows or []]
 
     def _normalize_order_result(
         self,

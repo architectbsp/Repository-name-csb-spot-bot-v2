@@ -74,11 +74,11 @@ def _start_engine_in_background(page: ft.Page, engine: BotEngine) -> None:
         _show_startup_error_dialog(page, exc)
 
 
-def _build_view(view_name: str, engine: BotEngine) -> ft.Control:
+def _build_view(view_name: str, engine: BotEngine, page: ft.Page) -> ft.Control:
     if view_name == SETTINGS:
         return build_settings_view(engine.config, engine.settings_store)
 
-    return build_dashboard_view()
+    return build_dashboard_view(engine, page)
 
 
 def main(page: ft.Page):
@@ -101,14 +101,14 @@ def main(page: ft.Page):
 
     content_area = ft.Container(
         expand=True,
-        content=_build_view(DASHBOARD, engine),
+        content=_build_view(DASHBOARD, engine, page),
     )
 
     sidebar_area = ft.Container()
 
     def navigate(view_name: str) -> None:
         sidebar_area.content = build_sidebar(view_name, navigate)
-        content_area.content = _build_view(view_name, engine)
+        content_area.content = _build_view(view_name, engine, page)
         sidebar_area.update()
         content_area.update()
 

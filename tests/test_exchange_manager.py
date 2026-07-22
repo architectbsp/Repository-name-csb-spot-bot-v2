@@ -106,6 +106,81 @@ def test_active_exchange_type_raises_when_nothing_enabled():
         raise AssertionError("Expected RuntimeError when no exchange is enabled")
 
 
+class FakeCcxtClient:
+    """Minimal stand-in for ccxt's client, only implementing fetch_ohlcv."""
+
+    def __init__(self, rows=None, error=None):
+        self._rows = rows if rows is not None else []
+        self._error = error
+        self.calls = []
+
+    def fetch_ohlcv(self, symbol, timeframe="15m", limit=200):
+        self.calls.append((symbol, timeframe, limit))
+        if self._error is not None:
+            raise self._error
+        return self._rows
+
+
+def make_binance_exchange():
+    exchange = BinanceExchange(
+        ExchangeState(exchange=ExchangeType.BINANCE, enabled=True),
+        ExchangeSettings(),
+    )
+    return exchange
+
+
+def test_base_exchange_fetch_ohlcv_normalizes_ccxt_rows_into_candles():
+    exchange = make_binance_exchange()
+    exchange.client = FakeCcxtClient(
+        rows=[
+            [1_700_000_000_000, 100.0, 105.0, 95.0, 102.0, 12.5],
+            [1_700_000_060_000, 102.0, 108.0, 101.0, 107.0, 8.0],
+        ]
+    )
+
+    candles = exchange.fetch_ohlcv("BTC/USDT", timeframe="1h", limit=2)
+
+    assert exchange.client.calls == [("BTC/USDT", "1h", 2)]
+    assert len(candles) == 2
+    assert candles[0].timestamp == 1_700_000_000_000
+    assert candles[0].open == 100.0
+    assert candles[0].high == 105.0
+    assert candles[0].low == 95.0
+    assert candles[0].close == 102.0
+    assert candles[0].volume == 12.5
+
+
+def test_base_exchange_fetch_ohlcv_returns_empty_list_on_failure_instead_of_raising():
+    exchange = make_binance_exchange()
+    exchange.client = FakeCcxtClient(error=RuntimeError("network down"))
+
+    candles = exchange.fetch_ohlcv("BTC/USDT")
+
+    assert candles == []
+
+
+def test_exchange_manager_fetch_ohlcv_delegates_to_the_active_exchange():
+    registry = ExchangeRegistry()
+    exchange = make_binance_exchange()
+    exchange.client = FakeCcxtClient(
+        rows=[[1_700_000_000_000, 1.0, 2.0, 0.5, 1.5, 100.0]]
+    )
+    registry.register(ExchangeType.BINANCE, exchange)
+
+    manager = ExchangeManager(registry)
+
+    candles = manager.fetch_ohlcv(
+        ExchangeType.BINANCE,
+        "BTC/USDT",
+        timeframe="5m",
+        limit=1,
+    )
+
+    assert exchange.client.calls == [("BTC/USDT", "5m", 1)]
+    assert len(candles) == 1
+    assert candles[0].close == 1.5
+
+
 def test_binance_price_stream_start_stop():
     from app.core.exchange.binance_price_stream import BinancePriceStream
 

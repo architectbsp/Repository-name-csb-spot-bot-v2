@@ -32,7 +32,7 @@ def _panel(title: str):
     )
 
 
-def build_dashboard():
+def build_dashboard(engine=None, page=None):
     left = ft.Column(
         expand=78,
         spacing=15,
@@ -41,8 +41,11 @@ def build_dashboard():
                 expand=58,
                 spacing=15,
                 controls=[
-                    ft.Container(expand=32, content=build_coin_table()),
-                    ft.Container(expand=68, content=build_open_positions()),
+                    ft.Container(expand=32, content=build_coin_table(engine, page)),
+                    ft.Container(
+                        expand=68,
+                        content=build_open_positions(engine, page),
+                    ),
                 ],
             ),
             ft.Row(

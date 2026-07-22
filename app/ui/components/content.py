@@ -5,14 +5,14 @@ from app.ui.components.dashboard_cards import build_dashboard_cards
 from app.ui.components.dashboard import build_dashboard
 
 
-def build_dashboard_view() -> ft.Column:
+def build_dashboard_view(engine=None, page=None) -> ft.Column:
     return ft.Column(
         expand=True,
         spacing=15,
         controls=[
             build_top_bar(),
             build_dashboard_cards(),
-            build_dashboard(),
+            build_dashboard(engine, page),
         ],
     )
 

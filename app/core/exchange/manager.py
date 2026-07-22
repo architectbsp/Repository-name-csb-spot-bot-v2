@@ -184,6 +184,21 @@ class ExchangeManager:
             symbol,
         )
 
+    def fetch_ohlcv(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+        timeframe: str = "15m",
+        limit: int = 200,
+    ):
+        return self._get_exchange(
+            exchange_type
+        ).fetch_ohlcv(
+            symbol,
+            timeframe=timeframe,
+            limit=limit,
+        )
+
 
 
     def start_price_stream(

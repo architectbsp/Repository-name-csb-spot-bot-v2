@@ -112,3 +112,21 @@ class TradeJournalRepository:
             .order_by(TradeJournalEntity.entry_time.desc())
             .all()
         )
+
+    def get_last_closed_by_symbol(
+        self,
+        symbol: str,
+    ) -> TradeJournalEntity | None:
+        """
+        Sprint 6 (coin charts): once a symbol's position has closed there
+        is nothing left in PositionManager/TradeJournal's in-memory
+        `_open_entries` to build a chart overlay from, so the chart falls
+        back to this -- the most recently closed journal row for that
+        symbol.
+        """
+        return (
+            self._session.query(TradeJournalEntity)
+            .filter_by(symbol=symbol, status="CLOSED")
+            .order_by(TradeJournalEntity.exit_time.desc())
+            .first()
+        )

@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.5
+Version: 2.6
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -54,6 +54,14 @@ Win Rate, Average Profit/Loss, Profit Factor, Expectancy, a simplified
 per-trade Sharpe ratio, Maximum Drawdown and Recovery Factor, all
 computed read-only from the Trade Journal's permanent closed-trade
 history.
+
+Changelog (2.5 -> 2.6): added Coin Charts (§8) -- clicking a coin in the
+UI shows a TradingView-like chart (own price candles only, per §10's
+exchange-isolation rule) with Entry / Stop / Take-Profit(trailing
+activation) / Trailing-shadow overlay levels and Entry/Exit point
+markers, sourced from the open Position or, once closed, the most
+recent Trade Journal entry for that symbol. Read-only, drawn with Flet's
+built-in canvas (no new charting dependency).
 
 ---
 
@@ -595,6 +603,29 @@ or risk state -- only summarizes what already happened.
   chronological order (by exit time).
 - **Recovery Factor**: total realized PnL / maximum drawdown -- how many
   times over the worst drawdown has been recovered by total profit.
+
+## Coin Charts
+
+`ChartService` (`app/core/services/chart_service.py`) assembles a
+read-only, per-symbol chart: recent OHLCV candles fetched from that
+symbol's own active exchange only (via `ExchangeManager.fetch_ohlcv`,
+never mixed with another exchange's data -- see §10) plus overlay levels
+for whichever trade the symbol currently has:
+
+- If there is an **open Position**, the overlay uses its live
+  `entry_price`, `stop_price`, `stop_stage` and `highest_price`
+  (trailing shadow reference), plus a Take-Profit/trailing-activation
+  target computed from `entry_price * (1 + trailing_activation_percent)`.
+- Otherwise, it falls back to the **most recently closed Trade Journal
+  entry** for that symbol (entry/exit price, time and reason).
+- With no trade history at all, only the raw price line is drawn.
+
+`app/ui/components/coin_chart.py` renders this into a TradingView-like
+line chart (price line + dashed Entry/Stop/TP/Trailing level lines +
+Entry/Exit point markers) using Flet's built-in `flet.canvas` -- no
+external charting/plotting dependency was added, consistent with the
+minimal pinned-dependency policy (§10/B29). Clicking a coin row in the
+coin table or an open-position card opens this chart in a modal dialog.
 
 ---
 

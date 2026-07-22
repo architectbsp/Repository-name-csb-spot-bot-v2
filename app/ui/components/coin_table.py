@@ -1,4 +1,11 @@
+import logging
+
 import flet as ft
+
+from app.ui.components.coin_chart import open_coin_chart_dialog
+
+
+logger = logging.getLogger(__name__)
 
 HEADERS = [
     (1, "#"),
@@ -96,7 +103,7 @@ def _header():
     )
 
 
-def _row(idx, coin, price, change, volume, signal, status):
+def _row(idx, coin, price, change, volume, signal, status, on_click=None):
     change_color = "#22C55E" if change.startswith("+") else "#EF4444"
 
     signal_color = {
@@ -110,6 +117,8 @@ def _row(idx, coin, price, change, volume, signal, status):
         bgcolor="#131C2B",
         border_radius=8,
         padding=10,
+        ink=on_click is not None,
+        on_click=on_click,
         content=ft.Row(
             spacing=0,
             controls=[
@@ -124,7 +133,38 @@ def _row(idx, coin, price, change, volume, signal, status):
         ),
     )
 
-def build_coin_table():
+
+def _open_chart(engine, page, symbol) -> None:
+    """
+    Sprint 6 -- "coin'e tıklayınca grafik göster". `engine` is None in
+    headless contexts (tests, or a dashboard built before BotEngine
+    finished connecting) -- silently no-ops rather than crashing the
+    click handler.
+    """
+    if engine is None or page is None:
+        return
+
+    try:
+        exchange_type = engine.exchange.active_exchange_type()
+    except Exception:
+        logger.exception("No active exchange -- cannot open chart for %s", symbol)
+        return
+
+    open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
+
+
+def build_coin_table(engine=None, page=None):
+    rows = [
+        (1, "BTC/USDT", "66,812.50", "+23%", "25B", "BUY", "READY"),
+        (2, "ETH/USDT", "3,254.08", "+2.11%", "987M", "BUY", "READY"),
+        (3, "SOL/USDT", "159.32", "+3.45%", "456M", "BUY", "READY"),
+        (4, "XRP/USDT", "1972", "-0.45%", "345M", "SELL", "ALERT"),
+        (5, "DOGE/USDT", "0.1523", "+1.02%", "289M", "BUY", "READY"),
+        (6, "ADA/USDT", "1831", "+0.76%", "234M", "BUY", "READY"),
+        (7, "AVAX/USDT", "34.21", "+2.34%", "198M", "BUY", "READY"),
+        (8, "DOT/USDT", "6.824", "+0.18%", "176M", "BUY", "READY"),
+    ]
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -135,14 +175,17 @@ def build_coin_table():
             controls=[
                 _toolbar(),
                 _header(),
-                _row(1, "BTC/USDT", "66,812.50", "+23%", "25B", "BUY", "READY"),
-                _row(2, "ETH/USDT", "3,254.08", "+2.11%", "987M", "BUY", "READY"),
-                _row(3, "SOL/USDT", "159.32", "+3.45%", "456M", "BUY", "READY"),
-                _row(4, "XRP/USDT", "1972", "-0.45%", "345M", "SELL", "ALERT"),
-                _row(5, "DOGE/USDT", "0.1523", "+1.02%", "289M", "BUY", "READY"),
-                _row(6, "ADA/USDT", "1831", "+0.76%", "234M", "BUY", "READY"),
-                _row(7, "AVAX/USDT", "34.21", "+2.34%", "198M", "BUY", "READY"),
-                _row(8, "DOT/USDT", "6.824", "+0.18%", "176M", "BUY", "READY"),
+                *(
+                    _row(
+                        *row,
+                        on_click=(
+                            (lambda _, symbol=row[1]: _open_chart(engine, page, symbol))
+                            if engine is not None and page is not None
+                            else None
+                        ),
+                    )
+                    for row in rows
+                ),
             ],
         ),
     )

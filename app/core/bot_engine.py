@@ -19,6 +19,7 @@ from app.core.stopwatch.stopwatch import Stopwatch
 from app.core.exchange.factory import create_exchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.services.chart_service import ChartService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.performance_analytics import PerformanceAnalytics
 from app.core.services.trade_journal import TradeJournal
@@ -122,6 +123,15 @@ class BotEngine:
         # positions/orders/risk state itself.
         self.performance_analytics = PerformanceAnalytics()
         self.performance_analytics.set_trade_journal(self.trade_journal)
+
+        # Sprint 6 -- Coin charts: assembles OHLCV candles (own exchange
+        # only, per the data-isolation rule) plus Entry/Stop/TP/Trailing
+        # overlay levels for the "click a coin to see its chart" UI.
+        self.chart_service = ChartService()
+        self.chart_service.set_exchange_manager(self.exchange)
+        self.chart_service.set_position_manager(self.position_manager)
+        self.chart_service.set_trade_journal(self.trade_journal)
+        self.chart_service.set_config(self.config)
 
         self.risk_manager = RiskManager()
         self.risk_manager.set_exchange(self.exchange)

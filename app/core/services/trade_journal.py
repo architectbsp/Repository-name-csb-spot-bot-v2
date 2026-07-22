@@ -184,6 +184,24 @@ class TradeJournal:
     def get_open(self, symbol: str) -> TradeJournalEntry | None:
         return self._open_entries.get(symbol)
 
+    def get_last_closed(self, symbol: str) -> TradeJournalEntry | None:
+        """
+        Sprint 6 (coin charts): the most recently closed trade for
+        `symbol`, used to overlay Entry/Exit markers on a chart once
+        PositionManager no longer has an open position for it. Only
+        available once a repository is wired in -- closed entries are not
+        kept in-memory (see record_exit, which pops them).
+        """
+        if self._repository is None:
+            return None
+
+        entity = self._repository.get_last_closed_by_symbol(symbol)
+
+        if entity is None:
+            return None
+
+        return journal_to_domain(entity)
+
     def list_open(self) -> list[TradeJournalEntry]:
         return list(self._open_entries.values())
 
