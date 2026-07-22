@@ -20,6 +20,7 @@ from app.core.exchange.factory import create_exchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
+from app.core.services.performance_analytics import PerformanceAnalytics
 from app.core.services.trade_journal import TradeJournal
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
@@ -115,6 +116,12 @@ class BotEngine:
         self.trade_journal.set_repository(
             self.persistence.trade_journal_repository(),
         )
+
+        # Sprint 7 -- Performance Analytics: reads exclusively from the
+        # Trade Journal's permanent closed-trade history; never touches
+        # positions/orders/risk state itself.
+        self.performance_analytics = PerformanceAnalytics()
+        self.performance_analytics.set_trade_journal(self.trade_journal)
 
         self.risk_manager = RiskManager()
         self.risk_manager.set_exchange(self.exchange)

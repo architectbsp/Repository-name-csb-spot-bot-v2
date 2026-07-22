@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.4
+Version: 2.5
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -48,6 +48,12 @@ of the `positions` table (whose row disappears the instant a position
 closes). Strategy records the entry (it is the only module that knows
 *why* a BUY happened); RiskManager records every partial and full exit
 (it is the sole owner of every exit path).
+
+Changelog (2.4 -> 2.5): added the Performance Analytics module (§8) --
+Win Rate, Average Profit/Loss, Profit Factor, Expectancy, a simplified
+per-trade Sharpe ratio, Maximum Drawdown and Recovery Factor, all
+computed read-only from the Trade Journal's permanent closed-trade
+history.
 
 ---
 
@@ -562,6 +568,33 @@ entry is never deleted.
   recorded as `close_reason` above), total realized PnL/PnL%, and how
   many minutes the trade was held from entry to exit. The trade is then
   marked `CLOSED`.
+
+---
+
+## Performance Analytics
+
+`PerformanceAnalytics` (`app/core/services/performance_analytics.py`) is
+a read-only module that measures the bot's own trading performance from
+every `CLOSED` Trade Journal entry. It never touches a position, order,
+or risk state -- only summarizes what already happened.
+
+- **Win Rate**: percentage of closed trades with `pnl > 0`.
+- **Average Profit / Average Loss**: mean `pnl` of winning trades and of
+  losing trades, respectively.
+- **Profit Factor**: gross profit / gross loss. Undefined (`None`) with
+  zero closed trades; `+infinity` when there have been wins and zero
+  losses so far (a "perfect" record, not literally infinite money).
+- **Expectancy**: total realized PnL / number of closed trades -- the
+  expected PnL of the "average" trade.
+- **Sharpe ratio**: a simplified, non-annualized ratio (mean / stdev of
+  each trade's `pnl_percent`, scaled by sqrt(N)) appropriate for a
+  trade-by-trade sample rather than a time-series of periodic returns.
+  `None` with fewer than 2 usable trades or zero-variance returns.
+- **Maximum Drawdown**: the largest peak-to-trough drop of the
+  cumulative realized-PnL equity curve built by walking closed trades in
+  chronological order (by exit time).
+- **Recovery Factor**: total realized PnL / maximum drawdown -- how many
+  times over the worst drawdown has been recovered by total profit.
 
 ---
 
