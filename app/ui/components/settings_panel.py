@@ -1,13 +1,14 @@
 """
 Sprint 1/2 Settings screen: every strategy/risk knob in
 app.core.config.settings_store.SETTINGS_SCHEMA is editable here, saved to
-SQLite, and applied live (no bot restart) because SettingsStore.update()
-mutates the same AppSettings instance every running module already holds
-a reference to.
+SQLite via ConfigManager, and applied live (no bot restart). Kaydet
+publishes ConfigUpdatedEvent (`config.updated`) so Strategy / Scanner /
+RiskManager observers refresh without a restart.
 """
 
 import flet as ft
 
+from app.core.config.config_manager import ConfigManager
 from app.core.config.settings_store import SETTINGS_SCHEMA, SettingsStore
 
 
@@ -41,7 +42,13 @@ def build_settings_view(config, settings_store: SettingsStore) -> ft.Column:
 
     def _on_save(_):
         changes = {name: field.value for name, field in fields.items()}
-        errors = settings_store.update(config, changes)
+        manager = ConfigManager.instance()
+        # Prefer the wired singleton; fall back to direct store update in
+        # unit tests that build the panel without BotEngine.
+        if manager.is_configured:
+            errors = manager.save(changes, source="settings_ui")
+        else:
+            errors = settings_store.update(config, changes)
 
         if errors:
             status_text.value = "Hata: " + " | ".join(errors)

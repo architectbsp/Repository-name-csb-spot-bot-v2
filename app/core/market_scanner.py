@@ -104,6 +104,26 @@ class MarketScanner:
     def get_config(self):
         return self._config
 
+    def on_config_updated(self, event) -> None:
+        """Apply a new scan_interval_seconds to the scheduled job without
+        restarting the bot (ConfigUpdatedEvent / ConfigManager.save)."""
+        if self._config is None or self._scheduler is None:
+            return
+        if not self._scheduler.has_job("market_scanner"):
+            return
+        job = self._scheduler.get("market_scanner")
+        if job is None:
+            return
+        new_interval = float(self._config.strategy.scan_interval_seconds)
+        if job.interval == new_interval:
+            return
+        job.interval = new_interval
+        self._scheduler.schedule(job)
+        logger.info(
+            "[Scanner] scan_interval updated to %ss via config.updated",
+            new_interval,
+        )
+
     def initialize(self) -> None:
         if self.is_initialized():
             return

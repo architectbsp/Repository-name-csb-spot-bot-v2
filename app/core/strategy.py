@@ -75,6 +75,12 @@ class Strategy:
     def set_config(self, config) -> None:
         self._config = config
 
+    def on_config_updated(self, event) -> None:
+        """EventBus `config.updated` -- thresholds are read live from
+        `self._config` on every tick; this hook exists so observers are
+        wired and scan/log side-effects can be added later."""
+        return None
+
     def on_ticker(
         self,
         watch_list,

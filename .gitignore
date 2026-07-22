@@ -24,8 +24,9 @@ logs/
 
 # Environment
 .env
-# Local database
+# Local database / optional settings mirror
 csb_spot_bot.db
+config.json
 
 # Generated source dump
 project_source.txt

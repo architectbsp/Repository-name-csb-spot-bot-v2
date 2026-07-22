@@ -7,6 +7,7 @@ from app.core.watch_list import WatchList
 from app.core.risk_manager import RiskManager
 from app.core.strategy import Strategy
 
+from app.core.config.config_manager import CONFIG_UPDATED_EVENT, ConfigManager
 from app.core.config.settings import AppSettings
 from app.core.config.settings_store import SettingsStore
 from app.core.event_bus.event_bus import EventBus
@@ -52,6 +53,15 @@ class BotEngine:
         self.settings_store.load_into(self.config)
 
         self.event_bus = EventBus()
+
+        # ConfigManager singleton: Settings UI + EventBus `config.updated`
+        # for runtime reload (Strategy / Scanner / RiskManager observers).
+        self.config_manager = ConfigManager.instance()
+        self.config_manager.configure(
+            self.config,
+            self.settings_store,
+            self.event_bus,
+        )
         self.scheduler = Scheduler()
         self.worker = Worker(self.scheduler)
         self.retry_policy = RetryPolicy(
@@ -251,6 +261,22 @@ class BotEngine:
         self.event_bus.subscribe(
             "position.closed",
             self.position_manager.handle_position_closed,
+        )
+
+        # ConfigUpdatedEvent: modules already share live AppSettings;
+        # handlers refresh anything that was snapshotted at initialize
+        # (e.g. scanner job interval).
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.strategy.on_config_updated,
+        )
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.market_scanner.on_config_updated,
+        )
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.risk_manager.on_config_updated,
         )
 
         for module in (

@@ -195,6 +195,11 @@ class RiskManager:
     def set_config(self, config):
         self._config = config
 
+    def on_config_updated(self, event) -> None:
+        """EventBus `config.updated` -- risk knobs are read live via
+        `self._risk` on every decision; no local cache to invalidate."""
+        return None
+
     @property
     def _risk(self):
         if self._config is None:
