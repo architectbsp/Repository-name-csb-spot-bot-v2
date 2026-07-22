@@ -1,0 +1,6 @@
+{
+  "database": {
+    "backend": "sqlite",
+    "path": "csb_spot_bot.db"
+  }
+}

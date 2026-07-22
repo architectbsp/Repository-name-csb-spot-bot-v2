@@ -927,13 +927,41 @@ Supported backends (Sprint 13):
 
 | Backend | How to select |
 |---|---|
-| **SQLite** (default) | unset / `DB_BACKEND=sqlite` / `DB_PATH=...` |
-| **PostgreSQL** | `DB_BACKEND=postgresql` + `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, or a full `DATABASE_URL` |
-| **MariaDB / MySQL** | `DB_BACKEND=mariadb` (or `mysql`) + the same `DB_*` fields, or `DATABASE_URL` |
+| **SQLite** (default) | unset / `DB_BACKEND=sqlite` / `DB_PATH=...` / `config.json` → `database.backend=sqlite` |
+| **PostgreSQL** | `DB_BACKEND=postgresql` + `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, a full `DATABASE_URL`, or `config.json` → `database` |
+| **MariaDB / MySQL** | `DB_BACKEND=mariadb` (or `mysql`) + the same `DB_*` fields, `DATABASE_URL`, or `config.json` → `database` |
 
-`DATABASE_URL` always wins when set. Optional drivers:
+Precedence: `DATABASE_URL` env → `config.json` `database` section →
+`DB_BACKEND` / `DB_*` env → SQLite default. Optional drivers:
 `pip install -r requirements-db.txt` (`psycopg`, `PyMySQL`). Schema
 evolution uses the dialect-aware `sync_schema()` helper (no Alembic).
+See `config.example.json`.
+
+---
+
+## Paper Trading
+
+When `TRADE_MODE=paper` or `PAPER_TRADING=true`, the exchange factory wraps
+each live venue in `PaperExchangeAdapter`:
+
+- **Prices**: real WebSocket / REST data from the configured venue.
+- **Orders**: filled locally against a virtual wallet
+  (`PAPER_INITIAL_BALANCE`, default 10000 quote units).
+- **Live mode**: `TRADE_MODE=live` (default) uses `RealExchangeAdapter`
+  and submits real market orders.
+
+---
+
+## Backtest Engine
+
+Offline replay of Strategy + RiskManager over OHLCV history with paper
+execution (`python -m app.core.backtest`):
+
+- Load candles from CSV (`--csv`) or download Binance public klines
+  (`--download BTC/USDT --timeframe 1h --days 30`).
+- Mock fills via `PaperExchangeAdapter` (no live orders).
+- Performance report from `AnalyticsService` (win rate, PnL, Sharpe,
+  max drawdown, …).
 
 ---
 

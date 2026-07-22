@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 
 from app.core.config.settings import ExchangeSettings, load_exchange_settings_list
+from app.core.exchange.adapter import PaperExchangeAdapter, RealExchangeAdapter
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.binance import BinanceExchange
 from app.core.exchange.bybit import BybitExchange
@@ -31,8 +33,34 @@ def supported_exchange_names() -> list[str]:
     return sorted(_EXCHANGE_CLASSES.keys())
 
 
-def create_exchange(settings: ExchangeSettings) -> BaseExchange:
-    """Builds a single exchange integration from `settings`."""
+def paper_trading_enabled() -> bool:
+    """
+    Paper mode: real WS/REST prices, local simulated fills.
+
+    Enabled when ``TRADE_MODE=paper`` or ``PAPER_TRADING`` is truthy
+    (1/true/yes/on). ``TRADE_MODE=live`` forces live orders.
+    """
+    mode = (os.getenv("TRADE_MODE") or "").strip().lower()
+    if mode in {"paper", "live"}:
+        return mode == "paper"
+    flag = (os.getenv("PAPER_TRADING") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
+def paper_initial_balance() -> float:
+    raw = (os.getenv("PAPER_INITIAL_BALANCE") or "10000").strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid PAPER_INITIAL_BALANCE={raw!r}; expected a number"
+        ) from exc
+    if value <= 0:
+        raise ValueError("PAPER_INITIAL_BALANCE must be positive")
+    return value
+
+
+def _create_live_exchange(settings: ExchangeSettings) -> BaseExchange:
     name = (settings.exchange or "").strip().lower()
 
     if name not in _EXCHANGE_CLASSES:
@@ -50,6 +78,24 @@ def create_exchange(settings: ExchangeSettings) -> BaseExchange:
         ),
         settings,
     )
+
+
+def create_exchange(settings: ExchangeSettings) -> BaseExchange:
+    """
+    Builds a single exchange integration from `settings`.
+
+    Returns ``PaperExchangeAdapter`` (real prices, virtual wallet) when
+    paper trading is enabled, otherwise ``RealExchangeAdapter``.
+    """
+    live = _create_live_exchange(settings)
+
+    if paper_trading_enabled():
+        return PaperExchangeAdapter(
+            live,
+            initial_quote=paper_initial_balance(),
+        )
+
+    return RealExchangeAdapter(live)
 
 
 def create_exchanges(

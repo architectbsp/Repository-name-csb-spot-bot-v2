@@ -85,6 +85,37 @@ def test_load_database_config_round_trip(monkeypatch):
     assert cfg.url == "sqlite:///:memory:"
 
 
+def test_load_database_config_from_config_json(monkeypatch, tmp_path):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"database": {"backend": "postgresql", "host": "db.local", '
+        '"port": 5432, "name": "csb", "user": "alice", "password": "s3cret"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_JSON_PATH", str(config_path))
+
+    cfg = load_database_config()
+    assert cfg.is_postgres
+    assert "db.local:5432/csb" in cfg.url
+    assert "alice" in cfg.url
+
+
+def test_database_url_env_wins_over_config_json(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"database": {"backend": "postgresql", "host": "ignored"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_JSON_PATH", str(config_path))
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+
+    cfg = load_database_config()
+    assert cfg.url == "sqlite:///:memory:"
+
+
 def test_persistence_service_from_url_exposes_protocol_repos():
     service = PersistenceService.from_url("sqlite:///:memory:")
 

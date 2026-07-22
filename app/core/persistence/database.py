@@ -1,8 +1,9 @@
 """
 SQLAlchemy engine / session factory.
 
-Sprint 13: the URL is resolved from env (`DATABASE_URL` or `DB_BACKEND`)
-so SQLite, PostgreSQL and MariaDB share one ORM + repository stack.
+Sprint 13: the URL is resolved from env / config.json
+(`DATABASE_URL`, `config.json` → `database`, or `DB_BACKEND`) so SQLite,
+PostgreSQL and MariaDB share one ORM + repository stack.
 Call `configure_database()` to rebuild the engine (tests / hot swap).
 """
 
