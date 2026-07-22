@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from app.core.domain.position import Position
 from app.core.scheduler.job import Job
+from app.core.services.order_execution import ExecutionOutcome, OrderExecutionService
 from app.core.trading.models import TradeRequest, TradeSide
 
 
@@ -62,6 +63,11 @@ class RiskManager:
         self._trading_day: date | None = None
         self._day_start_balance: float | None = None
         self._realized_pnl_today: float = 0.0
+
+        # Sprint 4: built lazily on first real order submission (see
+        # _get_order_execution) so every setter above has already run by
+        # the time it's constructed, regardless of wiring order.
+        self._order_execution: OrderExecutionService | None = None
 
     def initialize(self) -> None:
         self._initialized = True
@@ -138,6 +144,21 @@ class RiskManager:
 
     def set_order_validator(self, order_validator):
         self._order_validator = order_validator
+
+    def set_order_execution(self, order_execution: OrderExecutionService) -> None:
+        """Mainly for tests -- production wiring builds this lazily in
+        _get_order_execution() from the already-wired exchange_manager /
+        retry_policy / timeout dependencies."""
+        self._order_execution = order_execution
+
+    def _get_order_execution(self) -> OrderExecutionService:
+        if self._order_execution is None:
+            self._order_execution = OrderExecutionService(
+                self._exchange_manager,
+                retry_policy=self._retry_policy,
+                timeout=self._timeout,
+            )
+        return self._order_execution
 
     def set_config(self, config):
         self._config = config
@@ -293,6 +314,51 @@ class RiskManager:
             quantity=quantity,
         )
 
+    _NEEDS_MANUAL_REVIEW = frozenset(
+        {
+            ExecutionOutcome.UNRECONCILED,
+            ExecutionOutcome.UNKNOWN_STATUS,
+            ExecutionOutcome.QUARANTINED,
+        }
+    )
+
+    def _publish_execution_alert(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        execution,
+    ) -> None:
+        """
+        Sprint 4: surfaces execution outcomes that cannot be resolved
+        automatically (unreconciled/unknown-status/quarantined orders) as
+        an event, so a future UI banner or Telegram alert (Sprint 11/12)
+        can notify an operator instead of this only ever showing up in a
+        log file.
+        """
+        if execution.outcome not in self._NEEDS_MANUAL_REVIEW:
+            return
+
+        logger.critical(
+            "[EXEC ALERT] symbol=%s side=%s outcome=%s error=%s -- "
+            "manual review required",
+            symbol,
+            side,
+            execution.outcome,
+            execution.error,
+        )
+
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "order.needs_manual_review",
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "outcome": execution.outcome,
+                    "error": execution.error,
+                },
+            )
+
     @staticmethod
     def _is_filled_buy_result(result) -> bool:
         if result is None:
@@ -366,10 +432,27 @@ class RiskManager:
             trade,
         )
 
-        result = self._exchange_manager.execute_trade(
+        # Sprint 4: duplicate-order guard, retry/timeout policy, pending
+        # order reconciliation and unknown-status handling all live in
+        # OrderExecutionService -- RiskManager never talks to
+        # ExchangeManager.execute_trade() directly anymore.
+        execution = self._get_order_execution().execute(
             exchange_type,
             validated_trade,
         )
+
+        self._publish_execution_alert(symbol=symbol, side="BUY", execution=execution)
+
+        if not execution.is_filled:
+            logger.warning(
+                "[RISK] Buy order not filled for %s (outcome=%s error=%s)",
+                symbol,
+                execution.outcome,
+                execution.error,
+            )
+            return None
+
+        result = execution.order_result
 
         if not self._is_filled_buy_result(result):
             logger.warning(
@@ -580,25 +663,34 @@ class RiskManager:
             reason,
         )
 
-        result = self._exchange_manager.execute_trade(
+        execution = self._get_order_execution().execute(
             exchange_type,
             trade,
         )
 
+        self._publish_execution_alert(
+            symbol=position.symbol, side="SELL", execution=execution
+        )
+
+        result = execution.order_result
+
         if result is not None:
             logger.debug(
-                "[SELL STATUS] status=%s price=%.8f filled=%.8f",
+                "[SELL STATUS] outcome=%s status=%s price=%.8f filled=%.8f",
+                execution.outcome,
                 getattr(result, "status", None),
                 getattr(result, "average_price", None) or 0.0,
                 getattr(result, "filled_quantity", None) or 0.0,
             )
 
-        if result is None:
-            logger.error("[SELL FAILED] No result from exchange")
-            return
-
-        if result.status not in {"CLOSED", "FILLED"}:
-            logger.warning("[SELL INCOMPLETE] status=%s", result.status)
+        if not execution.is_filled or result is None:
+            logger.error(
+                "[SELL FAILED] symbol=%s outcome=%s error=%s -- position "
+                "remains OPEN, will be re-attempted on the next tick",
+                position.symbol,
+                execution.outcome,
+                execution.error,
+            )
             return
 
         exit_price = result.average_price

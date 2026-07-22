@@ -237,7 +237,7 @@ def test_open_position_returns_none_when_order_not_filled():
     rm.set_config(make_config())
 
     rm.set_exchange_manager(
-        DummyExchangeManager(balance=1000.0, fill_status="OPEN", fill_ratio=0.0)
+        DummyExchangeManager(balance=1000.0, fill_status="REJECTED", fill_ratio=0.0)
     )
     rm.set_order_validator(DummyOrderValidator())
 
@@ -566,6 +566,46 @@ def test_max_duration_check_skips_positions_within_the_limit():
 
     assert positions.closed == []
     assert exchange_manager.executed_trades == []
+
+
+def test_open_position_publishes_manual_review_alert_on_unreconciled_order():
+    """Sprint 4: an UNRECONCILED/UNKNOWN_STATUS/QUARANTINED outcome must
+    be surfaced through the event bus so a future UI/Telegram alert can
+    notify an operator instead of only ever appearing in a log file."""
+    from app.core.event_bus.event_bus import EventBus
+
+    class WeirdStatusExchangeManager(DummyExchangeManager):
+        def execute_trade(self, exchange_type, trade):
+            self.executed_trades.append((exchange_type, trade))
+            return OrderResult(
+                order_id="order-1",
+                symbol=trade.symbol,
+                side="BUY",
+                status="SOME_WEIRD_STATUS",
+                requested_quantity=float(trade.quantity),
+                filled_quantity=0.0,
+                average_price=None,
+                cost=None,
+                raw={},
+            )
+
+    rm = RiskManager()
+    rm.set_config(make_config())
+    rm.set_exchange_manager(WeirdStatusExchangeManager(balance=1000.0))
+    rm.set_order_validator(DummyOrderValidator())
+    rm.set_position_manager(DummyPositionManager())
+
+    event_bus = EventBus()
+    received = []
+    event_bus.subscribe("order.needs_manual_review", lambda payload: received.append(payload))
+    rm.set_event_bus(event_bus)
+
+    position = rm.open_position(exchange_type="BINANCE", symbol="BTCUSDT", price=100.0)
+
+    assert position is None
+    assert len(received) == 1
+    assert received[0]["symbol"] == "BTCUSDT"
+    assert received[0]["side"] == "BUY"
 
 
 def test_check_break_even_and_trailing_share_the_same_activation_threshold():

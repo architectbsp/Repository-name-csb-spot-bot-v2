@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.1
+Version: 2.2
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -19,6 +19,14 @@ SQLite, applied without a restart) instead of any hardcoded value in
 source, per §10 System Rules; Maximum Position Duration (§8) is now
 actually enforced by a periodic scheduler job instead of being a
 configured-but-unused value.
+
+Changelog (2.1 -> 2.2): added the Order Execution Safety pipeline
+(§8) -- duplicate-order protection, retry policy for transient/
+insufficient-balance failures, bounded timeout, pending-order
+reconciliation (poll -> cancel-with-retry), unknown-status handling and
+symbol quarantine. Previously RiskManager called the exchange directly
+with none of these protections, even though RetryPolicy/Timeout were
+already wired in and unused.
 
 ---
 
@@ -442,6 +450,35 @@ If the exchange rejects an order because of insufficient balance:
 
 ---
 
+## Order Execution Safety
+
+Every BUY and SELL submitted by RiskManager goes through
+`OrderExecutionService` (`app/core/services/order_execution.py`), which
+guarantees:
+
+- **Duplicate order protection**: a symbol can never have two orders in
+  flight at the same time. A second attempt while one is already
+  submitting is rejected before it ever reaches the exchange.
+- **Retry policy**: only transient network errors and insufficient-balance
+  rejections are retried (see "Insufficient Balance" above for the exact
+  numbers); any other exchange rejection (invalid order, generic exchange
+  error) is never retried.
+- **Timeout**: the blocking exchange call is bounded; a call that never
+  returns cannot hang the bot forever.
+- **Pending order reconciliation**: market orders are expected to fill
+  immediately. If the exchange instead reports one as still open, it is
+  polled a bounded number of times, then cancellation is attempted (with
+  its own retries) before giving up.
+- **Unknown order status handling**: a status this module does not
+  recognize as filled/open/terminal is never guessed at (never silently
+  treated as filled or as safe to ignore).
+- **Quarantine**: a symbol left in an unreconciled or unknown-status state
+  is quarantined -- no further order for that symbol is submitted until
+  an operator manually verifies the real exchange state and clears it.
+  This is surfaced as an `order.needs_manual_review` event.
+
+---
+
 # 9. Precision & Data Integrity
 
 ## Reading and Displaying Exchange Data
@@ -588,6 +625,11 @@ The following behaviors are not allowed:
 - Sizing a position above 0.1% of the coin's 24-hour volume.
 - Hardcoding a strategy/risk parameter instead of adding it to
   `SETTINGS_SCHEMA` and reading it from the live configuration object.
+- Submitting a second order for a symbol while one is already in flight.
+- Retrying an exchange rejection that is not insufficient-balance.
+- Treating an unrecognized order status as filled or as safe to ignore.
+- Submitting a new order for a quarantined symbol without an operator
+  first clearing the quarantine.
 
 ---
 

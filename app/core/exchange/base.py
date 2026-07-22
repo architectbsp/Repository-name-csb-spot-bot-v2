@@ -82,6 +82,12 @@ class BaseExchange(ABC):
         self.state = state
         self._markets_cache: dict[str, Any] | None = None
         self._price_stream: PriceStream | None = None
+        # Every concrete subclass assigns its own ccxt client instance to
+        # this attribute in its __init__ (after calling super().__init__).
+        # Declared here so fetch_order/cancel_order below (Sprint 4 order
+        # reconciliation) can be implemented once instead of duplicated
+        # per exchange.
+        self.client: Any = None
 
     @abstractmethod
     def connect(self) -> None:
@@ -172,6 +178,38 @@ class BaseExchange(ABC):
         amount: float,
     ):
         ...
+
+    def fetch_order(
+        self,
+        order_id: str,
+        symbol: str,
+    ) -> OrderResult:
+        """
+        Sprint 4 order reconciliation: re-fetches the current state of a
+        previously submitted order. Used when the initial submission
+        response reports the order as still open (e.g. thin order book on
+        a market order) instead of immediately filled, so the caller can
+        poll for a bounded time before deciding whether to cancel it.
+        """
+        return self._normalize_order_result(
+            self.client.fetch_order(order_id, symbol)
+        )
+
+    def cancel_order(
+        self,
+        order_id: str,
+        symbol: str,
+    ) -> OrderResult:
+        """
+        Sprint 4: cancels an order that never filled within the pending
+        poll window. Callers must retry this a bounded number of times
+        (network hiccups can make a single cancel attempt fail) and treat
+        repeated failure as needing manual reconciliation rather than
+        silently assuming the order went away.
+        """
+        return self._normalize_order_result(
+            self.client.cancel_order(order_id, symbol)
+        )
 
     def _normalize_order_result(
         self,

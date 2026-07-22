@@ -158,6 +158,32 @@ class ExchangeManager:
             amount,
         )
 
+    def fetch_order(
+        self,
+        exchange_type: ExchangeType,
+        order_id: str,
+        symbol: str,
+    ):
+        return self._get_exchange(
+            exchange_type
+        ).fetch_order(
+            order_id,
+            symbol,
+        )
+
+    def cancel_order(
+        self,
+        exchange_type: ExchangeType,
+        order_id: str,
+        symbol: str,
+    ):
+        return self._get_exchange(
+            exchange_type
+        ).cancel_order(
+            order_id,
+            symbol,
+        )
+
 
 
     def start_price_stream(
