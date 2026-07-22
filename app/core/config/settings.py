@@ -45,6 +45,24 @@ class RiskSettings:
     # volume to a single trade.
     max_volume_share_percent: float = 0.1
 
+    # Sprint 8 -- Advanced Position Sizing (docs/BUSINESS_RULES.md §8):
+    # 0 = liquidity-only (legacy: min(balance_cap, liquidity_cap)),
+    # 1 = hybrid (default): also take the min of risk-based, ATR-based
+    #     and volatility-based caps when candle data is available.
+    position_sizing_mode: int = 1
+    # How much of the treasury (percent) may be lost if the hard stop
+    # fires -- drives both risk-based and ATR-based sizing.
+    risk_per_trade_percent: float = 1.0
+    # ATR lookback period (candles) and multiplier for the ATR stop
+    # distance used when computing the ATR-based size cap.
+    atr_period: int = 14
+    atr_multiplier: float = 2.0
+    # Target realized volatility (close-to-close % stdev). The vol-based
+    # cap scales the balance cap by target/realized. 0 disables the
+    # volatility cap entirely.
+    volatility_target_percent: float = 2.0
+    volatility_lookback: int = 20
+
 
 @dataclass(slots=True)
 class StrategySettings:

@@ -15,6 +15,12 @@ def make_config(
     max_position_hours=24,
     partial_tp_activation_percent=0.0,
     partial_tp_sell_percent=50.0,
+    position_sizing_mode=0,
+    risk_per_trade_percent=1.0,
+    atr_period=14,
+    atr_multiplier=2.0,
+    volatility_target_percent=2.0,
+    volatility_lookback=20,
 ):
     return SimpleNamespace(
         risk=SimpleNamespace(
@@ -25,6 +31,12 @@ def make_config(
             trailing_percent=5.0,
             max_balance_utilization_percent=99.5,
             max_volume_share_percent=0.1,
+            position_sizing_mode=position_sizing_mode,
+            risk_per_trade_percent=risk_per_trade_percent,
+            atr_period=atr_period,
+            atr_multiplier=atr_multiplier,
+            volatility_target_percent=volatility_target_percent,
+            volatility_lookback=volatility_lookback,
             partial_tp_activation_percent=partial_tp_activation_percent,
             partial_tp_sell_percent=partial_tp_sell_percent,
         ),
@@ -921,3 +933,186 @@ def test_check_stop_loss_records_a_stage_aware_trade_journal_exit():
     symbol, kwargs = journal.exits[0]
     assert symbol == "BTCUSDT"
     assert kwargs["reason"] == "TRAILING_STOP"
+
+
+# ---- Sprint 8: advanced position sizing ---------------------------------
+
+
+class FakeOhlcvExchangeManager(DummyExchangeManager):
+    def __init__(self, candles, balance=10_000.0):
+        super().__init__(balance=balance)
+        self._candles = candles
+        self.fetch_ohlcv_calls = []
+
+    def fetch_ohlcv(self, exchange_type, symbol, timeframe="1h", limit=200):
+        self.fetch_ohlcv_calls.append((exchange_type, symbol, timeframe, limit))
+        return list(self._candles)
+
+
+def _flat_candles(count=30, price=100.0, pad=1.0):
+    from app.core.domain.candle import Candle
+
+    return [
+        Candle(
+            timestamp=i * 3_600_000,
+            open=price,
+            high=price + pad,
+            low=price - pad,
+            close=price,
+            volume=1.0,
+        )
+        for i in range(count)
+    ]
+
+
+def test_hybrid_sizing_applies_risk_based_cap():
+    """
+    Hybrid mode without candle data still applies the risk-based cap:
+    risk_amount = 10_000 * 1% = 100; stop = 10% -> size = 100 / 0.10 = 1_000.
+    Liquidity/balance caps are much larger, so risk-based wins.
+    """
+    rm = RiskManager()
+    rm.set_config(
+        make_config(
+            position_sizing_mode=1,
+            stop_loss_percent=10.0,
+            risk_per_trade_percent=1.0,
+        )
+    )
+
+    size = rm.calculate_position_size(10_000, volume_24h=50_000_000)
+
+    assert size == 1_000.0
+
+
+def test_hybrid_sizing_applies_atr_based_cap_when_tighter_than_risk():
+    """
+    ATR=2, multiplier=2 -> stop_distance=4 on price=100 (=4%).
+    risk_amount = 10_000 * 1% = 100 -> atr_cap = 100 * 100 / 4 = 2_500.
+    Risk-based with stop_loss=10% -> 1_000, which is tighter, so still 1_000.
+    With a wider hard stop (50%) risk-based = 200; ATR wins at 2_500? No
+    min(balance 9950, liquidity huge, risk 200, atr 2500) = 200.
+    Use stop_loss=50% so ATR (2500) is tighter than risk (200)? Wait
+    risk = 100/0.5 = 200. ATR = 2500. min = 200 still risk.
+    Make ATR tighter: pad=5 -> TR≈10, atr≈10, stop=20, atr_cap=100*100/20=500
+    risk with stop 10% = 1000. min = 500 (ATR).
+    """
+    rm = RiskManager()
+    rm.set_config(
+        make_config(
+            position_sizing_mode=1,
+            stop_loss_percent=10.0,
+            risk_per_trade_percent=1.0,
+            atr_period=14,
+            atr_multiplier=2.0,
+            volatility_target_percent=0.0,  # disable vol cap for this test
+        )
+    )
+    rm.set_exchange_manager(
+        FakeOhlcvExchangeManager(_flat_candles(pad=5.0), balance=10_000.0)
+    )
+
+    size = rm.calculate_position_size(
+        10_000,
+        volume_24h=50_000_000,
+        price=100.0,
+        symbol="BTC/USDT",
+        exchange_type="BINANCE",
+    )
+
+    # ATR ≈ 10, stop_distance = 20, atr_cap = 500; risk_cap = 1_000
+    assert size == 500.0
+
+
+def test_hybrid_sizing_scales_down_for_high_realized_volatility():
+    from app.core.domain.candle import Candle
+
+    # Alternating ±5 closes -> high realized vol vs a 2% target.
+    closes = [100 + (5 if i % 2 else -5) for i in range(30)]
+    candles = [
+        Candle(
+            timestamp=i * 3_600_000,
+            open=c,
+            high=c + 0.1,
+            low=c - 0.1,
+            close=c,
+            volume=1.0,
+        )
+        for i, c in enumerate(closes)
+    ]
+
+    rm = RiskManager()
+    # Wide stop + high risk_per_trade so risk/ATR caps stay above the
+    # vol-scaled balance cap; vol scaling is what should bite.
+    rm.set_config(
+        make_config(
+            position_sizing_mode=1,
+            stop_loss_percent=50.0,
+            risk_per_trade_percent=20.0,
+            atr_period=14,
+            atr_multiplier=0.5,
+            volatility_target_percent=2.0,
+            volatility_lookback=20,
+        )
+    )
+    rm.set_exchange_manager(FakeOhlcvExchangeManager(candles, balance=10_000.0))
+
+    size = rm.calculate_position_size(
+        10_000,
+        volume_24h=50_000_000,
+        price=100.0,
+        symbol="ETH/USDT",
+        exchange_type="BINANCE",
+    )
+
+    balance_cap = 9_950.0
+    # Vol scale is clamped to [0.25, 1.0]; with wild returns it must hit
+    # the floor, so size == 0.25 * balance_cap.
+    assert size == balance_cap * 0.25
+
+
+def test_hybrid_sizing_skips_atr_and_vol_when_ohlcv_unavailable():
+    rm = RiskManager()
+    rm.set_config(
+        make_config(
+            position_sizing_mode=1,
+            stop_loss_percent=10.0,
+            risk_per_trade_percent=1.0,
+        )
+    )
+    # No exchange_manager wired -> candles empty -> only risk + liquidity.
+
+    size = rm.calculate_position_size(
+        10_000,
+        volume_24h=50_000_000,
+        price=100.0,
+        symbol="BTC/USDT",
+        exchange_type="BINANCE",
+    )
+
+    assert size == 1_000.0
+
+
+def test_liquidity_only_mode_ignores_risk_and_atr_caps():
+    rm = RiskManager()
+    rm.set_config(
+        make_config(
+            position_sizing_mode=0,
+            stop_loss_percent=10.0,
+            risk_per_trade_percent=1.0,
+        )
+    )
+    rm.set_exchange_manager(
+        FakeOhlcvExchangeManager(_flat_candles(pad=5.0), balance=10_000.0)
+    )
+
+    size = rm.calculate_position_size(
+        10_000,
+        volume_24h=50_000_000,
+        price=100.0,
+        symbol="BTC/USDT",
+        exchange_type="BINANCE",
+    )
+
+    # Liquidity-only: just the balance cap (99.5% of 10_000).
+    assert size == 9_950.0

@@ -5,6 +5,10 @@ from decimal import Decimal
 from app.core.domain.position import Position
 from app.core.scheduler.job import Job
 from app.core.services.order_execution import ExecutionOutcome, OrderExecutionService
+from app.core.services.volatility import (
+    compute_atr,
+    compute_realized_volatility_percent,
+)
 from app.core.trading.models import TradeRequest, TradeSide
 
 
@@ -15,6 +19,17 @@ _DAILY_RESET_CHECK_INTERVAL_SECONDS = 60
 
 _MAX_DURATION_JOB_NAME = "risk_manager_max_duration_check"
 _MAX_DURATION_CHECK_INTERVAL_SECONDS = 60
+
+# Sprint 8: fixed OHLCV timeframe for ATR / realized-vol sizing. Not a
+# Settings knob (SETTINGS_SCHEMA is numeric-only); 1h + atr_period=14
+# gives a ~14h lookback appropriate for this spot swing bot.
+_SIZING_OHLCV_TIMEFRAME = "1h"
+_SIZING_MODE_LIQUIDITY_ONLY = 0
+_SIZING_MODE_HYBRID = 1
+# Clamp so a dead-flat market can't blow the vol-scaled size past the
+# balance cap, and a spike can't shrink it to a dust amount.
+_VOL_SCALE_MIN = 0.25
+_VOL_SCALE_MAX = 1.0
 
 # Sprint 3: which close_reason to record depending on which stop level
 # actually triggered, instead of a single generic "STOP_LOSS" label that
@@ -188,22 +203,28 @@ class RiskManager:
         self,
         balance: float,
         volume_24h: float | None = None,
+        *,
+        price: float | None = None,
+        symbol: str | None = None,
+        exchange_type=None,
     ) -> float:
         """
-        Dynamic, liquidity-based position sizing
-        (docs/BUSINESS_RULES.md §8): the treasury's own size is not what
-        drives the trade amount -- the smaller of two independent caps
-        is always used, computed with Decimal to avoid float drift on a
-        value that directly determines money at risk:
+        Position sizing (docs/BUSINESS_RULES.md §8).
 
-          - balance cap:   balance * 99.5%   (commission/slippage headroom)
-          - liquidity cap: 24h volume * 0.1% ("binde 1")
+        Always applies the two hard safety caps:
+          - balance cap:   balance * max_balance_utilization_percent
+          - liquidity cap: 24h volume * max_volume_share_percent
 
-        Small treasury (liquidity cap >= balance cap): the whole 99.5% of
-        the balance is committed to the single trade.
-        Large treasury (liquidity cap < balance cap): only the
-        liquidity-safe amount is committed; the remainder stays in the
-        treasury for other opportunities (automatic risk distribution).
+        In hybrid mode (position_sizing_mode=1, the default) the size is
+        further reduced by the *smallest* of the Sprint 8 advanced caps
+        that can be computed for this symbol:
+
+          - risk-based:  (balance * risk_per_trade%) / stop_loss%
+          - ATR-based:   (balance * risk_per_trade%) / (atr*multiplier/price)
+          - volatility:  balance_cap * clamp(target_vol / realized_vol)
+
+        Missing candle data never blocks a trade -- those caps are simply
+        skipped, and sizing falls back to min(balance, liquidity).
         """
         if balance <= 0:
             return 0.0
@@ -213,23 +234,140 @@ class RiskManager:
             str(self._risk.max_balance_utilization_percent)
         ) / Decimal("100")
 
-        if volume_24h is None or volume_24h <= 0:
-            # No liquidity data available -- fall back to the balance cap.
-            return float(balance_cap)
+        caps: list[Decimal] = [balance_cap]
 
-        volume_dec = Decimal(str(volume_24h))
-        liquidity_cap = volume_dec * Decimal(
-            str(self._risk.max_volume_share_percent)
-        ) / Decimal("100")
+        if volume_24h is not None and volume_24h > 0:
+            volume_dec = Decimal(str(volume_24h))
+            liquidity_cap = volume_dec * Decimal(
+                str(self._risk.max_volume_share_percent)
+            ) / Decimal("100")
+            caps.append(liquidity_cap)
 
-        return float(min(balance_cap, liquidity_cap))
+        sizing_mode = int(getattr(self._risk, "position_sizing_mode", _SIZING_MODE_HYBRID))
+
+        if sizing_mode == _SIZING_MODE_HYBRID:
+            risk_cap = self._risk_based_cap(balance_dec)
+            if risk_cap is not None:
+                caps.append(risk_cap)
+
+            candles = self._fetch_sizing_candles(symbol, exchange_type)
+            if candles and price is not None and price > 0:
+                atr_cap = self._atr_based_cap(balance_dec, price, candles)
+                if atr_cap is not None:
+                    caps.append(atr_cap)
+
+                vol_cap = self._volatility_based_cap(balance_cap, candles)
+                if vol_cap is not None:
+                    caps.append(vol_cap)
+
+        return float(min(caps))
+
+    def _risk_based_cap(self, balance: Decimal) -> Decimal | None:
+        """Size so that a hard-stop hit loses at most risk_per_trade% of
+        the treasury. None when stop_loss_percent is unset/zero."""
+        stop_pct = float(getattr(self._risk, "stop_loss_percent", 0.0) or 0.0)
+        risk_pct = float(getattr(self._risk, "risk_per_trade_percent", 0.0) or 0.0)
+
+        if stop_pct <= 0 or risk_pct <= 0:
+            return None
+
+        risk_amount = balance * Decimal(str(risk_pct)) / Decimal("100")
+        return risk_amount / (Decimal(str(stop_pct)) / Decimal("100"))
+
+    def _atr_based_cap(
+        self,
+        balance: Decimal,
+        price: float,
+        candles,
+    ) -> Decimal | None:
+        """Size so that an ATR*multiplier move against the position loses
+        at most risk_per_trade% of the treasury."""
+        period = int(getattr(self._risk, "atr_period", 14) or 14)
+        multiplier = float(getattr(self._risk, "atr_multiplier", 2.0) or 0.0)
+        risk_pct = float(getattr(self._risk, "risk_per_trade_percent", 0.0) or 0.0)
+
+        if multiplier <= 0 or risk_pct <= 0 or price <= 0:
+            return None
+
+        atr = compute_atr(candles, period=period)
+        if atr is None or atr <= 0:
+            return None
+
+        stop_distance = atr * multiplier
+        if stop_distance <= 0:
+            return None
+
+        risk_amount = balance * Decimal(str(risk_pct)) / Decimal("100")
+        # position_value * (stop_distance / price) = risk_amount
+        # => position_value = risk_amount * price / stop_distance
+        return risk_amount * Decimal(str(price)) / Decimal(str(stop_distance))
+
+    def _volatility_based_cap(
+        self,
+        balance_cap: Decimal,
+        candles,
+    ) -> Decimal | None:
+        """Scale the balance cap by target_vol / realized_vol, clamped so
+        a quiet market never exceeds the balance cap and a wild market
+        never sizes below VOL_SCALE_MIN of it."""
+        target = float(getattr(self._risk, "volatility_target_percent", 0.0) or 0.0)
+        lookback = int(getattr(self._risk, "volatility_lookback", 20) or 20)
+
+        if target <= 0:
+            return None
+
+        realized = compute_realized_volatility_percent(candles, lookback=lookback)
+        if realized is None or realized <= 0:
+            return None
+
+        scale = target / realized
+        scale = max(_VOL_SCALE_MIN, min(_VOL_SCALE_MAX, scale))
+        return balance_cap * Decimal(str(scale))
+
+    def _fetch_sizing_candles(self, symbol: str | None, exchange_type):
+        if (
+            symbol is None
+            or exchange_type is None
+            or self._exchange_manager is None
+        ):
+            return []
+
+        period = int(getattr(self._risk, "atr_period", 14) or 14)
+        lookback = int(getattr(self._risk, "volatility_lookback", 20) or 20)
+        # +2 for the prior-close needed by ATR / return math.
+        limit = max(period, lookback) + 2
+
+        try:
+            return self._exchange_manager.fetch_ohlcv(
+                exchange_type,
+                symbol,
+                timeframe=_SIZING_OHLCV_TIMEFRAME,
+                limit=limit,
+            )
+        except Exception:
+            logger.debug(
+                "[RISK] Sizing OHLCV fetch failed for %s -- skipping ATR/vol caps",
+                symbol,
+                exc_info=True,
+            )
+            return []
 
     def has_sufficient_balance(
         self,
         balance: float,
         volume_24h: float | None = None,
+        *,
+        price: float | None = None,
+        symbol: str | None = None,
+        exchange_type=None,
     ) -> bool:
-        return self.calculate_position_size(balance, volume_24h) > 0.0
+        return self.calculate_position_size(
+            balance,
+            volume_24h,
+            price=price,
+            symbol=symbol,
+            exchange_type=exchange_type,
+        ) > 0.0
 
     def is_daily_loss_limit_reached(self, daily_loss_percent: float) -> bool:
         return daily_loss_percent >= self._risk.max_daily_loss_percent
@@ -440,7 +578,13 @@ class RiskManager:
         ):
             return None
 
-        position_value = self.calculate_position_size(balance, volume_24h)
+        position_value = self.calculate_position_size(
+            balance,
+            volume_24h,
+            price=price,
+            symbol=symbol,
+            exchange_type=exchange_type,
+        )
 
         if position_value <= 0:
             return None

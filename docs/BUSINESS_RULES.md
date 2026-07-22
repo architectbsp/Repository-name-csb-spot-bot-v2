@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.7
+Version: 2.8
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -69,6 +69,11 @@ desktop dashboard with a live `DashboardSnapshot` (§8) rebuilt every
 daily PnL, quote balance, in-memory log tail). Ticker prices for the UI
 come from an in-memory cache fed by `ticker.updated` (plus the last
 MarketScanner result) -- the poll never REST-fetches every coin's price.
+
+Changelog (2.7 -> 2.8): advanced Position Sizing (§8) -- hybrid mode
+(default) takes the min of the existing balance/liquidity caps plus
+risk-based, ATR-based and volatility-based caps (editable from the
+Settings screen; falls back gracefully when OHLCV is unavailable).
 
 ---
 
@@ -405,8 +410,7 @@ IDLE
 ## Position Size - Dynamic Sizing & Liquidity Filter
 
 Position size is **not** a fixed percentage of the treasury. It is
-computed dynamically from two independent caps, and the **smaller** of
-the two is always used:
+always bounded by two hard safety caps, and the **smaller** is used:
 
 1. **Balance cap**: at most 99.5% of the available account balance may
    be committed to a single trade. The remaining 0.5% headroom exists so
@@ -417,18 +421,45 @@ the two is always used:
    order can never meaningfully move the market or fail to fill cleanly.
 
 ```
-position_size = min(balance * 99.5%, volume_24h * 0.1%)
+safety_size = min(balance * 99.5%, volume_24h * 0.1%)
 ```
 
 - **Small treasury scenario** (e.g. $1,000): the liquidity cap is
   typically far larger than the balance cap, so `min()` resolves to the
-  balance cap -> the bot commits 99.5% of the account to the single
-  trade.
+  balance cap.
 - **Large treasury scenario** (e.g. $100,000+): the liquidity cap is
-  typically smaller than the balance cap, so `min()` resolves to the
-  liquidity cap -> only the liquidity-safe amount is committed, and the
-  remaining balance stays free for other opportunities (automatic risk
-  distribution across positions).
+  typically smaller than the balance cap, so only the liquidity-safe
+  amount is committed (automatic risk distribution across positions).
+
+### Advanced Position Sizing (Risk / ATR / Volatility)
+
+`position_sizing_mode` (Settings screen):
+
+- **0 = Liquidity-only**: `position_size = safety_size` (legacy behaviour).
+- **1 = Hybrid** (default): also take the min of any advanced caps that
+  can be computed for the symbol. Missing OHLCV never blocks a trade --
+  those caps are skipped and sizing falls back to `safety_size` (plus
+  the risk-based cap, which needs no candles).
+
+Advanced caps (all use Decimal math; all are Settings-editable):
+
+1. **Risk-based**: size so a hard-stop hit loses at most
+   `risk_per_trade_percent` of the treasury:
+   `balance * risk_per_trade% / stop_loss%`.
+2. **ATR-based**: fetch 1h candles from the active exchange only
+   (isolation rule), compute ATR(`atr_period`), treat
+   `ATR * atr_multiplier` as the stop distance:
+   `balance * risk_per_trade% * price / (ATR * atr_multiplier)`.
+3. **Volatility-based**: scale the balance cap by
+   `volatility_target_percent / realized_vol%` (close-to-close sample
+   stdev over `volatility_lookback` returns), clamped to
+   `[0.25, 1.0]` so a quiet market never exceeds the balance cap and a
+   spike never shrinks size below a quarter of it. Set
+   `volatility_target_percent = 0` to disable this cap.
+
+```
+position_size = min(safety_size, risk_cap?, atr_cap?, vol_cap?)
+```
 
 ---
 
