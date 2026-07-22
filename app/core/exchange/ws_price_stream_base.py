@@ -233,6 +233,15 @@ class WebsocketPriceStreamBase(PriceStream, ABC):
         self._connected.set()
         logger.info("[%s] websocket connected", type(self).__name__)
 
+        if self._callback:
+            self._callback(
+                "exchange.connected",
+                {
+                    "stream": type(self).__name__,
+                    "exchange": getattr(self, "exchange_name", type(self).__name__),
+                },
+            )
+
         with self._lock:
             symbols = list(self._symbols)
 
@@ -279,6 +288,17 @@ class WebsocketPriceStreamBase(PriceStream, ABC):
             type(self).__name__,
             error,
         )
+        if self._callback:
+            self._callback(
+                "exchange.disconnected",
+                {
+                    "stream": type(self).__name__,
+                    "exchange": getattr(
+                        self, "exchange_name", type(self).__name__
+                    ),
+                    "error": str(error),
+                },
+            )
 
     def _on_close(self, ws, code, msg) -> None:
         self._connected.clear()
@@ -288,6 +308,17 @@ class WebsocketPriceStreamBase(PriceStream, ABC):
             code,
             msg,
         )
+        if self._callback:
+            self._callback(
+                "exchange.disconnected",
+                {
+                    "stream": type(self).__name__,
+                    "exchange": getattr(
+                        self, "exchange_name", type(self).__name__
+                    ),
+                    "detail": f"closed ({code}): {msg}",
+                },
+            )
 
     def update_symbols(self, symbols: list[str]) -> None:
         symbols = sorted(set(symbols))

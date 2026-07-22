@@ -23,6 +23,8 @@ from app.core.services.chart_service import ChartService
 from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.performance_analytics import PerformanceAnalytics
+from app.core.services.telegram_client import TelegramClient
+from app.core.services.telegram_notifier import TelegramNotifier
 from app.core.services.trade_journal import TradeJournal
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
@@ -172,6 +174,22 @@ class BotEngine:
         self.dashboard_service.set_config(self.config)
         self.dashboard_service.set_bot_running_fn(lambda: self.running)
 
+        # Sprint 11 -- Telegram: opt-in via TELEGRAM_BOT_TOKEN +
+        # TELEGRAM_CHAT_ID. Notifier only sends; trading paths never
+        # depend on Telegram being reachable.
+        self.telegram_client = TelegramClient(
+            self.config.telegram.bot_token,
+            self.config.telegram.chat_id,
+        )
+        self.telegram_notifier = TelegramNotifier(self.telegram_client)
+        self.telegram_notifier.set_config(self.config)
+        self.telegram_notifier.set_event_bus(self.event_bus)
+        self.telegram_notifier.set_scheduler(self.scheduler)
+        self.telegram_notifier.set_exchange_manager(self.exchange)
+        self.telegram_notifier.set_trade_journal(self.trade_journal)
+        self.telegram_notifier.set_risk_manager(self.risk_manager)
+        self.telegram_notifier.set_position_manager(self.position_manager)
+
     def start_price_stream(self) -> None:
         # Per-venue streams only (isolation): never subscribe exchange A's
         # symbols on exchange B's websocket.
@@ -241,6 +259,7 @@ class BotEngine:
             self.position_manager,
             self.risk_manager,
             self.strategy,
+            self.telegram_notifier,
         ):
             module.initialize()
 
@@ -249,6 +268,7 @@ class BotEngine:
 
     def shutdown(self):
         for module in (
+            self.telegram_notifier,
             self.market_scanner,
             self.watch_list,
             self.position_manager,
@@ -266,6 +286,7 @@ class BotEngine:
             self.position_manager,
             self.risk_manager,
             self.strategy,
+            self.telegram_notifier,
         ):
             module.start()
 
@@ -287,6 +308,7 @@ class BotEngine:
         self.running = False
 
         for module in (
+            self.telegram_notifier,
             self.market_scanner,
             self.watch_list,
             self.position_manager,

@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.9
+Version: 3.0
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -83,6 +83,12 @@ Market identity is `(exchange, symbol)` (`market_key`); a ticker from
 exchange A never sizes, opens or closes a position on exchange B.
 Daily-loss treasury and dashboard quote balance are the sum across
 enabled venues; position size still uses that venue's free balance only.
+
+Changelog (2.9 -> 3.0): Telegram notifications (§8) -- optional Bot API
+alerts for BUY / SELL / STOP / ERROR / API disconnect / internet
+disconnect plus daily and weekly PnL summaries. Secrets stay in env
+(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`); a Telegram outage must never
+block trading.
 
 ---
 
@@ -807,6 +813,35 @@ Isolation rules (non-negotiable):
 
 ---
 
+## Telegram Notifications
+
+`TelegramNotifier` (`app/core/services/telegram_notifier.py`) is an
+optional, read-only operator channel. It never places orders and never
+mutates Position / Risk / WatchList state. Send failures are logged and
+ignored so a Telegram outage cannot interrupt trading.
+
+Configuration (environment only -- never stored in SQLite):
+
+- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (required to enable)
+- `TELEGRAM_ENABLED` (optional explicit on/off; defaults to on when both
+  credentials are present)
+- `TELEGRAM_DAILY_SUMMARY_HOUR` (UTC hour, default `0`)
+- `TELEGRAM_WEEKLY_SUMMARY_WEEKDAY` (Monday=0 … Sunday=6, default `0`)
+
+Alert types:
+
+| Event | Source |
+|---|---|
+| **BUY** | `position.opened` after a filled market buy |
+| **SELL** | `position.closed` / `position.partial_exit` (non-stop reasons) |
+| **STOP** | `position.closed` with `HARD_STOP` / `BREAK_EVEN_STOP` / `TRAILING_STOP` |
+| **ERROR** | `order.needs_manual_review`, `risk.daily_loss_limit` |
+| **API Disconnect** | websocket close/error or exchange `ConnectionStatus` flip |
+| **Internet Disconnect** | periodic probe of `api.telegram.org` (state-change only) |
+| **Daily / Weekly Summary** | closed-trade PnL window from Trade Journal |
+
+---
+
 # 11. System Rules
 
 ## Configuration
@@ -830,6 +865,9 @@ Isolation rules (non-negotiable):
 ## Internet Connection
 
 - If the internet connection is lost, the system retries every 10 seconds until connectivity is restored.
+- When Telegram is enabled, an internet / Telegram-API outage also emits a
+  one-shot **INTERNET DISCONNECT** alert (and a reconnect alert when the
+  probe succeeds again). Trading continues independently of Telegram.
 
 ---
 

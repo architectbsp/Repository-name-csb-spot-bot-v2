@@ -131,6 +131,51 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+@dataclass(slots=True)
+class TelegramSettings:
+    """
+    Sprint 11 -- Telegram Bot API notifications.
+
+    Credentials come from the environment only (never Settings UI /
+    SQLite). Enabled when token+chat_id are set and TELEGRAM_ENABLED
+    is not explicitly false; or when TELEGRAM_ENABLED=true.
+    """
+
+    bot_token: str = ""
+    chat_id: str = ""
+    enabled: bool = False
+    # UTC hour (0-23) when the daily summary is sent.
+    daily_summary_hour_utc: int = 0
+    # Monday=0 … Sunday=6 -- weekly summary weekday at the same hour.
+    weekly_summary_weekday: int = 0
+    connectivity_probe_seconds: int = 60
+
+
+def load_telegram_settings() -> TelegramSettings:
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    explicit = os.getenv("TELEGRAM_ENABLED")
+    if explicit is None:
+        enabled = bool(token and chat_id)
+    else:
+        enabled = _env_bool("TELEGRAM_ENABLED", False)
+
+    return TelegramSettings(
+        bot_token=token,
+        chat_id=chat_id,
+        enabled=enabled and bool(token and chat_id),
+        daily_summary_hour_utc=int(
+            os.getenv("TELEGRAM_DAILY_SUMMARY_HOUR", "0")
+        ),
+        weekly_summary_weekday=int(
+            os.getenv("TELEGRAM_WEEKLY_SUMMARY_WEEKDAY", "0")
+        ),
+        connectivity_probe_seconds=int(
+            os.getenv("TELEGRAM_CONNECTIVITY_PROBE_SECONDS", "60")
+        ),
+    )
+
+
 def load_exchange_settings_list() -> list[ExchangeSettings]:
     """
     Sprint 18 -- builds one ExchangeSettings per enabled venue.
@@ -191,6 +236,7 @@ class AppSettings:
     strategy: StrategySettings = field(default_factory=StrategySettings)
     connectivity: ConnectivitySettings = field(default_factory=ConnectivitySettings)
     exchange: ExchangeSettings = field(default_factory=ExchangeSettings)
+    telegram: TelegramSettings = field(default_factory=load_telegram_settings)
     retry_policy: RetryPolicySettings = field(default_factory=RetryPolicySettings)
     timeout: TimeoutSettings = field(default_factory=TimeoutSettings)
     rate_limiter: RateLimiterSettings = field(default_factory=RateLimiterSettings)

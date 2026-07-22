@@ -90,6 +90,8 @@ class RiskManager:
         self._trading_day: date | None = None
         self._day_start_balance: float | None = None
         self._realized_pnl_today: float = 0.0
+        # Sprint 11: fire risk.daily_loss_limit at most once per UTC day.
+        self._daily_loss_alerted: bool = False
 
         # Sprint 4: built lazily on first real order submission (see
         # _get_order_execution) so every setter above has already run by
@@ -387,6 +389,7 @@ class RiskManager:
         self._trading_day = today
         self._day_start_balance = balance
         self._realized_pnl_today = 0.0
+        self._daily_loss_alerted = False
 
         logger.info(
             "[RISK] New UTC trading day started; day_start_balance=%.8f",
@@ -467,6 +470,18 @@ class RiskManager:
                 self.current_daily_loss_percent(),
                 self._risk.max_daily_loss_percent,
             )
+            if not self._daily_loss_alerted:
+                self._daily_loss_alerted = True
+                if self._event_bus is not None:
+                    self._event_bus.publish(
+                        "risk.daily_loss_limit",
+                        {
+                            "daily_loss_percent": (
+                                self.current_daily_loss_percent()
+                            ),
+                            "limit_percent": self._risk.max_daily_loss_percent,
+                        },
+                    )
 
     def can_open_trade(
         self,
@@ -694,6 +709,19 @@ class RiskManager:
             stop_price,
         )
 
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "position.opened",
+                {
+                    "symbol": symbol,
+                    "exchange": getattr(exchange_type, "name", exchange_type),
+                    "entry_price": entry_price,
+                    "quantity": position.quantity,
+                    "stop_price": stop_price,
+                    "position": position,
+                },
+            )
+
         return position
 
     def on_price_tick(
@@ -874,6 +902,9 @@ class RiskManager:
                 "position.partial_exit",
                 {
                     "symbol": position.symbol,
+                    "exchange": getattr(
+                        position.exchange, "name", position.exchange
+                    ),
                     "quantity": filled_quantity,
                     "exit_price": exit_price,
                     "realized_pnl": realized,
