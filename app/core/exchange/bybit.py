@@ -1,7 +1,8 @@
 import ccxt
 
 from app.core.config.settings import ExchangeSettings
-from app.core.exchange.base import BaseExchange
+from app.core.exchange.base import BaseExchange, enable_sandbox_mode
+from app.core.exchange.bybit_price_stream import BybitPriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
 
@@ -17,12 +18,20 @@ class BybitExchange(BaseExchange):
             {
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
+                "enableRateLimit": True,
                 "options": {
                     "defaultType": "spot",
                 },
-                "sandbox": settings.testnet,
             }
         )
+
+        enable_sandbox_mode(
+            self.client,
+            testnet=settings.testnet,
+            exchange_name="BYBIT",
+        )
+
+        self._price_stream = BybitPriceStream(testnet=settings.testnet)
 
     def connect(self) -> None:
         self.state.status = ConnectionStatus.CONNECTING

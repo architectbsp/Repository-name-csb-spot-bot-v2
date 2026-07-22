@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 class EventBus:
@@ -40,7 +44,15 @@ class EventBus:
         subscribers = self._subscribers.get(event, [])
 
         for callback in tuple(subscribers):
-            callback(*args, **kwargs)
+            try:
+                callback(*args, **kwargs)
+            except Exception as e:
+                logger.error(
+                    "[EventBus] Callback exception for event '%s': %s",
+                    event,
+                    type(e).__name__,
+                    exc_info=True,
+                )
 
     def has_subscribers(self, event: str) -> bool:
         return bool(self._subscribers.get(event))

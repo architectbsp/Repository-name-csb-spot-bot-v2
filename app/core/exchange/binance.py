@@ -1,7 +1,7 @@
 import ccxt
 
 from app.core.config.settings import ExchangeSettings
-from app.core.exchange.base import BaseExchange
+from app.core.exchange.base import BaseExchange, enable_sandbox_mode
 from app.core.exchange.binance_price_stream import BinancePriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
@@ -18,14 +18,17 @@ class BinanceExchange(BaseExchange):
             {
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
-                "sandbox": settings.testnet,
+                "enableRateLimit": True,
             }
         )
 
-        if settings.testnet:
-            self.client.set_sandbox_mode(True)
+        enable_sandbox_mode(
+            self.client,
+            testnet=settings.testnet,
+            exchange_name="BINANCE",
+        )
 
-        self._price_stream = BinancePriceStream()
+        self._price_stream = BinancePriceStream(testnet=settings.testnet)
 
     def connect(self) -> None:
         self.state.status = ConnectionStatus.CONNECTING

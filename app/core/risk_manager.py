@@ -1,4 +1,9 @@
 import logging
+from datetime import UTC, datetime
+from decimal import Decimal
+
+from app.core.domain.position import Position
+from app.core.trading.models import TradeRequest, TradeSide
 
 
 logger = logging.getLogger(__name__)
@@ -16,6 +21,7 @@ class RiskManager:
         "timer",
         "stopwatch",
         "position_manager",
+        "order_validator",
         "config",
     )
 
@@ -33,6 +39,7 @@ class RiskManager:
         self._timer = None
         self._stopwatch = None
         self._position_manager = None
+        self._order_validator = None
         self._config = None
 
     def initialize(self) -> None:
@@ -86,6 +93,9 @@ class RiskManager:
     def set_position_manager(self, position_manager):
         self._position_manager = position_manager
 
+    def set_order_validator(self, order_validator):
+        self._order_validator = order_validator
+
     def set_config(self, config):
         self._config = config
 
@@ -128,6 +138,134 @@ class RiskManager:
         logger.debug("[RISK] Trade accepted")
         return True
 
+    @staticmethod
+    def create_trade_request(
+        *,
+        symbol: str,
+        quantity: Decimal,
+        side: TradeSide = TradeSide.BUY,
+    ) -> TradeRequest:
+        return TradeRequest(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+        )
+
+    @staticmethod
+    def _is_filled_buy_result(result) -> bool:
+        if result is None:
+            return False
+
+        return (
+            str(getattr(result, "status", "")).upper() in {"CLOSED", "FILLED"}
+            and float(getattr(result, "filled_quantity", 0.0) or 0.0) > 0.0
+        )
+
+    def open_position(
+        self,
+        *,
+        exchange_type,
+        symbol: str,
+        price: float,
+        stop_loss_percent: float,
+    ) -> Position | None:
+        """
+        Full buy-side trade-permission and execution workflow.
+
+        This is the single entry point through which a new position may be
+        opened: balance validation, position sizing, trade-permission
+        checks, order validation and order submission all happen here.
+
+        BUSINESS_RULES.md #11 forbids Strategy from sending exchange orders
+        directly, so Strategy must only call this method with a candidate
+        signal and react to the returned Position (or None on rejection).
+        """
+        if (
+            self._exchange_manager is None
+            or self._position_manager is None
+            or self._order_validator is None
+        ):
+            logger.error(
+                "[RISK] open_position missing required dependencies "
+                "(exchange_manager=%s position_manager=%s order_validator=%s)",
+                self._exchange_manager is not None,
+                self._position_manager is not None,
+                self._order_validator is not None,
+            )
+            return None
+
+        balance = self._exchange_manager.get_quote_balance(exchange_type)
+
+        if not self.can_open_trade(
+            balance=balance,
+            daily_loss_percent=0.0,
+            open_positions=self._position_manager.open_count(),
+        ):
+            return None
+
+        position_value = self.calculate_position_size(balance)
+
+        if position_value <= 0:
+            return None
+
+        quantity = position_value / price
+
+        trade = self.create_trade_request(
+            symbol=symbol,
+            quantity=Decimal(str(quantity)),
+        )
+
+        validated_trade = self._order_validator.validate(
+            exchange_type,
+            trade,
+        )
+
+        result = self._exchange_manager.execute_trade(
+            exchange_type,
+            validated_trade,
+        )
+
+        if not self._is_filled_buy_result(result):
+            logger.warning(
+                "[RISK] Buy order not filled for %s (status=%s)",
+                symbol,
+                getattr(result, "status", None),
+            )
+            return None
+
+        entry_price = result.average_price
+
+        if entry_price is None or entry_price <= 0:
+            entry_price = price
+
+        stop_price = entry_price * (1 - stop_loss_percent / 100)
+
+        position = Position(
+            symbol=symbol,
+            entry_price=entry_price,
+            quantity=float(result.filled_quantity),
+            opened_at=datetime.now(UTC),
+            stop_price=stop_price,
+            exchange=exchange_type,
+        )
+
+        if not self._position_manager.add(position):
+            logger.error(
+                "[RISK] PositionManager rejected new position for %s",
+                symbol,
+            )
+            return None
+
+        logger.info(
+            "[BUY EXECUTED] symbol=%s entry=%.8f qty=%.8f stop=%.8f",
+            symbol,
+            entry_price,
+            position.quantity,
+            stop_price,
+        )
+
+        return position
+
     def on_price_tick(
         self,
         ticker,
@@ -152,6 +290,26 @@ class RiskManager:
             return
 
         if not self._running:
+            return
+
+        # Isolated data flow guard (docs/BUSINESS_RULES.md §9): a price
+        # tick from exchange A must never be allowed to trigger a
+        # stop-loss/trailing/break-even action on a position opened on
+        # exchange B. Older positions with no recorded exchange (e.g.
+        # legacy data) are still processed to avoid silently orphaning
+        # them.
+        if (
+            position.exchange is not None
+            and getattr(ticker, "exchange", None) is not None
+            and position.exchange != ticker.exchange
+        ):
+            logger.debug(
+                "[RISK] Ignoring tick for %s from %s; position was opened "
+                "on %s",
+                symbol,
+                ticker.exchange,
+                position.exchange,
+            )
             return
 
         self.update_position(
@@ -186,9 +344,6 @@ class RiskManager:
             return
 
         logger.info("[SELL TRIGGER] symbol=%s last=%.8f stop=%.8f", position.symbol, last_price, position.stop_price)
-
-        from decimal import Decimal
-        from app.core.trading.models import TradeRequest, TradeSide
 
         if position.state.name != "OPEN":
             return

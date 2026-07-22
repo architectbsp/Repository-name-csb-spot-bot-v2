@@ -76,12 +76,50 @@ def test_exchange_manager_fetch_my_trades():
     assert trades == ["trade-1", "trade-2"]
 
 
+def test_active_exchange_type_returns_the_single_enabled_exchange():
+    registry = ExchangeRegistry()
+
+    registry.register(
+        ExchangeType.BYBIT,
+        BinanceExchange(
+            ExchangeState(
+                exchange=ExchangeType.BYBIT,
+                enabled=True,
+            ),
+            ExchangeSettings(),
+        ),
+    )
+
+    manager = ExchangeManager(registry)
+
+    assert manager.active_exchange_type() == ExchangeType.BYBIT
+
+
+def test_active_exchange_type_raises_when_nothing_enabled():
+    manager = ExchangeManager(ExchangeRegistry())
+
+    try:
+        manager.active_exchange_type()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Expected RuntimeError when no exchange is enabled")
+
+
 def test_binance_price_stream_start_stop():
     from app.core.exchange.binance_price_stream import BinancePriceStream
 
     stream = BinancePriceStream()
 
     assert stream.running is False
+
+
+def test_binance_price_stream_uses_testnet_endpoint_when_configured():
+    from app.core.exchange.binance_price_stream import BinancePriceStream
+
+    stream = BinancePriceStream(testnet=True)
+
+    assert stream._base_url == stream.TESTNET_BASE_URL
 
     stream.start([], lambda _: None)
 

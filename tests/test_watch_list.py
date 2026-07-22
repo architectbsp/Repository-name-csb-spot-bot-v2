@@ -1,4 +1,51 @@
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
+from app.core.scheduler.scheduler import Scheduler
 from app.core.watch_list import WatchList, WatchState
+
+
+class DummyExchangeManagerNoActive:
+    def active_exchange_type(self):
+        raise RuntimeError("No enabled exchange is registered.")
+
+
+class DummyExchangeManagerWithActive:
+    def __init__(self, active_type):
+        self._active_type = active_type
+        self.update_price_stream_calls = []
+
+    def active_exchange_type(self):
+        return self._active_type
+
+    def update_price_stream(self, exchange_type, symbols):
+        self.update_price_stream_calls.append((exchange_type, list(symbols)))
+
+
+def test_sync_price_stream_noop_without_exchange():
+    watchlist = WatchList()
+    # No exchange configured at all -- must not raise.
+    watchlist.add("BTCUSDT")
+
+
+def test_sync_price_stream_noop_when_no_exchange_enabled():
+    watchlist = WatchList()
+    watchlist.set_exchange(DummyExchangeManagerNoActive())
+
+    # Must not raise even though active_exchange_type() raises.
+    watchlist.add("BTCUSDT")
+
+
+def test_sync_price_stream_uses_the_single_active_exchange():
+    watchlist = WatchList()
+    exchange_manager = DummyExchangeManagerWithActive("BYBIT")
+    watchlist.set_exchange(exchange_manager)
+
+    watchlist.add("BTCUSDT")
+
+    assert exchange_manager.update_price_stream_calls == [
+        ("BYBIT", ["BTCUSDT"]),
+    ]
 
 
 def test_full_state_machine_lifecycle():
@@ -27,8 +74,6 @@ def test_full_state_machine_lifecycle():
     assert watchlist.close_position("BTCUSDT")
     assert watchlist.get_state("BTCUSDT") == WatchState.POSITION_CLOSED
 
-from datetime import UTC, datetime, timedelta
-
 
 def test_cooldown_lifecycle():
     watchlist = WatchList()
@@ -48,6 +93,107 @@ def test_cooldown_lifecycle():
 
     assert watchlist.finish_cooldown("ETHUSDT")
     assert watchlist.get_state("ETHUSDT") == WatchState.IDLE
+
+
+def _open_position(watchlist: WatchList, symbol: str) -> None:
+    watchlist.add(symbol)
+    watchlist.begin_falling_watch(symbol, 100)
+    watchlist.begin_rising_watch(symbol, 101)
+    watchlist.promote_to_buy_pending(symbol, 102)
+    watchlist.promote_to_position_open(symbol, 102, 98)
+
+
+def test_handle_position_closed_starts_cooldown_automatically():
+    """
+    B2 fix: closing a position must not leave the coin stuck in
+    POSITION_CLOSED forever. It must automatically enter COOLDOWN using
+    the configured cooldown duration (docs/BUSINESS_RULES.md: 4 hours).
+    """
+    watchlist = WatchList()
+    watchlist.set_config(
+        SimpleNamespace(risk=SimpleNamespace(cooldown_hours=4)),
+    )
+
+    _open_position(watchlist, "BTCUSDT")
+
+    watchlist.handle_position_closed({"symbol": "BTCUSDT"})
+
+    assert watchlist.get_state("BTCUSDT") == WatchState.COOLDOWN
+
+    coin = watchlist.get("BTCUSDT")
+    remaining = coin["cooldown_until"] - datetime.now(UTC)
+
+    assert timedelta(hours=3, minutes=59) < remaining <= timedelta(hours=4)
+
+
+def test_handle_position_closed_uses_default_cooldown_without_config():
+    watchlist = WatchList()
+
+    _open_position(watchlist, "BTCUSDT")
+
+    watchlist.handle_position_closed({"symbol": "BTCUSDT"})
+
+    assert watchlist.get_state("BTCUSDT") == WatchState.COOLDOWN
+
+
+def test_process_cooldowns_returns_expired_coins_to_idle():
+    """
+    B2 fix: an expired cooldown must actively transition the coin back to
+    IDLE, independent of the next market scan.
+    """
+    watchlist = WatchList()
+
+    _open_position(watchlist, "BTCUSDT")
+    watchlist.close_position("BTCUSDT")
+
+    already_expired = datetime.now(UTC) - timedelta(seconds=1)
+    watchlist.enter_cooldown("BTCUSDT", already_expired)
+
+    finished = watchlist.process_cooldowns()
+
+    assert finished == 1
+    assert watchlist.get_state("BTCUSDT") == WatchState.IDLE
+
+
+def test_process_cooldowns_keeps_active_cooldowns_untouched():
+    watchlist = WatchList()
+
+    _open_position(watchlist, "ETHUSDT")
+    watchlist.close_position("ETHUSDT")
+
+    still_active = datetime.now(UTC) + timedelta(hours=1)
+    watchlist.enter_cooldown("ETHUSDT", still_active)
+
+    finished = watchlist.process_cooldowns()
+
+    assert finished == 0
+    assert watchlist.get_state("ETHUSDT") == WatchState.COOLDOWN
+
+
+def test_initialize_registers_cooldown_job_with_scheduler():
+    watchlist = WatchList()
+    scheduler = Scheduler()
+
+    watchlist.set_scheduler(scheduler)
+    watchlist.initialize()
+
+    assert scheduler.has_job(WatchList._COOLDOWN_JOB_NAME)
+
+    job = scheduler.get(WatchList._COOLDOWN_JOB_NAME)
+    assert job.callback == watchlist.process_cooldowns
+
+
+def test_cancel_buy_pending_returns_to_rising_watch():
+    watchlist = WatchList()
+
+    watchlist.add("BTCUSDT")
+    watchlist.begin_falling_watch("BTCUSDT", 100)
+    watchlist.begin_rising_watch("BTCUSDT", 101)
+    watchlist.promote_to_buy_pending("BTCUSDT", 102)
+
+    assert watchlist.cancel_buy_pending("BTCUSDT")
+    assert watchlist.get_state("BTCUSDT") == WatchState.WATCH_RISING
+    assert watchlist.get("BTCUSDT")["entry_price"] is None
 
 
 def test_reset_restores_idle_state():

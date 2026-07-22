@@ -4,7 +4,7 @@ from app.core.domain.position import Position, PositionState
 from app.core.persistence.mapper import to_entity
 
 
-MAX_OPEN_POSITIONS = 15
+MAX_OPEN_POSITIONS = 10  # docs/BUSINESS_RULES.md §3/§8: max 10 simultaneous positions.
 
 
 class PositionManager:

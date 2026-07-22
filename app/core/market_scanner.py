@@ -1,7 +1,6 @@
 import logging
 
 from app.core.scheduler.job import Job
-from app.core.exchange.models import ExchangeType
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +204,12 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
+            # Isolated data flow (docs/BUSINESS_RULES.md §9): always scan
+            # the currently active exchange, never a hardcoded one, so
+            # watch-list/strategy calculations can never be seeded with
+            # another exchange's ticker data.
             return self._exchange.get_tickers(
-                ExchangeType.BINANCE,
+                self._exchange.active_exchange_type(),
             )
 
         if self.has_rate_limiter():

@@ -1,8 +1,3 @@
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-
-from app.core.domain.position import Position
-from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchState
 
 
@@ -12,11 +7,21 @@ def _cfg(config):
 
 
 class Strategy:
+    """
+    Generates entry signals only.
+
+    Per docs/BUSINESS_RULES.md #11 and docs/ARCHITECTURE.md, Strategy must
+    never send exchange orders, manage positions or perform risk
+    validation itself. Every candidate BUY signal is handed to
+    RiskManager.open_position(), which owns trade-permission checks,
+    position sizing, order validation, order submission and position
+    registration. Strategy only reacts to the resulting Position (or None)
+    to update WatchList bookkeeping.
+    """
+
     _DEPENDENCY_NAMES = (
         "risk_manager",
         "position_manager",
-        "exchange_manager",
-        "order_validator",
         "config",
     )
 
@@ -26,8 +31,6 @@ class Strategy:
 
         self._risk_manager = None
         self._position_manager = None
-        self._exchange_manager = None
-        self._order_validator = None
         self._config = None
 
     def initialize(self) -> None:
@@ -56,12 +59,6 @@ class Strategy:
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
-
-    def set_exchange_manager(self, exchange_manager) -> None:
-        self._exchange_manager = exchange_manager
-
-    def set_order_validator(self, order_validator) -> None:
-        self._order_validator = order_validator
 
     def set_config(self, config) -> None:
         self._config = config
@@ -147,73 +144,30 @@ class Strategy:
             ticker.last_price,
         )
 
-        balance = self._exchange_manager.get_quote_balance(
-            ticker.exchange,
-        )
-
-        if not self._risk_manager.can_open_trade(
-            balance=balance,
-            daily_loss_percent=0.0,
-            open_positions=self._position_manager.open_count(),
-        ):
+        if self._risk_manager is None:
+            watch_list.cancel_buy_pending(ticker.symbol)
             return
 
-        position_value = (
-            self._risk_manager.calculate_position_size(
-                balance,
-            )
-        )
-
-        if position_value <= 0:
-            return
-
-        quantity = position_value / ticker.last_price
-
-        trade = self.create_trade_request(
+        # Strategy never talks to the exchange directly (BUSINESS_RULES.md
+        # #11). RiskManager performs the balance check, position sizing,
+        # order validation, order submission and position registration,
+        # and returns the resulting Position (or None if rejected/unfilled).
+        position = self._risk_manager.open_position(
+            exchange_type=ticker.exchange,
             symbol=ticker.symbol,
-            quantity=Decimal(str(quantity)),
+            price=ticker.last_price,
+            stop_loss_percent=_cfg(self._config).stop_loss_percent,
         )
 
-        result = self.execute_trade(
-            ticker.exchange,
-            trade,
-        )
-
-
-        if not result:
+        if position is None:
+            watch_list.cancel_buy_pending(ticker.symbol)
             return
-
-        stop_price = (
-            ticker.last_price
-            * (1 - _cfg(self._config).stop_loss_percent / 100)
-        )
 
         watch_list.promote_to_position_open(
             ticker.symbol,
-            ticker.last_price,
-            stop_price,
+            position.entry_price,
+            position.stop_price,
         )
-
-        filled_quantity = float(result.filled_quantity)
-
-        if filled_quantity <= 0:
-            filled_quantity = float(trade.quantity)
-
-        entry_price = result.average_price
-
-        if entry_price is None or entry_price <= 0:
-            entry_price = ticker.last_price
-
-        if self._position_manager is not None:
-            self._position_manager.add(
-                Position(
-                    symbol=ticker.symbol,
-                    entry_price=entry_price,
-                    quantity=filled_quantity,
-                    opened_at=datetime.now(UTC),
-                    stop_price=stop_price,
-                )
-            )
 
     def _handle_position_open(
         self,
@@ -235,41 +189,6 @@ class Strategy:
                 ticker.symbol,
                 ticker.last_price,
             )
-
-    def create_trade_request(
-        self,
-        *,
-        symbol: str,
-        quantity: Decimal,
-        side: TradeSide = TradeSide.BUY,
-    ) -> TradeRequest:
-        return TradeRequest(
-            symbol=symbol,
-            side=side,
-            quantity=quantity,
-        )
-
-    def execute_trade(
-        self,
-        exchange_type,
-        trade: TradeRequest,
-    ):
-        if self._exchange_manager is None:
-            raise RuntimeError("ExchangeManager is not configured.")
-
-        if self._order_validator is None:
-            raise RuntimeError("OrderValidator is not configured.")
-
-        validated_trade = self._order_validator.validate(
-            exchange_type,
-            trade,
-        )
-
-        return self._exchange_manager.execute_trade(
-            exchange_type,
-            validated_trade,
-        )
-
 
     def on_price_tick(
         self,

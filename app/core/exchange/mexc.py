@@ -1,7 +1,8 @@
 import ccxt
 
 from app.core.config.settings import ExchangeSettings
-from app.core.exchange.base import BaseExchange
+from app.core.exchange.base import BaseExchange, enable_sandbox_mode
+from app.core.exchange.mexc_price_stream import MEXCPriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
 
@@ -17,12 +18,23 @@ class MEXCExchange(BaseExchange):
             {
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
+                "enableRateLimit": True,
                 "options": {
                     "defaultType": "spot",
                 },
-                "sandbox": settings.testnet,
             }
         )
+
+        # MEXC spot has no ccxt sandbox environment; enable_sandbox_mode
+        # will log a warning instead of silently trading live if testnet
+        # was requested.
+        enable_sandbox_mode(
+            self.client,
+            testnet=settings.testnet,
+            exchange_name="MEXC",
+        )
+
+        self._price_stream = MEXCPriceStream(testnet=settings.testnet)
 
     def connect(self) -> None:
         self.state.status = ConnectionStatus.CONNECTING

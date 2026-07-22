@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -8,6 +9,35 @@ from app.core.exchange.models import (
     TradeFill,
 )
 from app.core.exchange.stream import PriceStream
+
+
+logger = logging.getLogger(__name__)
+
+
+def enable_sandbox_mode(client: Any, *, testnet: bool, exchange_name: str) -> None:
+    """
+    Safely enables ccxt's sandbox/testnet mode for `client` when `testnet`
+    is True.
+
+    Not every exchange ccxt integration ships a sandbox/test environment
+    (e.g. Kraken spot and MEXC do not). Calling `set_sandbox_mode` on those
+    either no-ops or raises depending on the ccxt version, so failures are
+    caught and logged loudly instead of silently leaving the caller unsure
+    whether real-money endpoints are in use.
+    """
+    if not testnet:
+        return
+
+    try:
+        client.set_sandbox_mode(True)
+    except Exception as exc:
+        logger.warning(
+            "[%s] Testnet requested but ccxt has no sandbox environment "
+            "for this exchange (%s). Requests will target the LIVE "
+            "endpoint -- do not trade real funds unless that is intended.",
+            exchange_name,
+            exc,
+        )
 
 
 class BaseExchange(ABC):

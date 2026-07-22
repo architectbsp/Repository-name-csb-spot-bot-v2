@@ -1,8 +1,9 @@
 import ccxt
 
 from app.core.config.settings import ExchangeSettings
-from app.core.exchange.base import BaseExchange
+from app.core.exchange.base import BaseExchange, enable_sandbox_mode
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
+from app.core.exchange.okx_price_stream import OKXPriceStream
 
 
 class OKXExchange(BaseExchange):
@@ -17,12 +18,20 @@ class OKXExchange(BaseExchange):
             {
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
+                "enableRateLimit": True,
                 "options": {
                     "defaultType": "spot",
                 },
-                "sandbox": settings.testnet,
             }
         )
+
+        enable_sandbox_mode(
+            self.client,
+            testnet=settings.testnet,
+            exchange_name="OKX",
+        )
+
+        self._price_stream = OKXPriceStream(testnet=settings.testnet)
 
     def connect(self) -> None:
         self.state.status = ConnectionStatus.CONNECTING

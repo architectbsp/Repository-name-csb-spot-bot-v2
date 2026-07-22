@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 class BinancePriceStream(PriceStream):
     BASE_URL = "wss://stream.binance.com:9443/ws"
+    TESTNET_BASE_URL = "wss://stream.testnet.binance.vision/ws"
 
-    def __init__(self) -> None:
+    def __init__(self, *, testnet: bool = False) -> None:
+        self._base_url = self.TESTNET_BASE_URL if testnet else self.BASE_URL
         self._running = False
         self._symbols: list[str] = []
         self._lock = threading.RLock()
@@ -84,7 +86,7 @@ class BinancePriceStream(PriceStream):
         while not self._stop_event.is_set():
 
             self._ws = websocket.WebSocketApp(
-                self.BASE_URL,
+                self._base_url,
                 on_open=self._on_open,
                 on_message=self._on_message,
                 on_error=self._on_error,

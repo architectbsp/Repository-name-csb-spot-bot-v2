@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from app.core.exchange.models import ExchangeType
+
 
 class PositionState(StrEnum):
     OPEN = "OPEN"
@@ -22,3 +24,7 @@ class Position:
     pnl_percent: float | None = None
     close_reason: str | None = None
     state: PositionState = PositionState.OPEN
+    # Which exchange this position was opened on (docs/BUSINESS_RULES.md
+    # §9 isolated data flow). Used to guard against ever acting on a
+    # position using price ticks from a different exchange.
+    exchange: ExchangeType | None = None

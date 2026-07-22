@@ -1,8 +1,10 @@
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 import threading
 from typing import Any
+
+from app.core.scheduler.job import Job
 
 
 class WatchState(StrEnum):
@@ -21,7 +23,7 @@ _ALLOWED_TRANSITIONS = {
     WatchState.IDLE: {WatchState.WATCH_FALLING, WatchState.WATCH_RISING},
     WatchState.WATCH_FALLING: {WatchState.WATCH_RISING},
     WatchState.WATCH_RISING: {WatchState.BUY_PENDING},
-    WatchState.BUY_PENDING: {WatchState.POSITION_OPEN},
+    WatchState.BUY_PENDING: {WatchState.WATCH_RISING, WatchState.POSITION_OPEN},
     WatchState.POSITION_OPEN: {WatchState.BREAK_EVEN, WatchState.POSITION_CLOSED},
     WatchState.BREAK_EVEN: {WatchState.TRAILING_ACTIVE, WatchState.POSITION_CLOSED},
     WatchState.TRAILING_ACTIVE: {WatchState.POSITION_CLOSED},
@@ -44,6 +46,10 @@ class WatchList:
         "strategy",
     )
 
+    _COOLDOWN_JOB_NAME = "watch_list_cooldown"
+    _COOLDOWN_CHECK_INTERVAL_SECONDS = 60
+    _DEFAULT_COOLDOWN_HOURS = 4.0
+
     def __init__(self) -> None:
         self._coins: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
@@ -63,6 +69,17 @@ class WatchList:
 
     def initialize(self) -> None:
         self._initialized = True
+
+        if self.has_scheduler() and not self._scheduler.has_job(
+            self._COOLDOWN_JOB_NAME,
+        ):
+            job = Job(
+                name=self._COOLDOWN_JOB_NAME,
+                interval=self._COOLDOWN_CHECK_INTERVAL_SECONDS,
+                callback=self.process_cooldowns,
+            )
+            self._scheduler.register(job)
+            self._scheduler.schedule(job)
 
     def shutdown(self) -> None:
         self._running = False
@@ -109,13 +126,16 @@ class WatchList:
         if self._exchange is None:
             return
 
-        enabled = self._exchange.enabled()
-
-        if not enabled:
+        try:
+            active_exchange_type = self._exchange.active_exchange_type()
+        except RuntimeError:
             return
 
+        # Isolated data flow (docs/BUSINESS_RULES.md §9): watch-list
+        # symbols are always subscribed against the single active
+        # exchange's own price stream, never a different one.
         self._exchange.update_price_stream(
-            enabled[0].state.exchange,
+            active_exchange_type,
             self.get_symbols(),
         )
 
@@ -242,6 +262,15 @@ class WatchList:
         coin["stop_price"] = stop_price
         coin["updated_at"] = datetime.now(UTC)
 
+        return True
+
+    def cancel_buy_pending(self, symbol: str) -> bool:
+        if not self.transition(symbol, WatchState.WATCH_RISING):
+            return False
+
+        coin = self._coins[symbol]
+        coin["entry_price"] = None
+        coin["updated_at"] = datetime.now(UTC)
         return True
 
 
@@ -527,7 +556,55 @@ class WatchList:
         if symbol not in self._coins:
             return
 
-        self.close_position(symbol)
+        if not self.close_position(symbol):
+            return
+
+        cooldown_until = datetime.now(UTC) + timedelta(
+            hours=self._cooldown_hours(),
+        )
+
+        self.enter_cooldown(symbol, cooldown_until)
+
+    def _cooldown_hours(self) -> float:
+        if self._config is None:
+            return self._DEFAULT_COOLDOWN_HOURS
+
+        risk_config = getattr(self._config, "risk", self._config)
+
+        return float(
+            getattr(
+                risk_config,
+                "cooldown_hours",
+                self._DEFAULT_COOLDOWN_HOURS,
+            )
+        )
+
+    def process_cooldowns(self, now: datetime | None = None) -> int:
+        """
+        Transitions every coin whose cooldown period has expired back to
+        IDLE. Registered as a periodic scheduler job so a coin becomes
+        eligible for trading again exactly when its cooldown ends, instead
+        of only lazily on the next market scan.
+        """
+        now = now or datetime.now(UTC)
+
+        with self._lock:
+            symbols_in_cooldown = [
+                symbol
+                for symbol, coin in self._coins.items()
+                if coin["state"] == WatchState.COOLDOWN
+            ]
+
+        finished = 0
+
+        for symbol in symbols_in_cooldown:
+            if not self.cooldown_expired(symbol, now):
+                continue
+
+            if self.finish_cooldown(symbol):
+                finished += 1
+
+        return finished
 
     def handle_price_update(self, ticker) -> None:
 

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from app.core.exchange.models import ExchangeType
 from app.core.market_scanner import MarketScanner
 
 
@@ -42,3 +43,51 @@ def test_filter_symbols():
 
     assert len(result) == 1
     assert result[0].symbol == "B/USDT"
+
+
+class DummyExchangeManager:
+    """Records which exchange type get_tickers() was called with, so we
+    can prove fetch_symbols() never hardcodes an exchange (isolated data
+    flow, docs/BUSINESS_RULES.md §9)."""
+
+    def __init__(self, active_type):
+        self._active_type = active_type
+        self.get_tickers_calls = []
+
+    def active_exchange_type(self):
+        return self._active_type
+
+    def get_tickers(self, exchange_type):
+        self.get_tickers_calls.append(exchange_type)
+        return ["ticker-1", "ticker-2"]
+
+
+def test_fetch_symbols_uses_the_active_exchange_dynamically():
+    scanner = MarketScanner()
+    scanner.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(ExchangeType.BYBIT)
+    scanner.set_exchange(exchange_manager)
+
+    result = scanner.fetch_symbols()
+
+    assert result == ["ticker-1", "ticker-2"]
+    assert exchange_manager.get_tickers_calls == [ExchangeType.BYBIT]
+
+
+def test_fetch_symbols_follows_active_exchange_when_it_changes():
+    scanner = MarketScanner()
+    scanner.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(ExchangeType.OKX)
+    scanner.set_exchange(exchange_manager)
+
+    scanner.fetch_symbols()
+
+    exchange_manager._active_type = ExchangeType.KRAKEN
+    scanner.fetch_symbols()
+
+    assert exchange_manager.get_tickers_calls == [
+        ExchangeType.OKX,
+        ExchangeType.KRAKEN,
+    ]

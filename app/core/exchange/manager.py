@@ -35,7 +35,23 @@ class ExchangeManager:
     def enabled(self) -> list[BaseExchange]:
         return self._registry.enabled()
 
+    def active_exchange_type(self) -> ExchangeType:
+        """
+        Returns the single currently-enabled exchange type.
 
+        Per docs/BUSINESS_RULES.md §9, only one exchange connection is
+        active at a time. Every caller that needs "the exchange we are
+        trading on right now" (MarketScanner, WatchList's price-stream
+        sync, BotEngine's price-stream start/stop) must resolve it through
+        this single method instead of hardcoding an exchange, so no code
+        path can ever mix data between exchanges.
+        """
+        enabled = self._registry.enabled()
+
+        if not enabled:
+            raise RuntimeError("No enabled exchange is registered.")
+
+        return enabled[0].state.exchange
 
     def get_price_stream(
         self,

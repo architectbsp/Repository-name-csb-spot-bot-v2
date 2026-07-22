@@ -15,9 +15,8 @@ from app.core.timeout.timeout import Timeout
 from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
-from app.core.exchange.binance import BinanceExchange
+from app.core.exchange.factory import create_exchange
 from app.core.exchange.manager import ExchangeManager
-from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
 from app.core.persistence.service import PersistenceService
@@ -52,15 +51,18 @@ class BotEngine:
         self.stopwatch = Stopwatch()
         self.exchange_registry = ExchangeRegistry()
 
+        # Only one exchange connection is active at a time
+        # (docs/BUSINESS_RULES.md §9). Which exchange class gets
+        # instantiated is decided entirely by the EXCHANGE environment
+        # variable via create_exchange() -- nothing else in this class may
+        # hardcode a specific exchange, so WatchList/Strategy/RiskManager
+        # and the price stream always operate on exactly the exchange the
+        # operator configured.
+        active_exchange = create_exchange(self.config.exchange)
+
         self.exchange_registry.register(
-            ExchangeType.BINANCE,
-            BinanceExchange(
-                ExchangeState(
-                    exchange=ExchangeType.BINANCE,
-                    enabled=True,
-                ),
-                self.config.exchange,
-            ),
+            active_exchange.state.exchange,
+            active_exchange,
         )
 
         self.exchange = ExchangeManager(self.exchange_registry)
@@ -108,25 +110,26 @@ class BotEngine:
         self.risk_manager.set_position_manager(
             self.position_manager,
         )
+        self.risk_manager.set_order_validator(
+            self.order_validator,
+        )
 
         self.strategy = Strategy()
         self.strategy.set_risk_manager(self.risk_manager)
         self.strategy.set_position_manager(self.position_manager)
-        self.strategy.set_exchange_manager(self.exchange)
-        self.strategy.set_order_validator(self.order_validator)
 
         self.watch_list.set_strategy(self.strategy)
 
     def start_price_stream(self) -> None:
         self.exchange.start_price_stream(
-            self.exchange.enabled()[0].state.exchange,
+            self.exchange.active_exchange_type(),
             self.watch_list.get_symbols(),
             self.event_bus.publish,
         )
 
     def stop_price_stream(self) -> None:
         self.exchange.stop_price_stream(
-            self.exchange.enabled()[0].state.exchange,
+            self.exchange.active_exchange_type(),
         )
 
     def initialize(self):
