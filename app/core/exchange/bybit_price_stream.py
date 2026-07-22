@@ -74,4 +74,5 @@ class BybitPriceStream(WebsocketPriceStreamBase):
                 else 0.0
             ),
             timestamp=int(data.get("ts") or 0),
+            raw_last_price=str(last_price),
         )

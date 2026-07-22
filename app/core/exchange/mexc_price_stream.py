@@ -78,4 +78,5 @@ class MEXCPriceStream(WebsocketPriceStreamBase):
                 float(change_rate) * 100 if change_rate is not None else 0.0
             ),
             timestamp=int(payload.get("t") or 0),
+            raw_last_price=str(price),
         )

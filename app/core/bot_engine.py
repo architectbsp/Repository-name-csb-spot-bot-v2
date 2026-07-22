@@ -8,6 +8,7 @@ from app.core.risk_manager import RiskManager
 from app.core.strategy import Strategy
 
 from app.core.config.settings import AppSettings
+from app.core.config.settings_store import SettingsStore
 from app.core.event_bus.event_bus import EventBus
 from app.core.scheduler.scheduler import Scheduler
 from app.core.retry_policy.retry_policy import RetryPolicy
@@ -31,6 +32,19 @@ class BotEngine:
         self.running = False
 
         self.config = AppSettings()
+
+        # docs/BUSINESS_RULES.md: no strategy/risk parameter may stay
+        # hardcoded. Any previously saved values are loaded on top of the
+        # compiled-in defaults *in place* (self.config keeps being the
+        # same shared object every module below receives), so later
+        # Settings-screen edits take effect immediately without a
+        # restart -- see SettingsStore for details.
+        self.persistence = PersistenceService()
+        self.settings_store = SettingsStore(
+            self.persistence.settings_repository(),
+        )
+        self.settings_store.load_into(self.config)
+
         self.event_bus = EventBus()
         self.scheduler = Scheduler()
         self.worker = Worker(self.scheduler)
@@ -52,7 +66,7 @@ class BotEngine:
         self.exchange_registry = ExchangeRegistry()
 
         # Only one exchange connection is active at a time
-        # (docs/BUSINESS_RULES.md §9). Which exchange class gets
+        # (docs/BUSINESS_RULES.md §10). Which exchange class gets
         # instantiated is decided entirely by the EXCHANGE environment
         # variable via create_exchange() -- nothing else in this class may
         # hardcode a specific exchange, so WatchList/Strategy/RiskManager
@@ -67,8 +81,6 @@ class BotEngine:
 
         self.exchange = ExchangeManager(self.exchange_registry)
         self.order_validator = OrderValidator(self.exchange)
-
-        self.persistence = PersistenceService()
 
         self.market_scanner = MarketScanner()
         self.market_scanner.set_exchange(self.exchange)

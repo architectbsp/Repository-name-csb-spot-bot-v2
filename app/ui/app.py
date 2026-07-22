@@ -6,8 +6,9 @@ import flet as ft
 from app.core.bot_engine import BotEngine
 
 from app.ui.theme import setup_page
-from app.ui.components.sidebar import build_sidebar
-from app.ui.components.content import build_content
+from app.ui.components.sidebar import DASHBOARD, SETTINGS, build_sidebar
+from app.ui.components.content import build_dashboard_view
+from app.ui.components.settings_panel import build_settings_view
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,13 @@ def _start_engine_in_background(page: ft.Page, engine: BotEngine) -> None:
         _show_startup_error_dialog(page, exc)
 
 
+def _build_view(view_name: str, engine: BotEngine) -> ft.Control:
+    if view_name == SETTINGS:
+        return build_settings_view(engine.config, engine.settings_store)
+
+    return build_dashboard_view()
+
+
 def main(page: ft.Page):
     setup_page(page)
 
@@ -91,16 +99,28 @@ def main(page: ft.Page):
 
     page.window.on_event = on_window_event
 
+    content_area = ft.Container(
+        expand=True,
+        content=_build_view(DASHBOARD, engine),
+    )
+
+    sidebar_area = ft.Container()
+
+    def navigate(view_name: str) -> None:
+        sidebar_area.content = build_sidebar(view_name, navigate)
+        content_area.content = _build_view(view_name, engine)
+        sidebar_area.update()
+        content_area.update()
+
+    sidebar_area.content = build_sidebar(DASHBOARD, navigate)
+
     page.add(
         ft.Row(
             expand=True,
             spacing=15,
             controls=[
-                build_sidebar(),
-                ft.Container(
-                    expand=True,
-                    content=build_content(),
-                ),
+                sidebar_area,
+                content_area,
             ],
         )
     )

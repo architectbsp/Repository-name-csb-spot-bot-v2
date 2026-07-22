@@ -101,13 +101,32 @@ class Strategy:
             self._handle_rising_watch(watch_list, ticker)
 
     def _handle_idle(self, watch_list, ticker) -> None:
-        if ticker.change_24h > -_cfg(self._config).watch_percent:
+        """
+        docs/BUSINESS_RULES.md §2 defines two entry paths into the same
+        strategy: Path A (price is already rising -- no prior dip) and
+        Path B (price falls first, then reverses). Both must lead into
+        WATCH_RISING with identical watch/entry parameters from then on;
+        only how a coin *arrives* at WATCH_RISING differs.
+        """
+        watch_percent = _cfg(self._config).watch_percent
+
+        if ticker.change_24h <= -watch_percent:
+            # Path B: price is dropping -- start tracking the low first.
+            watch_list.begin_falling_watch(
+                ticker.symbol,
+                ticker.last_price,
+            )
             return
 
-        watch_list.begin_falling_watch(
-            ticker.symbol,
-            ticker.last_price,
-        )
+        if ticker.change_24h >= watch_percent:
+            # Path A: price is already rising without ever dropping.
+            # Enter WATCH_RISING directly, using the current price as the
+            # reference point the further +entry_percent recovery is
+            # measured from -- identical treatment to Path B once here.
+            watch_list.begin_rising_watch(
+                ticker.symbol,
+                ticker.last_price,
+            )
 
     def _handle_falling_watch(self, watch_list, ticker) -> None:
         watch_list.record_falling_price(
@@ -149,14 +168,18 @@ class Strategy:
             return
 
         # Strategy never talks to the exchange directly (BUSINESS_RULES.md
-        # #11). RiskManager performs the balance check, position sizing,
-        # order validation, order submission and position registration,
-        # and returns the resulting Position (or None if rejected/unfilled).
+        # #12) and never carries its own copy of risk parameters (stop
+        # loss %, position sizing caps all live on RiskManager). RiskManager
+        # performs the balance check, dynamic/liquidity-based position
+        # sizing, order validation, order submission and position
+        # registration, and returns the resulting Position (or None if
+        # rejected/unfilled). `volume_24h` is passed through so RiskManager
+        # can cap the trade at 0.1% of the coin's own liquidity.
         position = self._risk_manager.open_position(
             exchange_type=ticker.exchange,
             symbol=ticker.symbol,
             price=ticker.last_price,
-            stop_loss_percent=_cfg(self._config).stop_loss_percent,
+            volume_24h=ticker.volume_24h,
         )
 
         if position is None:

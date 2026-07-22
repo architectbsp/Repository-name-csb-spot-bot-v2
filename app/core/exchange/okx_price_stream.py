@@ -95,4 +95,5 @@ class OKXPriceStream(WebsocketPriceStreamBase):
             volume_24h=float(quote_volume) if quote_volume else 0.0,
             change_24h=change_24h,
             timestamp=int(payload.get("ts") or 0),
+            raw_last_price=str(last),
         )

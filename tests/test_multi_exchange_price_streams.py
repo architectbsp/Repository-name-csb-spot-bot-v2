@@ -46,6 +46,8 @@ def test_bybit_parses_ticker_message():
     assert ticker.last_price == 21109.77
     assert ticker.volume_24h == 141946527.22
     assert round(ticker.change_24h, 2) == 1.36
+    # docs/BUSINESS_RULES.md §9: the exact wire string must be preserved.
+    assert ticker.raw_last_price == "21109.77"
 
 
 def test_bybit_ignores_non_ticker_messages():
@@ -95,6 +97,7 @@ def test_okx_parses_ticker_message():
     assert ticker.last_price == 21308.5
     assert ticker.volume_24h == 123456.7
     assert ticker.change_24h > 0
+    assert ticker.raw_last_price == "21308.5"
 
 
 def test_okx_ignores_non_ticker_messages():
@@ -145,6 +148,7 @@ def test_kraken_parses_ticker_message():
     # Approximated quote volume = base volume * last price.
     assert ticker.volume_24h == 100.0 * 21095.4
     assert ticker.change_24h == -1.75
+    assert ticker.raw_last_price == "21095.4"
 
 
 def test_kraken_ignores_non_ticker_channels():
@@ -186,6 +190,7 @@ def test_mexc_parses_mini_ticker_message():
     assert ticker.last_price == 21000.00
     assert ticker.volume_24h == 12345678.90
     assert round(ticker.change_24h, 2) == 1.23
+    assert ticker.raw_last_price == "21000.00"
 
 
 def test_mexc_ignores_non_ticker_messages():

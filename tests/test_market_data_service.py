@@ -29,3 +29,20 @@ def test_normalize_tickers():
     assert ticker.volume_24h == 1234567.0
     assert ticker.change_24h == 5.5
     assert ticker.timestamp == 123456789
+    assert ticker.raw_last_price == "100000"
+
+
+def test_normalize_tickers_raw_last_price_is_none_when_last_is_missing():
+    service = MarketDataService()
+
+    tickers = {
+        "ETH/USDT": {
+            "quoteVolume": 1000,
+            "percentage": 0.0,
+            "timestamp": 1,
+        }
+    }
+
+    result = service.normalize_tickers(ExchangeType.BINANCE, tickers)
+
+    assert result[0].raw_last_price is None

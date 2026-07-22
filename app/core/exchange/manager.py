@@ -39,7 +39,7 @@ class ExchangeManager:
         """
         Returns the single currently-enabled exchange type.
 
-        Per docs/BUSINESS_RULES.md §9, only one exchange connection is
+        Per docs/BUSINESS_RULES.md §10, only one exchange connection is
         active at a time. Every caller that needs "the exchange we are
         trading on right now" (MarketScanner, WatchList's price-stream
         sync, BotEngine's price-stream start/stop) must resolve it through
@@ -92,6 +92,19 @@ class ExchangeManager:
         ).normalize_amount(
             symbol,
             amount,
+        )
+
+    def normalize_price(
+        self,
+        exchange_type: ExchangeType,
+        symbol: str,
+        price: float,
+    ) -> float:
+        return self._get_exchange(
+            exchange_type
+        ).normalize_price(
+            symbol,
+            price,
         )
 
 

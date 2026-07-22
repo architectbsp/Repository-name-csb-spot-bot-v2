@@ -2,6 +2,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+import ccxt
+
 from app.core.exchange.models import (
     ExchangeState,
     MarketMetadata,
@@ -12,6 +14,41 @@ from app.core.exchange.stream import PriceStream
 
 
 logger = logging.getLogger(__name__)
+
+
+def truncate_to_precision(
+    client: Any,
+    symbol: str,
+    value: float,
+    *,
+    precision_key: str,
+) -> float:
+    """
+    Truncates (never rounds) `value` to the exchange's LOT_SIZE/stepSize
+    (precision_key="amount") or PRICE_FILTER/tickSize
+    (precision_key="price") precision for `symbol`.
+
+    docs/BUSINESS_RULES.md §9 "Order Submission Armor": this truncation
+    must only ever be applied at the moment an order is actually
+    submitted to the exchange, never earlier while data is only being
+    read, compared or logged. ccxt's own `price_to_precision` rounds by
+    default (only `amount_to_precision` truncates), so TRUNCATE is
+    requested explicitly here for both cases to guarantee we never submit
+    a quantity/price the exchange would reject or that overspends the
+    wallet.
+    """
+    market = client.market(symbol)
+    precision = market["precision"][precision_key]
+
+    result = client.decimal_to_precision(
+        value,
+        ccxt.TRUNCATE,
+        precision,
+        client.precisionMode,
+        client.paddingMode,
+    )
+
+    return float(result)
 
 
 def enable_sandbox_mode(client: Any, *, testnet: bool, exchange_name: str) -> None:
@@ -103,6 +140,21 @@ class BaseExchange(ABC):
         symbol: str,
         amount: float,
     ) -> float:
+        ...
+
+    @abstractmethod
+    def normalize_price(
+        self,
+        symbol: str,
+        price: float,
+    ) -> float:
+        """
+        Truncates `price` to this exchange's PRICE_FILTER/tickSize.
+        Forward-looking infrastructure for any future limit-order support;
+        market orders (the only order type currently placed, per
+        docs/BUSINESS_RULES.md §10) do not submit a price. Must only be
+        called at the moment of order submission (see truncate_to_precision).
+        """
         ...
 
     @abstractmethod

@@ -1,8 +1,24 @@
 # BUSINESS_RULES
 
-Version: 1.0
+Version: 2.1
 Status: Active
 Scope: CSB Spot Bot MVP
+
+Changelog (1.0 -> 2.0): hard stop moved from 5% to 10%; break-even and
+trailing activation merged into a single 2% threshold; trailing distance
+("callback rate") changed from 5% to 2.5%; position sizing changed from a
+fixed 10% of balance to dynamic liquidity-based sizing (§8); daily loss
+limit now resets at 00:00 UTC instead of a rolling 24h suspension (§8);
+added Precision & Data Integrity rules (§9).
+
+Changelog (2.0 -> 2.1): fixed Strategy never actually implementing Entry
+Path A (a coin rising without a prior dip stayed in IDLE forever instead
+of entering WATCH_RISING directly, §2); every strategy/risk parameter in
+this document is now backed by a live Settings screen (persisted in
+SQLite, applied without a restart) instead of any hardcoded value in
+source, per §10 System Rules; Maximum Position Duration (§8) is now
+actually enforced by a periodic scheduler job instead of being a
+configured-but-unused value.
 
 ---
 
@@ -116,14 +132,14 @@ Every coin managed by the system follows the state machine below.
                         | POSITION_OPEN  |
                         +--------+-------+
                                  |
-                         Profit reaches +10%
+                         Profit reaches +2.0%
                                  |
                                  v
                         +----------------+
                         |  BREAK_EVEN    |
                         +--------+-------+
                                  |
-                     Stop moved to Entry Price
+             Stop moved to Entry Price (same instant)
                                  |
                                  v
                         +----------------+
@@ -203,15 +219,18 @@ Exit
 
 Description
 
-The position has reached at least +10% profit.
+The position has reached at least +2.0% profit.
 
 Entry
 
-- Unrealized profit reaches +10%.
+- Unrealized profit reaches +2.0% (the same threshold that activates
+  trailing -- break-even and trailing activation are one single event,
+  not two separate stages).
 
 Responsibilities
 
-- Move the stop loss to the entry price.
+- Move the stop loss to the entry price (0 loss point) immediately, in
+  the same tick that trailing activates.
 - This action is performed only once.
 
 Exit
@@ -229,15 +248,20 @@ TRAILING_ACTIVE
 
 Description
 
-Trailing stop becomes active after break-even.
+Trailing stop becomes active the instant profit reaches +2.0% (same
+trigger as BREAK_EVEN; break-even and trailing activation happen
+together).
 
 Entry
 
-- Break-even completed.
+- Unrealized profit reaches +2.0%.
 
 Responsibilities
 
-- Keep the stop price 5% below the highest price reached after trailing activation.
+- Keep the stop price 2.5% ("callback rate") below the highest price
+  reached since trailing activated, trailing it like a shadow. When the
+  price reverses from the peak by 2.5%, the stop triggers and realizes
+  the profit.
 
 Exit
 
@@ -301,12 +325,16 @@ IDLE
 2. Coin enters WATCH_RISING.
 3. Continue monitoring.
 4. Coin reaches +6%.
-5. Market Buy.
-6. Initial Stop Loss = 5%.
-7. Profit reaches +10%.
-8. Stop moves to entry price.
-9. Trailing stop becomes active with a distance of 5%.
-10. Position closes.
+5. Market Buy. Position size is computed dynamically (§8), not a fixed
+   percentage of the account.
+6. Initial Stop Loss (hard stop) = 10% below entry.
+7. Profit reaches +2.0%.
+8. Stop moves to entry price (break-even) and trailing activates in the
+   same instant.
+9. Trailing stop follows the highest price with a callback distance of
+   2.5%.
+10. Position closes when price reverses 2.5% from its peak (or the hard
+    stop / max duration triggers first).
 11. Coin enters 4-hour cooldown.
 
 ---
@@ -324,9 +352,33 @@ IDLE
 
 # 8. Risk Management
 
-## Position Size
+## Position Size - Dynamic Sizing & Liquidity Filter
 
-- Every new position uses a maximum of 10% of the available account balance.
+Position size is **not** a fixed percentage of the treasury. It is
+computed dynamically from two independent caps, and the **smaller** of
+the two is always used:
+
+1. **Balance cap**: at most 99.5% of the available account balance may
+   be committed to a single trade. The remaining 0.5% headroom exists so
+   commission and slippage never cause an order to be rejected for
+   insufficient balance (never use 100% of the balance).
+2. **Liquidity cap**: at most 0.1% ("binde 1") of the coin's 24-hour
+   quote volume may be committed to a single trade, so the bot's own
+   order can never meaningfully move the market or fail to fill cleanly.
+
+```
+position_size = min(balance * 99.5%, volume_24h * 0.1%)
+```
+
+- **Small treasury scenario** (e.g. $1,000): the liquidity cap is
+  typically far larger than the balance cap, so `min()` resolves to the
+  balance cap -> the bot commits 99.5% of the account to the single
+  trade.
+- **Large treasury scenario** (e.g. $100,000+): the liquidity cap is
+  typically smaller than the balance cap, so `min()` resolves to the
+  liquidity cap -> only the liquidity-safe amount is committed, and the
+  remaining balance stays free for other opportunities (automatic risk
+  distribution across positions).
 
 ---
 
@@ -339,10 +391,36 @@ IDLE
 
 ## Daily Loss Limit
 
-- The daily realized loss limit is 20%.
-- When this limit is reached, the bot must not open any new positions.
-- Trading is suspended for 24 hours.
-- Existing open positions continue to be managed normally.
+- A "trading day" starts the first time each UTC calendar day the bot
+  observes the account balance; that balance becomes the day's starting
+  treasury.
+- The daily loss limit is 20% of the day's starting treasury, tracked
+  against **realized** PnL only (closed positions), not unrealized
+  drawdown on open positions.
+- The instant realized loss reaches 20% of the day-start balance, the
+  bot stops opening new positions ("kepenk kapatma" / circuit breaker).
+- The breaker resets automatically at 00:00 UTC, when a new trading day
+  (and a new starting treasury snapshot) begins.
+- Existing open positions continue to be managed normally (stop
+  loss/trailing/break-even keep working) even while the breaker is
+  active; only new entries are blocked.
+
+---
+
+## Stop Loss / Trailing Stop Integration
+
+- **Hard stop**: a fixed 10% stop loss below the entry price, active
+  from the moment the position opens, as the last-resort safety valve
+  against sudden crashes.
+- **Trailing activation threshold**: the instant unrealized profit
+  reaches +2.0%, trailing stop wakes up.
+- **Break-even (risk reset)**: in the same instant trailing wakes up,
+  the hard stop (waiting at -10%) is moved immediately to the entry
+  price (the 0-loss point). Break-even and trailing activation are one
+  single event sharing the same 2.0% threshold, not two separate stages.
+- **Callback rate (trailing distance)**: once active, the stop trails
+  2.5% behind the highest price reached, like a shadow; when price
+  reverses from the peak by 2.5%, the stop triggers and realizes profit.
 
 ---
 
@@ -364,7 +442,44 @@ If the exchange rejects an order because of insufficient balance:
 
 ---
 
-# 9. Market Rules
+# 9. Precision & Data Integrity
+
+## Reading and Displaying Exchange Data
+
+- Prices and volumes read from an exchange's REST/WebSocket feed must
+  never be rounded for display, logging, or internal comparisons. The
+  value is kept at the precision the exchange sent it at (raw
+  string / `Decimal`), not silently truncated by careless string
+  formatting (e.g. `%.2f`) before it is used or logged.
+- Log lines that print an exchange-sourced price must prefer the raw
+  string the exchange sent over a reformatted float when one is
+  available.
+
+---
+
+## Order Submission Armor
+
+- Truncation (never rounding) to the exchange's `LOT_SIZE`/`stepSize`
+  (quantity) and `PRICE_FILTER`/`tickSize` (price) limits happens
+  **only** at the moment an order is actually submitted to the
+  exchange -- never earlier in the pipeline. Rounding up a quantity
+  could submit more than the wallet can afford; rounding a price could
+  submit an invalid tick. Both must be truncated (floored), and the
+  exchange-specific market metadata (`ccxt` market precision) for the
+  exchange the order executes on is always the source of truth.
+
+---
+
+## Balance Usage Safety
+
+- No order may ever be sized using 100% of the available balance. The
+  hard ceiling is 99.5% of the balance, leaving headroom for commission
+  and slippage so an order is never rejected for insufficient funds (see
+  §8 Position Size).
+
+---
+
+# 10. Market Rules
 
 ## Volume Filter
 
@@ -383,6 +498,7 @@ If the exchange rejects an order because of insufficient balance:
 - Price precision must exactly match the exchange.
 - Quantity precision must exactly match the exchange.
 - The application must never invent its own formatting rules.
+- See §9 for exactly when truncation is (and is not) allowed to happen.
 
 ---
 
@@ -402,7 +518,25 @@ Only one exchange connection is active at a time.
 
 ---
 
-# 10. System Rules
+# 11. System Rules
+
+## Configuration
+
+- No strategy or risk parameter referenced anywhere in this document
+  (watch %, entry %, stop loss, break-even/trailing activation, trailing
+  %, cooldown, max open positions, scan interval, min volume, dynamic
+  sizing caps, max position duration, daily loss limit) may be hardcoded
+  in source.
+- Every such parameter is defined once in `SETTINGS_SCHEMA`
+  (`app/core/config/settings_store.py`), editable from the Settings
+  screen, and persisted to SQLite (`bot_settings` table) so it survives
+  restarts.
+- Saving a change from the Settings screen applies it to the running bot
+  immediately -- Strategy, WatchList, RiskManager and MarketScanner all
+  read the shared, mutable configuration object fresh on every use, so
+  no restart is required for a new value to take effect.
+
+---
 
 ## Internet Connection
 
@@ -437,7 +571,7 @@ The log screen provides:
 
 ---
 
-# 11. Forbidden Behaviors
+# 12. Forbidden Behaviors
 
 The following behaviors are not allowed:
 
@@ -449,10 +583,15 @@ The following behaviors are not allowed:
 - Sending exchange orders directly from Strategy.
 - Sending exchange orders directly from MarketScanner.
 - Implementing business rules outside the defined business layer.
+- Rounding (instead of truncating) quantities/prices at order submission.
+- Using more than 99.5% of the balance for a single order.
+- Sizing a position above 0.1% of the coin's 24-hour volume.
+- Hardcoding a strategy/risk parameter instead of adding it to
+  `SETTINGS_SCHEMA` and reading it from the live configuration object.
 
 ---
 
-# 12. Document Maintenance
+# 13. Document Maintenance
 
 This document is the authoritative reference for the business behavior of the CSB Spot Bot.
 

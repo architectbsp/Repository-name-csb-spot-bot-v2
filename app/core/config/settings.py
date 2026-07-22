@@ -8,21 +8,33 @@ load_dotenv()
 
 @dataclass(slots=True)
 class RiskSettings:
-    """Risk parameters. Values must match docs/BUSINESS_RULES.md exactly."""
+    """Risk parameters. Values must match docs/BUSINESS_RULES.md exactly.
+
+    RiskManager is the sole owner of every risk-related number; Strategy
+    must never carry its own copy of these (see the now-removed duplicate
+    fields that used to live on StrategySettings -- that duplication is
+    exactly the kind of config drift BUSINESS_RULES.md forbids).
+    """
 
     max_daily_loss_percent: float = 20.0
     max_open_positions: int = 10
-    capital_per_trade_percent: float = 10.0
     cooldown_hours: int = 4
 
-    # BUSINESS_RULES.md §6 BREAK_EVEN: activates at +10% unrealized profit.
-    break_even_activation_percent: float = 10.0
-    # BUSINESS_RULES.md §7 Scenario 1: initial stop loss is 5%.
-    stop_loss_percent: float = 5.0
-    # BUSINESS_RULES.md §6 TRAILING_ACTIVE: begins once break-even triggers.
-    trailing_activation_percent: float = 10.0
-    # BUSINESS_RULES.md §6 TRAILING_ACTIVE: trail 5% below the highest price.
-    trailing_percent: float = 5.0
+    # BUSINESS_RULES.md §7 Scenario 1 / §8: hard stop is 10% below entry.
+    stop_loss_percent: float = 10.0
+    # BUSINESS_RULES.md §8 Stop Loss / Trailing Stop Integration:
+    # break-even and trailing activation share this single 2.0% threshold.
+    trailing_activation_percent: float = 2.0
+    # BUSINESS_RULES.md §8: "callback rate" -- trail 2.5% below the peak.
+    trailing_percent: float = 2.5
+
+    # BUSINESS_RULES.md §8 Position Size: dynamic liquidity-based sizing.
+    # Never commit more than 99.5% of the balance to a single trade
+    # (headroom for commission/slippage).
+    max_balance_utilization_percent: float = 99.5
+    # Never commit more than 0.1% ("binde 1") of a coin's 24h quote
+    # volume to a single trade.
+    max_volume_share_percent: float = 0.1
 
 
 @dataclass(slots=True)
@@ -34,11 +46,7 @@ class StrategySettings:
     # BUSINESS_RULES.md §5 FSM: +6% recovery promotes WATCH_RISING to BUY_PENDING.
     entry_percent: float = 6.0
 
-    take_profit_activation: float = 10.0
-    stop_loss_percent: float = 5.0
-    trailing_percent: float = 5.0
-
-    # BUSINESS_RULES.md §9 Volume Filter: minimum 24h volume is 250,000 USD.
+    # BUSINESS_RULES.md §10 Volume Filter: minimum 24h volume is 250,000 USD.
     min_volume_usd: float = 250_000.0
     max_position_hours: int = 24
     scan_interval_seconds: int = 300

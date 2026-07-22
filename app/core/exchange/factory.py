@@ -14,7 +14,7 @@ from app.core.exchange.okx import OKXExchange
 
 _ExchangeFactoryFn = Callable[[ExchangeState, ExchangeSettings], BaseExchange]
 
-# docs/BUSINESS_RULES.md §9 "Multi Exchange Support": Binance, Bybit, OKX,
+# docs/BUSINESS_RULES.md §10 "Multi Exchange Support": Binance, Bybit, OKX,
 # Kraken and MEXC are supported, but "only one exchange connection is
 # active at a time". The EXCHANGE environment variable selects which one.
 _EXCHANGE_CLASSES: dict[str, tuple[ExchangeType, _ExchangeFactoryFn]] = {

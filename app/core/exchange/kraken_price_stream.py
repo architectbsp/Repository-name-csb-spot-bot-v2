@@ -82,4 +82,5 @@ class KrakenPriceStream(WebsocketPriceStreamBase):
             volume_24h=quote_volume,
             change_24h=float(change_pct) if change_pct is not None else 0.0,
             timestamp=0,
+            raw_last_price=str(last),
         )

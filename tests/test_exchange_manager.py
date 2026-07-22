@@ -114,6 +114,38 @@ def test_binance_price_stream_start_stop():
     assert stream.running is False
 
 
+def test_binance_price_stream_preserves_raw_price_string():
+    """docs/BUSINESS_RULES.md §9: the exact exchange string must survive
+    untouched (Decimal/raw-string precision), not just a reformatted
+    float, on the WebSocket ticker path."""
+    import json
+
+    from app.core.exchange.binance_price_stream import BinancePriceStream
+
+    stream = BinancePriceStream()
+    received = []
+    stream._callback = lambda event, payload=None: received.append(payload)
+
+    stream._on_message(
+        None,
+        json.dumps(
+            {
+                "e": "24hrTicker",
+                "s": "BTCUSDT",
+                "c": "1.0000088",
+                "q": "250000.5",
+                "P": "2.5",
+                "E": 1700000000000,
+            }
+        ),
+    )
+
+    assert len(received) == 1
+    ticker = received[0]
+    assert ticker.last_price == 1.0000088
+    assert ticker.raw_last_price == "1.0000088"
+
+
 def test_binance_price_stream_uses_testnet_endpoint_when_configured():
     from app.core.exchange.binance_price_stream import BinancePriceStream
 

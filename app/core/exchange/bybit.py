@@ -1,7 +1,11 @@
 import ccxt
 
 from app.core.config.settings import ExchangeSettings
-from app.core.exchange.base import BaseExchange, enable_sandbox_mode
+from app.core.exchange.base import (
+    BaseExchange,
+    enable_sandbox_mode,
+    truncate_to_precision,
+)
 from app.core.exchange.bybit_price_stream import BybitPriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
 
@@ -105,6 +109,18 @@ class BybitExchange(BaseExchange):
                 symbol,
                 amount,
             )
+        )
+
+    def normalize_price(
+        self,
+        symbol: str,
+        price: float,
+    ) -> float:
+        return truncate_to_precision(
+            self.client,
+            symbol,
+            price,
+            precision_key="price",
         )
 
     def place_market_buy(

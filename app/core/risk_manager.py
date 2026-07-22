@@ -1,12 +1,28 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.core.domain.position import Position
+from app.core.scheduler.job import Job
 from app.core.trading.models import TradeRequest, TradeSide
 
 
 logger = logging.getLogger(__name__)
+
+_DAILY_RESET_JOB_NAME = "risk_manager_daily_reset"
+_DAILY_RESET_CHECK_INTERVAL_SECONDS = 60
+
+_MAX_DURATION_JOB_NAME = "risk_manager_max_duration_check"
+_MAX_DURATION_CHECK_INTERVAL_SECONDS = 60
+
+
+def _raw_price(ticker, fallback: float) -> str:
+    """
+    docs/BUSINESS_RULES.md §9: prefer the untouched exchange string over a
+    reformatted float when logging an exchange-sourced price.
+    """
+    raw = getattr(ticker, "raw_last_price", None)
+    return raw if raw is not None else f"{fallback:.8f}"
 
 
 class RiskManager:
@@ -42,8 +58,35 @@ class RiskManager:
         self._order_validator = None
         self._config = None
 
+        # Daily loss circuit-breaker state (docs/BUSINESS_RULES.md §8).
+        self._trading_day: date | None = None
+        self._day_start_balance: float | None = None
+        self._realized_pnl_today: float = 0.0
+
     def initialize(self) -> None:
         self._initialized = True
+
+        if self._scheduler is not None and not self._scheduler.has_job(
+            _DAILY_RESET_JOB_NAME
+        ):
+            job = Job(
+                name=_DAILY_RESET_JOB_NAME,
+                interval=_DAILY_RESET_CHECK_INTERVAL_SECONDS,
+                callback=self._check_daily_reset,
+            )
+            self._scheduler.register(job)
+            self._scheduler.schedule(job)
+
+        if self._scheduler is not None and not self._scheduler.has_job(
+            _MAX_DURATION_JOB_NAME
+        ):
+            duration_job = Job(
+                name=_MAX_DURATION_JOB_NAME,
+                interval=_MAX_DURATION_CHECK_INTERVAL_SECONDS,
+                callback=self._check_max_duration_positions,
+            )
+            self._scheduler.register(duration_job)
+            self._scheduler.schedule(duration_job)
 
     def shutdown(self) -> None:
         self._running = False
@@ -105,16 +148,115 @@ class RiskManager:
             raise RuntimeError("RiskManager config dependency is not set.")
         return self._config.risk
 
-    def calculate_position_size(self, balance: float) -> float:
+    def calculate_position_size(
+        self,
+        balance: float,
+        volume_24h: float | None = None,
+    ) -> float:
+        """
+        Dynamic, liquidity-based position sizing
+        (docs/BUSINESS_RULES.md §8): the treasury's own size is not what
+        drives the trade amount -- the smaller of two independent caps
+        is always used, computed with Decimal to avoid float drift on a
+        value that directly determines money at risk:
+
+          - balance cap:   balance * 99.5%   (commission/slippage headroom)
+          - liquidity cap: 24h volume * 0.1% ("binde 1")
+
+        Small treasury (liquidity cap >= balance cap): the whole 99.5% of
+        the balance is committed to the single trade.
+        Large treasury (liquidity cap < balance cap): only the
+        liquidity-safe amount is committed; the remainder stays in the
+        treasury for other opportunities (automatic risk distribution).
+        """
         if balance <= 0:
             return 0.0
-        return balance * (self._risk.capital_per_trade_percent / 100.0)
 
-    def has_sufficient_balance(self, balance: float) -> bool:
-        return self.calculate_position_size(balance) > 0.0
+        balance_dec = Decimal(str(balance))
+        balance_cap = balance_dec * Decimal(
+            str(self._risk.max_balance_utilization_percent)
+        ) / Decimal("100")
+
+        if volume_24h is None or volume_24h <= 0:
+            # No liquidity data available -- fall back to the balance cap.
+            return float(balance_cap)
+
+        volume_dec = Decimal(str(volume_24h))
+        liquidity_cap = volume_dec * Decimal(
+            str(self._risk.max_volume_share_percent)
+        ) / Decimal("100")
+
+        return float(min(balance_cap, liquidity_cap))
+
+    def has_sufficient_balance(
+        self,
+        balance: float,
+        volume_24h: float | None = None,
+    ) -> bool:
+        return self.calculate_position_size(balance, volume_24h) > 0.0
 
     def is_daily_loss_limit_reached(self, daily_loss_percent: float) -> bool:
         return daily_loss_percent >= self._risk.max_daily_loss_percent
+
+    def _sync_trading_day(self, balance: float) -> None:
+        """
+        Resets the daily-loss tracking window at 00:00 UTC
+        (docs/BUSINESS_RULES.md §8: the circuit breaker resets at UTC
+        midnight, not on a rolling 24h timer). `balance` becomes the new
+        day's starting treasury the first time each UTC day is observed.
+        """
+        today = datetime.now(UTC).date()
+
+        if self._trading_day == today:
+            return
+
+        self._trading_day = today
+        self._day_start_balance = balance
+        self._realized_pnl_today = 0.0
+
+        logger.info(
+            "[RISK] New UTC trading day started; day_start_balance=%.8f",
+            balance,
+        )
+
+    def _check_daily_reset(self) -> None:
+        """Scheduled job: keeps the UTC day boundary accurate even on
+        days where no new trade is attempted (open_position() is the
+        other place this gets synced, opportunistically)."""
+        if self._exchange_manager is None:
+            return
+
+        try:
+            exchange_type = self._exchange_manager.active_exchange_type()
+            balance = self._exchange_manager.get_quote_balance(exchange_type)
+        except Exception:
+            logger.debug(
+                "[RISK] Skipping daily-reset check: exchange unavailable"
+            )
+            return
+
+        self._sync_trading_day(balance)
+
+    def current_daily_loss_percent(self) -> float:
+        """Realized loss so far today, as a percentage of the day's
+        starting treasury (0 if no loss, or if the day hasn't been
+        established yet)."""
+        if not self._day_start_balance or self._day_start_balance <= 0:
+            return 0.0
+
+        loss = max(0.0, -self._realized_pnl_today)
+        return (loss / self._day_start_balance) * 100
+
+    def _record_realized_pnl(self, pnl: float) -> None:
+        self._realized_pnl_today += pnl
+
+        if self.is_daily_loss_limit_reached(self.current_daily_loss_percent()):
+            logger.warning(
+                "[RISK] Daily loss limit reached (%.2f%% >= %.2f%%); "
+                "halting new trades until 00:00 UTC",
+                self.current_daily_loss_percent(),
+                self._risk.max_daily_loss_percent,
+            )
 
     def can_open_trade(
         self,
@@ -167,7 +309,7 @@ class RiskManager:
         exchange_type,
         symbol: str,
         price: float,
-        stop_loss_percent: float,
+        volume_24h: float | None = None,
     ) -> Position | None:
         """
         Full buy-side trade-permission and execution workflow.
@@ -176,9 +318,12 @@ class RiskManager:
         opened: balance validation, position sizing, trade-permission
         checks, order validation and order submission all happen here.
 
-        BUSINESS_RULES.md #11 forbids Strategy from sending exchange orders
+        BUSINESS_RULES.md #12 forbids Strategy from sending exchange orders
         directly, so Strategy must only call this method with a candidate
-        signal and react to the returned Position (or None on rejection).
+        signal (symbol/price/volume_24h) and react to the returned Position
+        (or None on rejection). Risk parameters (stop loss %, position
+        sizing caps, daily loss limit) all live here, not in Strategy, so
+        there is exactly one place they can be configured or drift.
         """
         if (
             self._exchange_manager is None
@@ -195,15 +340,16 @@ class RiskManager:
             return None
 
         balance = self._exchange_manager.get_quote_balance(exchange_type)
+        self._sync_trading_day(balance)
 
         if not self.can_open_trade(
             balance=balance,
-            daily_loss_percent=0.0,
+            daily_loss_percent=self.current_daily_loss_percent(),
             open_positions=self._position_manager.open_count(),
         ):
             return None
 
-        position_value = self.calculate_position_size(balance)
+        position_value = self.calculate_position_size(balance, volume_24h)
 
         if position_value <= 0:
             return None
@@ -238,7 +384,7 @@ class RiskManager:
         if entry_price is None or entry_price <= 0:
             entry_price = price
 
-        stop_price = entry_price * (1 - stop_loss_percent / 100)
+        stop_price = entry_price * (1 - self._risk.stop_loss_percent / 100)
 
         position = Position(
             symbol=symbol,
@@ -292,7 +438,7 @@ class RiskManager:
         if not self._running:
             return
 
-        # Isolated data flow guard (docs/BUSINESS_RULES.md §9): a price
+        # Isolated data flow guard (docs/BUSINESS_RULES.md §10): a price
         # tick from exchange A must never be allowed to trigger a
         # stop-loss/trailing/break-even action on a position opened on
         # exchange B. Older positions with no recorded exchange (e.g.
@@ -333,9 +479,9 @@ class RiskManager:
         last_price = ticker.last_price
 
         logger.debug(
-            "[STOP CHECK] symbol=%s last=%.8f stop=%.8f triggered=%s",
+            "[STOP CHECK] symbol=%s last=%s stop=%.8f triggered=%s",
             position.symbol,
-            last_price,
+            _raw_price(ticker, last_price),
             position.stop_price,
             last_price <= position.stop_price,
         )
@@ -343,8 +489,81 @@ class RiskManager:
         if last_price > position.stop_price:
             return
 
-        logger.info("[SELL TRIGGER] symbol=%s last=%.8f stop=%.8f", position.symbol, last_price, position.stop_price)
+        logger.info(
+            "[SELL TRIGGER] symbol=%s last=%s stop=%.8f",
+            position.symbol,
+            _raw_price(ticker, last_price),
+            position.stop_price,
+        )
 
+        self._close_position_with_market_sell(
+            position,
+            exchange_type=ticker.exchange,
+            fallback_price=last_price,
+            reason="STOP_LOSS",
+        )
+
+    def _check_max_duration_positions(self) -> None:
+        """
+        docs/BUSINESS_RULES.md §8 "Maximum Position Duration": once a
+        position has been open for `strategy.max_position_hours`, it must
+        be closed with a market order regardless of where the price sits
+        relative to the stop. Runs as a periodic scheduler job (like the
+        cooldown and daily-reset jobs) so it fires even if no new tick
+        happens to arrive for a stale symbol.
+        """
+        if self._position_manager is None or self._config is None:
+            return
+
+        max_hours = getattr(self._config.strategy, "max_position_hours", None)
+
+        if not max_hours:
+            return
+
+        now = datetime.now(UTC)
+
+        for position in list(self._position_manager.get_open_positions()):
+            if position.state.name != "OPEN":
+                continue
+
+            age_hours = (now - position.opened_at).total_seconds() / 3600.0
+
+            if age_hours < max_hours:
+                continue
+
+            exchange_type = position.exchange
+
+            if exchange_type is None:
+                logger.warning(
+                    "[MAX DURATION] %s has no recorded exchange; skipping "
+                    "forced close",
+                    position.symbol,
+                )
+                continue
+
+            logger.info(
+                "[MAX DURATION] symbol=%s age_hours=%.2f limit=%s -- "
+                "forcing close",
+                position.symbol,
+                age_hours,
+                max_hours,
+            )
+
+            self._close_position_with_market_sell(
+                position,
+                exchange_type=exchange_type,
+                fallback_price=position.entry_price,
+                reason="MAX_DURATION",
+            )
+
+    def _close_position_with_market_sell(
+        self,
+        position,
+        *,
+        exchange_type,
+        fallback_price: float,
+        reason: str,
+    ) -> None:
         if position.state.name != "OPEN":
             return
 
@@ -354,10 +573,15 @@ class RiskManager:
             side=TradeSide.SELL,
         )
 
-        logger.info("[SELL EXECUTE] symbol=%s quantity=%.8f", position.symbol, position.quantity)
+        logger.info(
+            "[SELL EXECUTE] symbol=%s quantity=%.8f reason=%s",
+            position.symbol,
+            position.quantity,
+            reason,
+        )
 
         result = self._exchange_manager.execute_trade(
-            ticker.exchange,
+            exchange_type,
             trade,
         )
 
@@ -380,27 +604,36 @@ class RiskManager:
         exit_price = result.average_price
 
         if exit_price is None or exit_price <= 0:
-            exit_price = last_price
+            exit_price = fallback_price
 
         self._position_manager.close(
             position.symbol,
             exit_price=exit_price,
-            reason="STOP_LOSS",
+            reason=reason,
         )
+
+        # docs/BUSINESS_RULES.md §8 Daily Loss Limit: only *realized* PnL
+        # counts towards the daily circuit breaker.
+        realized_pnl = getattr(position, "pnl", None)
+
+        if realized_pnl is not None:
+            self._record_realized_pnl(realized_pnl)
 
         if self._event_bus is not None:
             self._event_bus.publish(
                 "position.closed",
                 {
                     "symbol": position.symbol,
-                    "reason": "STOP_LOSS",
-                    "price": last_price,
+                    "reason": reason,
+                    "price": exit_price,
                     "position": position,
                 },
             )
 
     def check_break_even(self, position, ticker) -> None:
-        activation = self._risk.break_even_activation_percent
+        # docs/BUSINESS_RULES.md §8: break-even and trailing activation
+        # share a single 2.0% threshold -- they are one event, not two.
+        activation = self._risk.trailing_activation_percent
 
         profit = (
             (ticker.last_price - position.entry_price)

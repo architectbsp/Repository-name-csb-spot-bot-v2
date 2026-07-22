@@ -7,11 +7,11 @@ from app.core.watch_list import WatchList, WatchState
 
 
 class DummyConfig:
+    # Strategy no longer carries its own copy of any risk parameter (stop
+    # loss %, position sizing, daily loss limit); those all live on
+    # RiskManager now. Only FSM-transition thresholds remain here.
     watch_percent = 3
     entry_percent = 2
-    stop_loss_percent = 5
-    take_profit_activation = 10
-    trailing_percent = 5
 
 
 class DummyPositionManager:
@@ -80,6 +80,27 @@ def test_idle_starts_falling_watch():
     assert watchlist.get_state("BTCUSDT") == WatchState.WATCH_FALLING
 
 
+def test_idle_starts_rising_watch_directly_on_entry_path_a():
+    """
+    docs/BUSINESS_RULES.md §2 Entry Path A: a coin that never dropped and
+    is already rising must go straight from IDLE to WATCH_RISING (not
+    require a prior WATCH_FALLING dip like Entry Path B).
+    """
+    strategy = Strategy()
+    strategy.set_config(DummyConfig())
+    strategy.set_position_manager(DummyPositionManager())
+
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+
+    ticker = make_ticker(100, 5)  # +5% with no prior dip
+
+    strategy.on_ticker(watchlist, ticker)
+
+    assert watchlist.get_state("BTCUSDT") == WatchState.WATCH_RISING
+    assert watchlist.get("BTCUSDT")["lowest_price"] == 100
+
+
 def test_idle_ignores_small_drop():
     strategy = Strategy()
     strategy.set_config(DummyConfig())
@@ -132,6 +153,11 @@ def test_rising_watch_delegates_order_execution_to_risk_manager():
 
     assert len(risk_manager.calls) == 1
     assert risk_manager.calls[0]["symbol"] == "BTCUSDT"
+    # Strategy hands RiskManager the coin's 24h volume so it can size the
+    # trade dynamically (docs/BUSINESS_RULES.md §8); it never computes or
+    # forwards a stop_loss_percent -- that is RiskManager's own config.
+    assert risk_manager.calls[0]["volume_24h"] == 1000
+    assert "stop_loss_percent" not in risk_manager.calls[0]
 
     # Strategy no longer has any capability to talk to the exchange itself.
     assert not hasattr(strategy, "_exchange_manager")

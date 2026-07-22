@@ -5,7 +5,7 @@ from app.core.persistence.database import Base
 from app.core.persistence.database import SessionLocal
 from app.core.persistence.database import engine
 from app.core.persistence.mapper import to_domain
-from app.core.persistence.repository import PositionRepository
+from app.core.persistence.repository import PositionRepository, SettingsRepository
 
 
 class PersistenceService:
@@ -17,6 +17,11 @@ class PersistenceService:
 
     def position_repository(self) -> PositionRepository:
         return PositionRepository(
+            self.create_session(),
+        )
+
+    def settings_repository(self) -> SettingsRepository:
+        return SettingsRepository(
             self.create_session(),
         )
 

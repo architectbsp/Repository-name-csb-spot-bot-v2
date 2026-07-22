@@ -151,6 +151,9 @@ class BinancePriceStream(PriceStream):
             volume_24h=float(data["q"]),
             change_24h=float(data["P"]),
             timestamp=int(data["E"]),
+            # docs/BUSINESS_RULES.md §9: preserve the exact string Binance
+            # sent, untouched by float parsing, for display/logging.
+            raw_last_price=data["c"],
         )
 
         if self._callback:

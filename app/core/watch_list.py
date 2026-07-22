@@ -135,7 +135,7 @@ class WatchList:
         except RuntimeError:
             return
 
-        # Isolated data flow (docs/BUSINESS_RULES.md §9): watch-list
+        # Isolated data flow (docs/BUSINESS_RULES.md §10): watch-list
         # symbols are always subscribed against the single active
         # exchange's own price stream, never a different one.
         self._exchange.update_price_stream(

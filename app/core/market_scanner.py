@@ -204,7 +204,7 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
-            # Isolated data flow (docs/BUSINESS_RULES.md §9): always scan
+            # Isolated data flow (docs/BUSINESS_RULES.md §10): always scan
             # the currently active exchange, never a hardcoded one, so
             # watch-list/strategy calculations can never be seeded with
             # another exchange's ticker data.
