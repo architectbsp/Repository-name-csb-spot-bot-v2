@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.3
+Version: 2.4
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -39,6 +39,15 @@ realized PnL across all partial exits plus the final exit, not just the
 last chunk; added a lightweight additive SQLite schema-sync so a
 database from a previous version never breaks the app on startup when a
 Sprint adds a new persisted column.
+
+Changelog (2.3 -> 2.4): added the Trade Journal (§8) -- a permanent,
+append-only record of every trade's full decision history (which entry
+path, how long it was watched, how many times price rose/fell while
+watching, which stop fired, realized PnL, duration), kept independently
+of the `positions` table (whose row disappears the instant a position
+closes). Strategy records the entry (it is the only module that knows
+*why* a BUY happened); RiskManager records every partial and full exit
+(it is the sole owner of every exit path).
 
 ---
 
@@ -522,9 +531,37 @@ reconciliation, quarantine) described above -- there is no separate
   check closes a position, the recorded `close_reason` reflects which
   stop was actually active at the time --
   `HARD_STOP`/`BREAK_EVEN_STOP`/`TRAILING_STOP` -- instead of a single
-  generic `STOP_LOSS` string, so a future Trade Journal (Sprint 5) can
-  tell these apart. The Maximum Position Duration force-close is
-  recorded as `MAX_DURATION`.
+  generic `STOP_LOSS` string, so the Trade Journal (see below) can tell
+  these apart. The Maximum Position Duration force-close is recorded as
+  `MAX_DURATION`.
+
+---
+
+## Trade Journal
+
+Every trade (from the BUY that opens a position to the SELL that finally
+closes it) gets a permanent `trade_journal` row (`TradeJournalEntry` /
+`app/core/services/trade_journal.py`), independent of the `positions`
+table -- closing a position deletes its `positions` row, but its journal
+entry is never deleted.
+
+- **Recorded at entry** (by Strategy, the instant a BUY fills and the
+  position is promoted to `POSITION_OPEN`): symbol, exchange, entry
+  price/quantity, `entry_reason` (`PATH_A_DIRECT_RISE` or
+  `PATH_B_DIP_RECOVERY` -- see §2), when the watch cycle started, how
+  many minutes it was watched before the BUY, and how many times a new
+  high (`rise_events`) or new low (`fall_events`, Path B only) was
+  recorded while watching.
+- **Recorded on every partial exit** (by RiskManager's Scale Out /
+  Partial Take Profit): quantity sold, exit price, realized PnL, running
+  totals (`partial_exit_count`, `partial_exit_pnl`). The trade stays
+  `OPEN` in the journal.
+- **Recorded on final exit** (by RiskManager, for every full-close path --
+  ordinary stop-loss, Manual Close, Emergency Exit, or Maximum Position
+  Duration): exit price, `exit_reason` (the same stage-aware value
+  recorded as `close_reason` above), total realized PnL/PnL%, and how
+  many minutes the trade was held from entry to exit. The trade is then
+  marked `CLOSED`.
 
 ---
 

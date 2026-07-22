@@ -5,7 +5,11 @@ from app.core.persistence.database import SessionLocal
 from app.core.persistence.database import engine
 from app.core.persistence.mapper import to_domain
 from app.core.persistence.migrations import sync_schema
-from app.core.persistence.repository import PositionRepository, SettingsRepository
+from app.core.persistence.repository import (
+    PositionRepository,
+    SettingsRepository,
+    TradeJournalRepository,
+)
 
 
 class PersistenceService:
@@ -24,6 +28,11 @@ class PersistenceService:
 
     def settings_repository(self) -> SettingsRepository:
         return SettingsRepository(
+            self.create_session(),
+        )
+
+    def trade_journal_repository(self) -> TradeJournalRepository:
+        return TradeJournalRepository(
             self.create_session(),
         )
 

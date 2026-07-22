@@ -803,3 +803,121 @@ def test_emergency_exit_all_returns_zero_when_no_open_positions():
     rm.set_position_manager(PositionManager())
 
     assert rm.emergency_exit_all() == 0
+
+
+class DummyTradeJournal:
+    def __init__(self):
+        self.exits = []
+        self.partial_exits = []
+
+    def record_exit(self, symbol, **kwargs):
+        self.exits.append((symbol, kwargs))
+
+    def record_partial_exit(self, symbol, **kwargs):
+        self.partial_exits.append((symbol, kwargs))
+
+
+def test_close_position_manually_records_a_trade_journal_exit():
+    rm = RiskManager()
+    rm.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    journal = DummyTradeJournal()
+    rm.set_trade_journal(journal)
+
+    position_manager = PositionManager()
+    position_manager.add(make_open_position(quantity=1.0))
+    rm.set_position_manager(position_manager)
+
+    rm.close_position_manually("BTCUSDT")
+
+    assert len(journal.exits) == 1
+    symbol, kwargs = journal.exits[0]
+    assert symbol == "BTCUSDT"
+    assert kwargs["reason"] == "MANUAL_CLOSE"
+
+
+def test_emergency_exit_all_records_a_trade_journal_exit_per_position():
+    rm = RiskManager()
+    rm.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    journal = DummyTradeJournal()
+    rm.set_trade_journal(journal)
+
+    position_manager = PositionManager()
+    position_manager.add(make_open_position(symbol="BTCUSDT", quantity=1.0))
+    position_manager.add(
+        make_open_position(symbol="ETHUSDT", entry_price=50.0, quantity=2.0)
+    )
+    rm.set_position_manager(position_manager)
+
+    rm.emergency_exit_all()
+
+    reasons = {symbol: kwargs["reason"] for symbol, kwargs in journal.exits}
+    assert reasons == {"BTCUSDT": "EMERGENCY_EXIT", "ETHUSDT": "EMERGENCY_EXIT"}
+
+
+def test_check_partial_take_profit_records_a_trade_journal_partial_exit():
+    rm = RiskManager()
+    rm.set_config(
+        make_config(partial_tp_activation_percent=5.0, partial_tp_sell_percent=50.0)
+    )
+
+    exchange_manager = ScaleOutExchangeManager(exit_price=110.0, balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    journal = DummyTradeJournal()
+    rm.set_trade_journal(journal)
+
+    position_manager = PositionManager()
+    position = make_open_position()
+    position_manager.add(position)
+    rm.set_position_manager(position_manager)
+
+    ticker = SimpleNamespace(symbol="BTCUSDT", last_price=110.0, exchange="BINANCE")
+    rm.check_partial_take_profit(position, ticker)
+
+    assert len(journal.partial_exits) == 1
+    symbol, kwargs = journal.partial_exits[0]
+    assert symbol == "BTCUSDT"
+    assert kwargs["realized_pnl"] == (110.0 - 100.0) * 5.0
+    assert kwargs["reason"] == "PARTIAL_TP"
+
+
+def test_check_stop_loss_records_a_stage_aware_trade_journal_exit():
+    rm = RiskManager()
+    rm.set_config(make_config())
+    rm._running = True
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    journal = DummyTradeJournal()
+    rm.set_trade_journal(journal)
+
+    position = SimpleNamespace(
+        symbol="BTCUSDT",
+        quantity=1.0,
+        stop_price=90.0,
+        exchange="BYBIT",
+        state=SimpleNamespace(name="OPEN"),
+        entry_price=100.0,
+        highest_price=100.0,
+        stop_stage="TRAILING",
+        pnl=None,
+    )
+
+    rm.set_position_manager(DummyPositionsBySymbol(position))
+
+    ticker = SimpleNamespace(symbol="BTCUSDT", last_price=50.0, exchange="BYBIT")
+    rm.on_price_tick(ticker)
+
+    assert len(journal.exits) == 1
+    symbol, kwargs = journal.exits[0]
+    assert symbol == "BTCUSDT"
+    assert kwargs["reason"] == "TRAILING_STOP"

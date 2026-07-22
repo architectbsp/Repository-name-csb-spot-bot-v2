@@ -49,6 +49,7 @@ class RiskManager:
         "stopwatch",
         "position_manager",
         "order_validator",
+        "trade_journal",
         "config",
     )
 
@@ -67,6 +68,7 @@ class RiskManager:
         self._stopwatch = None
         self._position_manager = None
         self._order_validator = None
+        self._trade_journal = None
         self._config = None
 
         # Daily loss circuit-breaker state (docs/BUSINESS_RULES.md §8).
@@ -154,6 +156,9 @@ class RiskManager:
 
     def set_order_validator(self, order_validator):
         self._order_validator = order_validator
+
+    def set_trade_journal(self, trade_journal) -> None:
+        self._trade_journal = trade_journal
 
     def set_order_execution(self, order_execution: OrderExecutionService) -> None:
         """Mainly for tests -- production wiring builds this lazily in
@@ -654,6 +659,15 @@ class RiskManager:
         # the remainder later.
         self._record_realized_pnl(realized)
 
+        if self._trade_journal is not None:
+            self._trade_journal.record_partial_exit(
+                position.symbol,
+                exit_price=exit_price,
+                quantity=filled_quantity,
+                realized_pnl=realized,
+                reason="PARTIAL_TP",
+            )
+
         logger.info(
             "[PARTIAL TP] symbol=%s sold=%.8f exit=%.8f realized_pnl=%.8f "
             "remaining_qty=%.8f",
@@ -933,6 +947,15 @@ class RiskManager:
         )
 
         self._record_realized_pnl(final_chunk_pnl)
+
+        if self._trade_journal is not None:
+            self._trade_journal.record_exit(
+                position.symbol,
+                exit_price=exit_price,
+                reason=reason,
+                pnl=getattr(position, "pnl", None),
+                pnl_percent=getattr(position, "pnl_percent", None),
+            )
 
         if self._event_bus is not None:
             self._event_bus.publish(

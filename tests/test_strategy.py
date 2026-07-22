@@ -164,6 +164,77 @@ def test_rising_watch_delegates_order_execution_to_risk_manager():
     assert not hasattr(strategy, "_order_validator")
 
 
+class DummyTradeJournal:
+    def __init__(self):
+        self.entries = []
+
+    def record_entry(self, **kwargs):
+        self.entries.append(kwargs)
+
+
+def test_rising_watch_records_a_trade_journal_entry_on_fill():
+    """Sprint 5 -- Trade Journal: Strategy is the only module that knows
+    *why* a BUY happened, so it must record the entry itself, right after
+    the position is confirmed open."""
+    position = Position(
+        symbol="BTCUSDT",
+        entry_price=106.0,
+        quantity=1.0,
+        opened_at=datetime.now(UTC),
+        stop_price=100.7,
+    )
+
+    strategy = Strategy()
+    strategy.set_config(DummyConfig())
+    strategy.set_position_manager(DummyPositionManager())
+    strategy.set_risk_manager(DummyRiskManagerAccepts(position))
+
+    journal = DummyTradeJournal()
+    strategy.set_trade_journal(journal)
+
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+    watchlist.begin_falling_watch("BTCUSDT", 100)
+    watchlist.begin_rising_watch("BTCUSDT", 100)
+    watchlist.record_rising_price("BTCUSDT", 103)
+
+    ticker = make_ticker(106, 6)
+
+    strategy.on_ticker(watchlist, ticker)
+
+    assert len(journal.entries) == 1
+    recorded = journal.entries[0]
+    assert recorded["symbol"] == "BTCUSDT"
+    assert recorded["entry_price"] == 106.0
+    assert recorded["entry_reason"] == "PATH_B_DIP_RECOVERY"
+    # +1 from the manual record_rising_price(103) above, +1 more from
+    # on_ticker() itself recording the fill tick's own new high (106).
+    assert recorded["rise_events"] == 2
+    assert recorded["watch_started_at"] is not None
+    assert recorded["wait_minutes"] is not None
+
+
+def test_rejected_buy_does_not_record_a_trade_journal_entry():
+    strategy = Strategy()
+    strategy.set_config(DummyConfig())
+    strategy.set_position_manager(DummyPositionManager())
+    strategy.set_risk_manager(DummyRiskManagerRejects())
+
+    journal = DummyTradeJournal()
+    strategy.set_trade_journal(journal)
+
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+    watchlist.begin_falling_watch("BTCUSDT", 100)
+    watchlist.begin_rising_watch("BTCUSDT", 100)
+
+    ticker = make_ticker(106, 6)
+
+    strategy.on_ticker(watchlist, ticker)
+
+    assert journal.entries == []
+
+
 def test_rising_watch_returns_to_watch_rising_when_risk_manager_rejects():
     strategy = Strategy()
     strategy.set_config(DummyConfig())

@@ -345,6 +345,82 @@ def test_clear_price_tracking():
     assert coin["highest_price"] is None
 
 
+def test_path_a_direct_rise_records_entry_path_and_watch_start():
+    """Sprint 5 -- Trade Journal: a coin going IDLE -> WATCH_RISING
+    directly (no prior dip) must be tagged PATH_A_DIRECT_RISE with a
+    fresh watch_started_at and zeroed rise/fall counters."""
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+
+    watchlist.begin_rising_watch("BTCUSDT", 100)
+
+    coin = watchlist.get("BTCUSDT")
+    assert coin["entry_path"] == "PATH_A_DIRECT_RISE"
+    assert coin["watch_started_at"] is not None
+    assert coin["rise_count"] == 0
+    assert coin["fall_count"] == 0
+
+    watchlist.record_rising_price("BTCUSDT", 105)
+    watchlist.record_rising_price("BTCUSDT", 110)
+    # A tick that doesn't set a new high must not count as a "rise".
+    watchlist.record_rising_price("BTCUSDT", 108)
+
+    assert watchlist.get("BTCUSDT")["rise_count"] == 2
+
+
+def test_path_b_dip_recovery_tracks_falls_then_rises_under_one_watch_cycle():
+    """Sprint 5 -- Trade Journal: IDLE -> WATCH_FALLING -> WATCH_RISING
+    (Path B) must keep a single watch_started_at from the very first dip,
+    and preserve the fall_count accumulated while falling once the coin
+    moves on to WATCH_RISING."""
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+
+    watchlist.begin_falling_watch("BTCUSDT", 100)
+    watch_started_at = watchlist.get("BTCUSDT")["watch_started_at"]
+    assert watchlist.get("BTCUSDT")["entry_path"] == "PATH_B_DIP_RECOVERY"
+
+    watchlist.record_falling_price("BTCUSDT", 95)
+    watchlist.record_falling_price("BTCUSDT", 90)
+    # Not a new low -- must not count.
+    watchlist.record_falling_price("BTCUSDT", 92)
+
+    assert watchlist.get("BTCUSDT")["fall_count"] == 2
+
+    watchlist.begin_rising_watch("BTCUSDT", 92)
+
+    coin = watchlist.get("BTCUSDT")
+    # Path B continuation: watch_started_at/entry_path/fall_count from the
+    # falling leg must be preserved, not reset.
+    assert coin["entry_path"] == "PATH_B_DIP_RECOVERY"
+    assert coin["watch_started_at"] == watch_started_at
+    assert coin["fall_count"] == 2
+
+    # highest_price is still 100 from the falling leg (begin_falling_watch
+    # seeded it there) -- a new high only counts once price exceeds it.
+    watchlist.record_rising_price("BTCUSDT", 105)
+    assert watchlist.get("BTCUSDT")["rise_count"] == 1
+
+
+def test_finish_cooldown_resets_trade_journal_tracking_fields():
+    watchlist = WatchList()
+    watchlist.add("BTCUSDT")
+    watchlist.begin_rising_watch("BTCUSDT", 100)
+    watchlist.record_rising_price("BTCUSDT", 105)
+    watchlist.promote_to_buy_pending("BTCUSDT", 106)
+    watchlist.promote_to_position_open("BTCUSDT", 106, 100.7)
+
+    watchlist.close_position("BTCUSDT")
+    watchlist.enter_cooldown("BTCUSDT", datetime.now(UTC) - timedelta(seconds=1))
+    watchlist.finish_cooldown("BTCUSDT")
+
+    coin = watchlist.get("BTCUSDT")
+    assert coin["entry_path"] is None
+    assert coin["watch_started_at"] is None
+    assert coin["rise_count"] == 0
+    assert coin["fall_count"] == 0
+
+
 def test_cooldown_helpers():
     watchlist = WatchList()
 

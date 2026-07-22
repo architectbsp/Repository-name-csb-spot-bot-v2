@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.core.persistence.models import PositionEntity, SettingsEntity
+from app.core.persistence.models import PositionEntity, SettingsEntity, TradeJournalEntity
 
 
 _SETTINGS_ROW_ID = 1
@@ -63,5 +63,52 @@ class PositionRepository:
     ) -> list[PositionEntity]:
         return (
             self._session.query(PositionEntity)
+            .all()
+        )
+
+
+class TradeJournalRepository:
+    """
+    Sprint 5 -- Trade Journal persistence. Unlike PositionRepository,
+    rows are never deleted: a trade's history is kept permanently, even
+    long after the position itself has closed.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+    ) -> None:
+        self._session = session
+
+    def insert(self, entity: TradeJournalEntity) -> int:
+        """Adds a brand-new journal row (the entry side of a trade) and
+        returns the autoincrement id the caller must remember to update
+        this same row later (partial exits, final exit). `entity.id` must
+        be unset (None) so SQLAlchemy assigns a fresh autoincrement id
+        instead of colliding with an existing row."""
+        self._session.add(entity)
+        self._session.commit()
+        self._session.refresh(entity)
+        return entity.id
+
+    def update(self, entity: TradeJournalEntity) -> None:
+        self._session.merge(entity)
+        self._session.commit()
+
+    def get(self, entry_id: int) -> TradeJournalEntity | None:
+        return self._session.get(TradeJournalEntity, entry_id)
+
+    def get_open_by_symbol(self, symbol: str) -> TradeJournalEntity | None:
+        return (
+            self._session.query(TradeJournalEntity)
+            .filter_by(symbol=symbol, status="OPEN")
+            .order_by(TradeJournalEntity.id.desc())
+            .first()
+        )
+
+    def list_all(self) -> list[TradeJournalEntity]:
+        return (
+            self._session.query(TradeJournalEntity)
+            .order_by(TradeJournalEntity.entry_time.desc())
             .all()
         )

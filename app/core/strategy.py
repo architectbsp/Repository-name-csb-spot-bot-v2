@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from app.core.watch_list import WatchState
 
 
@@ -22,6 +24,7 @@ class Strategy:
     _DEPENDENCY_NAMES = (
         "risk_manager",
         "position_manager",
+        "trade_journal",
         "config",
     )
 
@@ -31,6 +34,7 @@ class Strategy:
 
         self._risk_manager = None
         self._position_manager = None
+        self._trade_journal = None
         self._config = None
 
     def initialize(self) -> None:
@@ -59,6 +63,9 @@ class Strategy:
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
+
+    def set_trade_journal(self, trade_journal) -> None:
+        self._trade_journal = trade_journal
 
     def set_config(self, config) -> None:
         self._config = config
@@ -190,6 +197,40 @@ class Strategy:
             ticker.symbol,
             position.entry_price,
             position.stop_price,
+        )
+
+        self._record_journal_entry(coin, ticker, position)
+
+    def _record_journal_entry(self, coin, ticker, position) -> None:
+        """Sprint 5 -- Trade Journal: only Strategy knows *why* this BUY
+        happened (which entry path, how long it was watched, how many
+        times price rose/fell while watching) -- that context lives on
+        the WatchList coin dict fetched at the top of
+        _handle_rising_watch, before promote_to_buy_pending/
+        promote_to_position_open touched anything relevant to it."""
+        if self._trade_journal is None:
+            return
+
+        watch_started_at = coin.get("watch_started_at")
+        wait_minutes = None
+
+        if watch_started_at is not None:
+            wait_minutes = (
+                datetime.now(UTC) - watch_started_at
+            ).total_seconds() / 60.0
+
+        exchange_name = getattr(ticker.exchange, "name", ticker.exchange)
+
+        self._trade_journal.record_entry(
+            symbol=ticker.symbol,
+            exchange=exchange_name,
+            entry_price=position.entry_price,
+            quantity=position.quantity,
+            entry_reason=coin.get("entry_path") or "PATH_B_DIP_RECOVERY",
+            watch_started_at=watch_started_at,
+            wait_minutes=wait_minutes,
+            rise_events=coin.get("rise_count", 0),
+            fall_events=coin.get("fall_count", 0),
         )
 
     def _handle_position_open(

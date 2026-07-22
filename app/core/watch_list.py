@@ -115,6 +115,15 @@ class WatchList:
             "cooldown_until": None,
             "created_at": now,
             "updated_at": now,
+            # Sprint 5 -- Trade Journal: which entry path this watch cycle
+            # is on, when it started, and how many new highs/lows were
+            # recorded while watching. Reset every time a coin starts a
+            # fresh watch cycle (begin_falling_watch / Path A's
+            # begin_rising_watch / finish_cooldown).
+            "watch_started_at": None,
+            "entry_path": None,
+            "rise_count": 0,
+            "fall_count": 0,
         }
 
         self.sync_price_stream()
@@ -181,6 +190,14 @@ class WatchList:
         coin["highest_price"] = price
         coin["updated_at"] = datetime.now(UTC)
 
+        # Sprint 5 -- Trade Journal: WATCH_FALLING is only ever reached
+        # from IDLE (see _ALLOWED_TRANSITIONS), so this always marks the
+        # start of a fresh Path B (dip-then-recovery) watch cycle.
+        coin["entry_path"] = "PATH_B_DIP_RECOVERY"
+        coin["watch_started_at"] = datetime.now(UTC)
+        coin["rise_count"] = 0
+        coin["fall_count"] = 0
+
         return True
 
     def begin_rising_watch(
@@ -188,6 +205,15 @@ class WatchList:
         symbol: str,
         price: float,
     ) -> bool:
+        if symbol not in self._coins:
+            return False
+
+        # Captured before transition() overwrites "state" -- this is the
+        # only way to tell whether this call is Path A (direct rise from
+        # IDLE, no prior dip) or the continuation of Path B (arriving
+        # here from WATCH_FALLING after a dip already being tracked).
+        previous_state = self._coins[symbol]["state"]
+
         if not self.transition(symbol, WatchState.WATCH_RISING):
             return False
 
@@ -198,6 +224,14 @@ class WatchList:
 
         if coin["highest_price"] is None or price > coin["highest_price"]:
             coin["highest_price"] = price
+
+        if previous_state == WatchState.IDLE:
+            # Sprint 5 -- Trade Journal: Path A -- the coin never dipped,
+            # so this call IS the start of the watch cycle.
+            coin["entry_path"] = "PATH_A_DIRECT_RISE"
+            coin["watch_started_at"] = datetime.now(UTC)
+            coin["rise_count"] = 0
+            coin["fall_count"] = 0
 
         coin["updated_at"] = datetime.now(UTC)
 
@@ -216,6 +250,10 @@ class WatchList:
 
         if price < coin["lowest_price"]:
             coin["lowest_price"] = price
+            # Sprint 5 -- Trade Journal: counts how many times the dip
+            # deepened while watching, for the Trade Journal's "kaç kere
+            # düştü" field.
+            coin["fall_count"] = coin.get("fall_count", 0) + 1
 
         coin["updated_at"] = datetime.now(UTC)
         return True
@@ -232,6 +270,10 @@ class WatchList:
 
         if price > coin["highest_price"]:
             coin["highest_price"] = price
+            # Sprint 5 -- Trade Journal: counts how many times a new high
+            # was recorded while watching, for the Trade Journal's "kaç
+            # defa yükseldi" field.
+            coin["rise_count"] = coin.get("rise_count", 0) + 1
 
         coin["updated_at"] = datetime.now(UTC)
         return True
@@ -354,6 +396,10 @@ class WatchList:
         coin["stop_price"] = None
         coin["trailing_price"] = None
         coin["cooldown_until"] = None
+        coin["watch_started_at"] = None
+        coin["entry_path"] = None
+        coin["rise_count"] = 0
+        coin["fall_count"] = 0
         coin["updated_at"] = datetime.now(UTC)
 
         return True
@@ -545,6 +591,10 @@ class WatchList:
             "cooldown_until": None,
             "created_at": created_at,
             "updated_at": now,
+            "watch_started_at": None,
+            "entry_path": None,
+            "rise_count": 0,
+            "fall_count": 0,
         }
         return True
 

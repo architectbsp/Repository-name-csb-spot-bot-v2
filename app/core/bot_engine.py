@@ -20,6 +20,7 @@ from app.core.exchange.factory import create_exchange
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.order_validator import OrderValidator
+from app.core.services.trade_journal import TradeJournal
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
 
@@ -107,6 +108,14 @@ class BotEngine:
             self.persistence.position_repository(),
         )
 
+        # Sprint 5 -- Trade Journal: a permanent record of every trade's
+        # decision history, independent from position_manager (whose rows
+        # disappear the instant a position closes).
+        self.trade_journal = TradeJournal()
+        self.trade_journal.set_repository(
+            self.persistence.trade_journal_repository(),
+        )
+
         self.risk_manager = RiskManager()
         self.risk_manager.set_exchange(self.exchange)
         self.risk_manager.set_exchange_manager(
@@ -125,10 +134,12 @@ class BotEngine:
         self.risk_manager.set_order_validator(
             self.order_validator,
         )
+        self.risk_manager.set_trade_journal(self.trade_journal)
 
         self.strategy = Strategy()
         self.strategy.set_risk_manager(self.risk_manager)
         self.strategy.set_position_manager(self.position_manager)
+        self.strategy.set_trade_journal(self.trade_journal)
 
         self.watch_list.set_strategy(self.strategy)
 
