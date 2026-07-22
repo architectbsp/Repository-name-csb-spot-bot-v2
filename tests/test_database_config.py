@@ -97,7 +97,9 @@ def test_persistence_service_from_url_exposes_protocol_repos():
     inspector = inspect(service.engine)
     assert "positions" in inspector.get_table_names()
     assert "bot_settings" in inspector.get_table_names()
-    assert "trade_journal" in inspector.get_table_names()
+    tables = set(inspector.get_table_names())
+    assert "trade_journals" in tables
+    assert "trade_logs" in tables
 
 
 def test_create_db_engine_sqlite_memory_syncs_schema():

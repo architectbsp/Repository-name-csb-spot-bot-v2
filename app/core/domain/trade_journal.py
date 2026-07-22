@@ -1,10 +1,7 @@
 """
-Sprint 5 -- Trade Journal: a permanent, append-only record of every trade's
-full decision history, independent from `positions` (which only tracks
-currently-open positions and deletes a row the moment it closes -- see
-PositionManager.handle_position_closed). This is what a future UI screen,
-export, or performance-analytics module (Sprint 7) reads from to answer
-"why did the bot buy/sell this, and how did it go".
+Trade Journal: permanent decision history for every trade, independent of
+`positions` (which is deleted on close). Persisted as `trade_journals` +
+append-only `trade_logs` (entry / in-trade extremes / partial / exit).
 """
 
 from dataclasses import dataclass, field
@@ -17,6 +14,12 @@ ENTRY_PATH_B_DIP_RECOVERY = "PATH_B_DIP_RECOVERY"
 
 STATUS_OPEN = "OPEN"
 STATUS_CLOSED = "CLOSED"
+
+# trade_logs.event_type values
+LOG_ENTRY = "ENTRY"
+LOG_PRICE_EXTREME = "PRICE_EXTREME"
+LOG_PARTIAL_EXIT = "PARTIAL_EXIT"
+LOG_EXIT = "EXIT"
 
 
 @dataclass(slots=True)
@@ -39,6 +42,18 @@ class TradeJournalEntry:
     # Path B only -- always 0 for Path A since there was no dip to track).
     fall_events: int = 0
 
+    # Snapshot at BUY: volume / path / price filters that justified entry.
+    entry_conditions: dict = field(default_factory=dict)
+    # Free quote wallet (e.g. USDT) immediately after / around the BUY.
+    wallet_quote_free: float | None = None
+
+    # In-trade MFE / MAE style extremes (updated on price ticks).
+    highest_price: float | None = None
+    lowest_price: float | None = None
+    # How many times a new high / new low was printed while OPEN.
+    peak_count: int = 0
+    trough_count: int = 0
+
     status: str = STATUS_OPEN
 
     # Scale Out / Partial Take Profit activity while the trade was open.
@@ -53,3 +68,13 @@ class TradeJournalEntry:
     duration_minutes: float | None = None
     pnl: float | None = None
     pnl_percent: float | None = None
+
+
+@dataclass(slots=True)
+class TradeLog:
+    journal_id: int
+    event_type: str
+    created_at: datetime
+    message: str | None = None
+    payload: dict = field(default_factory=dict)
+    id: int | None = None

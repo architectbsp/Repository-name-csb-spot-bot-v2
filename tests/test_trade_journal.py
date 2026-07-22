@@ -14,9 +14,12 @@ class DummyTradeJournalRepository:
 
     def __init__(self):
         self._rows = {}
+        self._logs = []
         self._next_id = 1
+        self._next_log_id = 1
         self.insert_calls = 0
         self.update_calls = 0
+        self.insert_log_calls = 0
 
     def insert(self, entity) -> int:
         entity.id = self._next_id
@@ -28,6 +31,16 @@ class DummyTradeJournalRepository:
     def update(self, entity) -> None:
         self._rows[entity.id] = entity
         self.update_calls += 1
+
+    def insert_log(self, entity) -> int:
+        entity.id = self._next_log_id
+        self._next_log_id += 1
+        self._logs.append(entity)
+        self.insert_log_calls += 1
+        return entity.id
+
+    def list_logs(self, journal_id: int):
+        return [log for log in self._logs if log.journal_id == journal_id]
 
     def list_all(self):
         return list(self._rows.values())
@@ -144,10 +157,15 @@ def test_journal_persists_through_the_repository_when_configured():
         entry_price=100.0,
         quantity=1.0,
         entry_reason="PATH_A_DIRECT_RISE",
+        entry_conditions={"volume_24h": 1_000_000},
+        wallet_quote_free=250.0,
     )
 
     assert repository.insert_calls == 1
     assert entry.id == 1
+    assert entry.wallet_quote_free == 250.0
+    assert entry.entry_conditions["volume_24h"] == 1_000_000
+    assert repository.insert_log_calls >= 1
 
     journal.record_partial_exit(
         "BTCUSDT", exit_price=105.0, quantity=0.5, realized_pnl=2.5
@@ -161,3 +179,33 @@ def test_journal_persists_through_the_repository_when_configured():
     assert len(all_entries) == 1
     assert all_entries[0].status == "CLOSED"
     assert all_entries[0].partial_exit_count == 1
+
+
+def test_record_price_update_tracks_extremes_and_peak_trough_counts():
+    journal = TradeJournal()
+    repository = DummyTradeJournalRepository()
+    journal.set_repository(repository)
+
+    journal.record_entry(
+        symbol="BTCUSDT",
+        entry_price=100.0,
+        quantity=1.0,
+        entry_reason="PATH_A_DIRECT_RISE",
+    )
+
+    # Same price -- no extreme change.
+    entry = journal.record_price_update("BTCUSDT", 100.0)
+    assert entry.peak_count == 0
+    assert entry.trough_count == 0
+
+    entry = journal.record_price_update("BTCUSDT", 110.0)
+    assert entry.highest_price == 110.0
+    assert entry.peak_count == 1
+
+    entry = journal.record_price_update("BTCUSDT", 90.0)
+    assert entry.lowest_price == 90.0
+    assert entry.trough_count == 1
+
+    log_types = [log.event_type for log in repository.list_logs(entry.id)]
+    assert "ENTRY" in log_types
+    assert "PRICE_EXTREME" in log_types

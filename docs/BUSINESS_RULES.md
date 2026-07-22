@@ -617,28 +617,34 @@ reconciliation, quarantine) described above -- there is no separate
 ## Trade Journal
 
 Every trade (from the BUY that opens a position to the SELL that finally
-closes it) gets a permanent `trade_journal` row (`TradeJournalEntry` /
-`app/core/services/trade_journal.py`), independent of the `positions`
-table -- closing a position deletes its `positions` row, but its journal
-entry is never deleted.
+closes it) gets a permanent `trade_journals` row (`TradeJournalEntry` /
+`app/core/services/trade_journal.py`) plus an append-only `trade_logs`
+event stream, independent of the `positions` table -- closing a position
+deletes its `positions` row, but journal history is never deleted.
+Legacy DBs with the old `trade_journal` table name are renamed on
+`sync_schema()`.
 
 - **Recorded at entry** (by Strategy, the instant a BUY fills and the
   position is promoted to `POSITION_OPEN`): symbol, exchange, entry
   price/quantity, `entry_reason` (`PATH_A_DIRECT_RISE` or
   `PATH_B_DIP_RECOVERY` -- see §2), when the watch cycle started, how
-  many minutes it was watched before the BUY, and how many times a new
-  high (`rise_events`) or new low (`fall_events`, Path B only) was
-  recorded while watching.
+  many minutes it was watched before the BUY, watch `rise_events` /
+  `fall_events`, **entry conditions** (volume_24h, change_24h, strategy
+  thresholds), and **wallet quote free** balance. A matching `trade_logs`
+  row with `event_type=ENTRY` is appended.
+- **Recorded while OPEN** (by RiskManager on every price tick via
+  `record_price_update`): highest/lowest price seen (MFE/MAE style),
+  peak/trough print counts, and hold minutes in the log payload. Only
+  extreme changes persist (`event_type=PRICE_EXTREME`) to avoid spam.
 - **Recorded on every partial exit** (by RiskManager's Scale Out /
   Partial Take Profit): quantity sold, exit price, realized PnL, running
-  totals (`partial_exit_count`, `partial_exit_pnl`). The trade stays
-  `OPEN` in the journal.
+  totals (`partial_exit_count`, `partial_exit_pnl`) + `PARTIAL_EXIT` log.
+  The trade stays `OPEN` in the journal.
 - **Recorded on final exit** (by RiskManager, for every full-close path --
   ordinary stop-loss, Manual Close, Emergency Exit, or Maximum Position
-  Duration): exit price, `exit_reason` (the same stage-aware value
-  recorded as `close_reason` above), total realized PnL/PnL%, and how
-  many minutes the trade was held from entry to exit. The trade is then
-  marked `CLOSED`.
+  Duration): exit price, `exit_reason` (CloseReason / stage-aware),
+  net PnL %, USD PnL, duration minutes, plus final extremes. Marked
+  `CLOSED` with an `EXIT` log row.
 
 ---
 
@@ -684,11 +690,13 @@ for whichever trade the symbol currently has:
 - With no trade history at all, only the raw price line is drawn.
 
 `app/ui/components/coin_chart.py` renders this into a TradingView-like
-line chart (price line + dashed Entry/Stop/TP/Trailing level lines +
-Entry/Exit point markers) using Flet's built-in `flet.canvas` -- no
-external charting/plotting dependency was added, consistent with the
-minimal pinned-dependency policy (§10/B29). Clicking a coin row in the
-coin table or an open-position card opens this chart in a modal dialog.
+line chart (price line + dashed Entry / Stop Loss / TP / Trailing Stop
+level lines + Entry/Exit point markers) using Flet's built-in
+`flet.canvas` -- Plotly / lightweight-charts were not added, consistent
+with the minimal pinned-dependency policy (§10/B29). Clicking a coin row
+in the coin table or an open-position card opens a **live** modal that
+auto-refreshes candles and overlay levels every few seconds while open
+(plus a manual Yenile action).
 
 ## Live Dashboard
 

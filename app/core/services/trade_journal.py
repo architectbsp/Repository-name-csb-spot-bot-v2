@@ -1,32 +1,37 @@
 """
-Sprint 5 -- Trade Journal.
+Trade Journal -- permanent ledger for every trade.
 
-Records the full decision history of every trade: why it was bought
-(which entry path, how long it was watched, how many times price rose or
-fell while watching), and, once it closes, how it went (which stop fired,
-how long it was held, the realized PnL). This is intentionally decoupled
-from PositionManager: a Position row disappears the instant it closes
-(see PositionManager.handle_position_closed), while a TradeJournalEntry
-is kept forever -- it is the historical ledger a future UI screen,
-export, or Performance Analytics module (Sprint 7) reads from.
+Tables:
+  - trade_journals: one row per trade (entry → close)
+  - trade_logs: append-only event stream (ENTRY / PRICE_EXTREME /
+    PARTIAL_EXIT / EXIT)
 
-Wiring (see BotEngine):
-    - Strategy calls record_entry() the moment a BUY is filled and the
-      position is promoted to POSITION_OPEN -- Strategy is the only
-      module that knows *why* the bot decided to buy (entry path, watch
-      duration, rise/fall counts all live on WatchList's per-coin state).
-    - RiskManager calls record_partial_exit() (Scale Out / Partial Take
-      Profit) and record_exit() (every full close, regardless of which
-      stop/manual/emergency/max-duration path triggered it) -- RiskManager
-      is the sole owner of every exit.
+Writers:
+  - Strategy.record_entry (BUY fill + why)
+  - RiskManager.record_price_update (in-trade MFE/MAE + peaks)
+  - RiskManager.record_partial_exit / record_exit
 """
+
+from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
 
-from app.core.domain.trade_journal import STATUS_CLOSED, TradeJournalEntry
+from app.core.domain.trade_journal import (
+    LOG_ENTRY,
+    LOG_EXIT,
+    LOG_PARTIAL_EXIT,
+    LOG_PRICE_EXTREME,
+    STATUS_CLOSED,
+    TradeJournalEntry,
+    TradeLog,
+)
 from app.core.exchange.market_key import market_key
-from app.core.persistence.mapper import journal_to_domain, journal_to_entity
+from app.core.persistence.mapper import (
+    journal_to_domain,
+    journal_to_entity,
+    trade_log_to_entity,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +40,7 @@ logger = logging.getLogger(__name__)
 class TradeJournal:
     def __init__(self) -> None:
         self._repository = None
-        # Sprint 18: one open trade per (exchange, symbol) -- keyed by
-        # market_key so the same coin on two venues never collides.
+        # Sprint 18: one open trade per (exchange, symbol).
         self._open_entries: dict[str, TradeJournalEntry] = {}
 
     def _entry_key(self, symbol: str, exchange=None) -> str:
@@ -44,6 +48,28 @@ class TradeJournal:
 
     def set_repository(self, repository) -> None:
         self._repository = repository
+
+    def _append_log(
+        self,
+        entry: TradeJournalEntry,
+        event_type: str,
+        *,
+        message: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        if self._repository is None or entry.id is None:
+            return
+        if not hasattr(self._repository, "insert_log"):
+            return
+
+        log = TradeLog(
+            journal_id=entry.id,
+            event_type=event_type,
+            created_at=datetime.now(UTC),
+            message=message,
+            payload=payload or {},
+        )
+        self._repository.insert_log(trade_log_to_entity(log))
 
     def record_entry(
         self,
@@ -57,7 +83,10 @@ class TradeJournal:
         wait_minutes: float | None = None,
         rise_events: int = 0,
         fall_events: int = 0,
+        entry_conditions: dict | None = None,
+        wallet_quote_free: float | None = None,
     ) -> TradeJournalEntry:
+        conditions = dict(entry_conditions or {})
         entry = TradeJournalEntry(
             symbol=symbol,
             entry_time=datetime.now(UTC),
@@ -69,6 +98,10 @@ class TradeJournal:
             wait_minutes=wait_minutes,
             rise_events=rise_events,
             fall_events=fall_events,
+            entry_conditions=conditions,
+            wallet_quote_free=wallet_quote_free,
+            highest_price=entry_price,
+            lowest_price=entry_price,
         )
 
         if self._repository is not None:
@@ -76,19 +109,86 @@ class TradeJournal:
 
         self._open_entries[self._entry_key(symbol, exchange)] = entry
 
+        self._append_log(
+            entry,
+            LOG_ENTRY,
+            message=entry_reason,
+            payload={
+                "entry_price": entry_price,
+                "quantity": quantity,
+                "wait_minutes": wait_minutes,
+                "rise_events": rise_events,
+                "fall_events": fall_events,
+                "entry_conditions": conditions,
+                "wallet_quote_free": wallet_quote_free,
+            },
+        )
+
         logger.info(
             "[JOURNAL] ENTRY symbol=%s exchange=%s reason=%s price=%.8f "
-            "qty=%.8f wait_minutes=%s rise_events=%d fall_events=%d",
+            "qty=%.8f wait_minutes=%s wallet_free=%s rise_events=%d "
+            "fall_events=%d",
             symbol,
             exchange,
             entry_reason,
             entry_price,
             quantity,
             f"{wait_minutes:.1f}" if wait_minutes is not None else "n/a",
+            f"{wallet_quote_free:.4f}" if wallet_quote_free is not None else "n/a",
             rise_events,
             fall_events,
         )
 
+        return entry
+
+    def record_price_update(
+        self,
+        symbol: str,
+        price: float,
+        *,
+        exchange=None,
+    ) -> TradeJournalEntry | None:
+        """
+        In-trade tracking: hold extremes (highest/lowest) and peak/trough
+        print counts. Persists + logs only when an extreme changes.
+        """
+        entry = self._resolve_open(symbol, exchange)
+        if entry is None:
+            return None
+
+        changed = False
+        if entry.highest_price is None or price > entry.highest_price:
+            entry.highest_price = price
+            entry.peak_count += 1
+            changed = True
+        if entry.lowest_price is None or price < entry.lowest_price:
+            entry.lowest_price = price
+            entry.trough_count += 1
+            changed = True
+
+        if not changed:
+            return entry
+
+        hold_minutes = (
+            datetime.now(UTC) - entry.entry_time
+        ).total_seconds() / 60.0
+
+        if self._repository is not None and entry.id is not None:
+            self._repository.update(journal_to_entity(entry))
+
+        self._append_log(
+            entry,
+            LOG_PRICE_EXTREME,
+            message="new_extreme",
+            payload={
+                "price": price,
+                "highest_price": entry.highest_price,
+                "lowest_price": entry.lowest_price,
+                "peak_count": entry.peak_count,
+                "trough_count": entry.trough_count,
+                "hold_minutes": hold_minutes,
+            },
+        )
         return entry
 
     def record_partial_exit(
@@ -101,14 +201,7 @@ class TradeJournal:
         reason: str = "PARTIAL_TP",
         exchange=None,
     ) -> TradeJournalEntry | None:
-        entry = self._open_entries.get(self._entry_key(symbol, exchange))
-        if entry is None and exchange is None:
-            # Ambiguous legacy lookup: unique open entry for this symbol.
-            matches = [
-                e for e in self._open_entries.values() if e.symbol == symbol
-            ]
-            entry = matches[0] if len(matches) == 1 else None
-
+        entry = self._resolve_open(symbol, exchange)
         if entry is None:
             logger.warning(
                 "[JOURNAL] Partial exit for %s with no open journal entry "
@@ -119,18 +212,24 @@ class TradeJournal:
 
         entry.partial_exit_count += 1
         entry.partial_exit_pnl += realized_pnl
-        entry.partial_exits.append(
-            {
-                "time": datetime.now(UTC).isoformat(),
-                "exit_price": exit_price,
-                "quantity": quantity,
-                "realized_pnl": realized_pnl,
-                "reason": reason,
-            }
-        )
+        partial = {
+            "time": datetime.now(UTC).isoformat(),
+            "exit_price": exit_price,
+            "quantity": quantity,
+            "realized_pnl": realized_pnl,
+            "reason": reason,
+        }
+        entry.partial_exits.append(partial)
 
         if self._repository is not None and entry.id is not None:
             self._repository.update(journal_to_entity(entry))
+
+        self._append_log(
+            entry,
+            LOG_PARTIAL_EXIT,
+            message=str(reason),
+            payload=partial,
+        )
 
         logger.info(
             "[JOURNAL] PARTIAL EXIT symbol=%s qty=%.8f price=%.8f "
@@ -188,19 +287,41 @@ class TradeJournal:
         if self._repository is not None and entry.id is not None:
             self._repository.update(journal_to_entity(entry))
 
+        self._append_log(
+            entry,
+            LOG_EXIT,
+            message=str(reason),
+            payload={
+                "exit_price": exit_price,
+                "exit_reason": reason,
+                "pnl": pnl,
+                "pnl_percent": pnl_percent,
+                "duration_minutes": entry.duration_minutes,
+                "highest_price": entry.highest_price,
+                "lowest_price": entry.lowest_price,
+                "peak_count": entry.peak_count,
+                "trough_count": entry.trough_count,
+            },
+        )
+
         logger.info(
             "[JOURNAL] EXIT symbol=%s reason=%s price=%.8f pnl=%s "
-            "duration_minutes=%.1f",
+            "pnl_percent=%s duration_minutes=%.1f",
             symbol,
             reason,
             exit_price,
             f"{pnl:.8f}" if pnl is not None else "n/a",
+            f"{pnl_percent:.4f}" if pnl_percent is not None else "n/a",
             entry.duration_minutes,
         )
 
         return entry
 
-    def get_open(self, symbol: str, exchange=None) -> TradeJournalEntry | None:
+    def _resolve_open(
+        self,
+        symbol: str,
+        exchange=None,
+    ) -> TradeJournalEntry | None:
         entry = self._open_entries.get(self._entry_key(symbol, exchange))
         if entry is not None:
             return entry
@@ -211,23 +332,27 @@ class TradeJournal:
             return matches[0] if len(matches) == 1 else None
         return None
 
+    def get_open(self, symbol: str, exchange=None) -> TradeJournalEntry | None:
+        return self._resolve_open(symbol, exchange)
+
     def get_last_closed(self, symbol: str) -> TradeJournalEntry | None:
-        """
-        Sprint 6 (coin charts): the most recently closed trade for
-        `symbol`, used to overlay Entry/Exit markers on a chart once
-        PositionManager no longer has an open position for it. Only
-        available once a repository is wired in -- closed entries are not
-        kept in-memory (see record_exit, which pops them).
-        """
         if self._repository is None:
             return None
 
         entity = self._repository.get_last_closed_by_symbol(symbol)
-
         if entity is None:
             return None
-
         return journal_to_domain(entity)
+
+    def list_logs(self, journal_id: int) -> list[TradeLog]:
+        if self._repository is None or not hasattr(self._repository, "list_logs"):
+            return []
+        from app.core.persistence.mapper import trade_log_to_domain
+
+        return [
+            trade_log_to_domain(entity)
+            for entity in self._repository.list_logs(journal_id)
+        ]
 
     def list_open(self) -> list[TradeJournalEntry]:
         return list(self._open_entries.values())

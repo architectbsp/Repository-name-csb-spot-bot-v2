@@ -1,21 +1,18 @@
 """
-Sprint 6 -- Coin charts: a TradingView-like price chart for a single
-symbol, drawn on a flet.canvas.Canvas (no external charting/plotting
-dependency -- see docs/BUSINESS_RULES.md's minimal, pinned-dependency
-policy from the B29 fix). Renders the recent price line plus horizontal
-overlay levels for Entry / Stop / Take-Profit(trailing activation) /
-Trailing-shadow, and Entry/Exit point markers, from a ChartData built by
-ChartService.
+Coin charts: TradingView-like price chart on flet.canvas (no Plotly /
+lightweight-charts dependency -- BUSINESS_RULES §10/B29). Renders the
+price line plus dynamic Entry / Stop Loss / TP / Trailing Stop overlays
+from ChartService.ChartData.
 
-Pure rendering: build_coin_chart() takes an already-assembled ChartData
-and returns a Control tree with no side effects, so it is fully unit
-testable without a running Page (see tests/test_coin_chart.py).
-open_coin_chart_dialog() is the one function that touches a live Page --
-it fetches fresh ChartData and shows it in a modal dialog, used by the
-coin_table/open_positions "click a coin" handlers.
+build_coin_chart() is pure/unit-testable. open_coin_chart_dialog() shows
+a modal that auto-refreshes overlays + candles while open.
 """
 
+from __future__ import annotations
+
 import logging
+import threading
+import time
 
 import flet as ft
 import flet.canvas as canvas
@@ -30,6 +27,7 @@ logger = logging.getLogger(__name__)
 _WIDTH = 640
 _HEIGHT = 300
 _PADDING = 24
+_LIVE_REFRESH_SECONDS = 5.0
 
 _ENTRY_COLOR = "#FACC15"
 _STOP_COLOR = DANGER
@@ -154,9 +152,13 @@ def build_coin_chart(chart_data: ChartData) -> ft.Control:
         )
 
     add_level(chart_data.entry_price, _ENTRY_COLOR, "ENTRY")
-    add_level(chart_data.stop_price, _STOP_COLOR, "STOP")
-    add_level(chart_data.take_profit_price, _TARGET_COLOR, "TP/TRAIL AKTİF")
-    add_level(chart_data.trailing_reference_price, _TRAILING_COLOR, "TRAILING")
+    add_level(chart_data.stop_price, _STOP_COLOR, "STOP LOSS")
+    add_level(chart_data.take_profit_price, _TARGET_COLOR, "TP")
+    add_level(
+        chart_data.trailing_reference_price,
+        _TRAILING_COLOR,
+        "TRAILING STOP",
+    )
 
     if chart_data.entry_time is not None:
         entry_index = _nearest_index(candles, chart_data.entry_time.timestamp() * 1000)
@@ -241,25 +243,56 @@ def open_coin_chart_dialog(
     exchange_type,
 ) -> None:
     """
-    "Coin'e tıklayınca grafik göster" -- builds fresh ChartData for
-    `symbol` on the active exchange and shows it in a modal dialog.
-    Never raises: any failure to build chart data is shown as a friendly
-    empty-chart state instead of breaking the click handler.
+    Click-a-coin live chart: fetches ChartData, shows Entry/SL/TP/Trailing
+    overlays, and refreshes every few seconds while the dialog stays open
+    so stop/trailing lines track the live position.
     """
-    try:
-        chart_data = chart_service.build_chart_data(symbol, exchange_type)
-    except Exception:
-        logger.exception("Failed to build chart data for %s", symbol)
-        chart_data = ChartData(symbol=symbol)
+
+    def _load() -> ChartData:
+        try:
+            return chart_service.build_chart_data(symbol, exchange_type)
+        except Exception:
+            logger.exception("Failed to build chart data for %s", symbol)
+            return ChartData(symbol=symbol)
+
+    chart_host = ft.Column(
+        tight=True,
+        controls=[build_coin_chart(_load())],
+    )
+    state = {"alive": True}
+
+    def _rebuild(_: object | None = None) -> None:
+        chart_host.controls = [build_coin_chart(_load())]
+        try:
+            page.update()
+        except Exception:
+            state["alive"] = False
+
+    def _close(_: object | None = None) -> None:
+        state["alive"] = False
+        page.pop_dialog()
+
+    def _auto_refresh() -> None:
+        while state["alive"]:
+            time.sleep(_LIVE_REFRESH_SECONDS)
+            if not state["alive"]:
+                break
+            try:
+                _rebuild()
+            except Exception:
+                logger.exception("Live chart refresh failed for %s", symbol)
+                break
 
     dialog = ft.AlertDialog(
         modal=True,
-        title=ft.Text(f"{symbol} Grafiği", color=TEXT),
-        content=build_coin_chart(chart_data),
+        title=ft.Text(f"{symbol} Grafiği (canlı)", color=TEXT),
+        content=chart_host,
         actions=[
-            ft.TextButton("Kapat", on_click=lambda _: page.pop_dialog()),
+            ft.TextButton("Yenile", on_click=_rebuild),
+            ft.TextButton("Kapat", on_click=_close),
         ],
     )
 
     page.show_dialog(dialog)
     page.update()
+    threading.Thread(target=_auto_refresh, daemon=True).start()

@@ -34,8 +34,14 @@ def sync_schema(engine: Engine) -> None:
     Creates any missing tables, then adds any missing columns to tables
     that already exist. Safe to call on every startup.
     """
+    # Each structural migration runs in its own transaction. Nested
+    # inspect(engine) / DDL inside one shared SQLite transaction can leave
+    # staging tables behind (positions__sprint18) with an empty target.
     with engine.begin() as connection:
         _migrate_positions_primary_key(connection, engine)
+
+    with engine.begin() as connection:
+        _migrate_trade_journal_table_rename(connection, engine)
 
     Base.metadata.create_all(bind=engine)
 
@@ -86,7 +92,9 @@ def _migrate_positions_primary_key(connection, engine: Engine) -> None:
     (`symbol` or `id`) so open rows survive as `BINANCE:BTC/USDT`-style
     keys. No-op when the table is missing or already on `position_key`.
     """
-    inspector = inspect(engine)
+    # Inspect the live connection (not a pooled side-connection) so SQLite
+    # DDL in this transaction stays consistent.
+    inspector = inspect(connection)
     if "positions" not in inspector.get_table_names():
         return
 
@@ -175,6 +183,29 @@ def _rename_table(connection, engine: Engine, old: str, new: str) -> None:
         return
 
     # SQLite + PostgreSQL
+    connection.execute(text(f"ALTER TABLE {old_sql} RENAME TO {new_sql}"))
+
+
+def _migrate_trade_journal_table_rename(connection, engine: Engine) -> None:
+    """
+    Renames legacy `trade_journal` → `trade_journals` when the old table
+    still exists and the new name does not. No-op otherwise.
+    """
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+    if "trade_journal" not in tables or "trade_journals" in tables:
+        return
+
+    preparer = engine.dialect.identifier_preparer
+    old_sql = preparer.quote("trade_journal")
+    new_sql = preparer.quote("trade_journals")
+
+    logger.warning(
+        "[DB MIGRATION] Renaming table %s -> %s (%s)",
+        "trade_journal",
+        "trade_journals",
+        engine.dialect.name,
+    )
     connection.execute(text(f"ALTER TABLE {old_sql} RENAME TO {new_sql}"))
 
 

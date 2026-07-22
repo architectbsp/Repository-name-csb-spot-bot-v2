@@ -130,14 +130,12 @@ class PositionEntity(Base):
 
 class TradeJournalEntity(Base):
     """
-    Sprint 5 -- Trade Journal: one row per trade (BUY through final SELL),
-    kept forever regardless of what happens to the corresponding
-    `PositionEntity` row (which is deleted the moment the position
-    closes). `symbol` is intentionally NOT the primary key here -- the
-    same symbol is traded many times over the bot's lifetime.
+    One row per trade (BUY through final SELL), kept forever regardless of
+    what happens to the corresponding `PositionEntity` row. Table name is
+    `trade_journals` (legacy `trade_journal` is renamed on sync).
     """
 
-    __tablename__ = "trade_journal"
+    __tablename__ = "trade_journals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
@@ -154,6 +152,16 @@ class TradeJournalEntity(Base):
     rise_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fall_events: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # BUY-time context: indicator/volume filters + wallet snapshot.
+    entry_conditions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wallet_quote_free: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # In-trade extremes (MFE/MAE style) + peak/trough print counts.
+    highest_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lowest_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    peak_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trough_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     status: Mapped[str] = mapped_column(String(10), nullable=False, default="OPEN")
 
     partial_exit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -169,3 +177,19 @@ class TradeJournalEntity(Base):
     duration_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class TradeLogEntity(Base):
+    """
+    Append-only event stream for a trade_journals row: ENTRY, PRICE_EXTREME,
+    PARTIAL_EXIT, EXIT (and future event types).
+    """
+
+    __tablename__ = "trade_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    journal_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
+    message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)

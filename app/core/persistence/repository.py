@@ -1,6 +1,11 @@
 from sqlalchemy.orm import Session
 
-from app.core.persistence.models import PositionEntity, SettingsEntity, TradeJournalEntity
+from app.core.persistence.models import (
+    PositionEntity,
+    SettingsEntity,
+    TradeJournalEntity,
+    TradeLogEntity,
+)
 
 
 _SETTINGS_ROW_ID = 1
@@ -129,4 +134,18 @@ class TradeJournalRepository:
             .filter_by(symbol=symbol, status="CLOSED")
             .order_by(TradeJournalEntity.exit_time.desc())
             .first()
+        )
+
+    def insert_log(self, entity: TradeLogEntity) -> int:
+        self._session.add(entity)
+        self._session.commit()
+        self._session.refresh(entity)
+        return entity.id
+
+    def list_logs(self, journal_id: int) -> list[TradeLogEntity]:
+        return (
+            self._session.query(TradeLogEntity)
+            .filter_by(journal_id=journal_id)
+            .order_by(TradeLogEntity.id.asc())
+            .all()
         )

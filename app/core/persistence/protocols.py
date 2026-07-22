@@ -15,6 +15,7 @@ from app.core.persistence.models import (
     PositionEntity,
     SettingsEntity,
     TradeJournalEntity,
+    TradeLogEntity,
 )
 
 
@@ -52,3 +53,7 @@ class TradeJournalRepositoryProtocol(Protocol):
         self,
         symbol: str,
     ) -> TradeJournalEntity | None: ...
+
+    def insert_log(self, entity: TradeLogEntity) -> int: ...
+
+    def list_logs(self, journal_id: int) -> list[TradeLogEntity]: ...

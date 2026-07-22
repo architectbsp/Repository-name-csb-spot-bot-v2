@@ -786,11 +786,33 @@ class RiskManager:
             ticker,
         )
 
+    def get_quote_balance(self, exchange_type) -> float | None:
+        """Free quote wallet for journal / sizing callers."""
+        if self._exchange_manager is None:
+            return None
+        try:
+            return float(self._exchange_manager.get_quote_balance(exchange_type))
+        except Exception:
+            return None
+
     def update_position(
         self,
         position,
         ticker,
     ) -> None:
+        if self._trade_journal is not None:
+            try:
+                self._trade_journal.record_price_update(
+                    position.symbol,
+                    float(ticker.last_price),
+                    exchange=getattr(position, "exchange", None),
+                )
+            except Exception:
+                logger.exception(
+                    "[JOURNAL] price update failed symbol=%s",
+                    position.symbol,
+                )
+
         self.check_partial_take_profit(position, ticker)
         self.check_break_even(position, ticker)
         self.check_trailing(position, ticker)

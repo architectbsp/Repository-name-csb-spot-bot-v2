@@ -238,17 +238,52 @@ class Strategy:
             ).total_seconds() / 60.0
 
         exchange_name = getattr(ticker.exchange, "name", ticker.exchange)
+        entry_reason = coin.get("entry_path") or "PATH_B_DIP_RECOVERY"
+
+        # BUY-time context: volume / price filters + free quote wallet.
+        entry_conditions = {
+            "entry_path": entry_reason,
+            "volume_24h": getattr(ticker, "volume_24h", None),
+            "last_price": getattr(ticker, "last_price", None),
+            "change_24h": getattr(ticker, "change_24h", None),
+            "min_volume_usd": getattr(
+                getattr(self._config, "strategy", None),
+                "min_volume_usd",
+                None,
+            ),
+            "watch_percent": getattr(
+                getattr(self._config, "strategy", None),
+                "watch_percent",
+                None,
+            ),
+            "entry_percent": getattr(
+                getattr(self._config, "strategy", None),
+                "entry_percent",
+                None,
+            ),
+        }
+
+        wallet_quote_free = None
+        if self._risk_manager is not None:
+            try:
+                wallet_quote_free = self._risk_manager.get_quote_balance(
+                    ticker.exchange,
+                )
+            except Exception:
+                wallet_quote_free = None
 
         self._trade_journal.record_entry(
             symbol=ticker.symbol,
             exchange=exchange_name,
             entry_price=position.entry_price,
             quantity=position.quantity,
-            entry_reason=coin.get("entry_path") or "PATH_B_DIP_RECOVERY",
+            entry_reason=entry_reason,
             watch_started_at=watch_started_at,
             wait_minutes=wait_minutes,
             rise_events=coin.get("rise_count", 0),
             fall_events=coin.get("fall_count", 0),
+            entry_conditions=entry_conditions,
+            wallet_quote_free=wallet_quote_free,
         )
 
     def _handle_position_open(

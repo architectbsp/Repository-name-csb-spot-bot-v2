@@ -140,6 +140,8 @@ class ChartService:
         chart.exit_time = entry.exit_time
         chart.exit_reason = entry.exit_reason
         chart.take_profit_price = self._take_profit_price(entry.entry_price)
+        # Replay in-trade extremes as Trailing / high-water mark when known.
+        chart.trailing_reference_price = entry.highest_price
 
     def _take_profit_price(self, entry_price: float | None) -> float | None:
         if entry_price is None or self._config is None:

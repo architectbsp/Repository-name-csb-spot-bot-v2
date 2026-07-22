@@ -10,9 +10,14 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.domain.trade_journal import TradeJournalEntry
+from app.core.domain.trade_journal import LOG_ENTRY, TradeJournalEntry, TradeLog
 from app.core.persistence.database import Base
-from app.core.persistence.mapper import journal_to_domain, journal_to_entity
+from app.core.persistence.mapper import (
+    journal_to_domain,
+    journal_to_entity,
+    trade_log_to_domain,
+    trade_log_to_entity,
+)
 from app.core.persistence.repository import TradeJournalRepository
 
 
@@ -32,6 +37,12 @@ def test_journal_entry_round_trips_through_the_mapper():
         exchange="BINANCE",
         rise_events=4,
         fall_events=0,
+        entry_conditions={"volume_24h": 500000.0},
+        wallet_quote_free=120.5,
+        highest_price=112.0,
+        lowest_price=95.0,
+        peak_count=2,
+        trough_count=1,
         partial_exits=[{"exit_price": 105.0, "quantity": 0.5}],
         partial_exit_count=1,
         partial_exit_pnl=2.5,
@@ -45,6 +56,12 @@ def test_journal_entry_round_trips_through_the_mapper():
     assert restored.rise_events == 4
     assert restored.partial_exits == [{"exit_price": 105.0, "quantity": 0.5}]
     assert restored.partial_exit_pnl == 2.5
+    assert restored.entry_conditions == {"volume_24h": 500000.0}
+    assert restored.wallet_quote_free == 120.5
+    assert restored.highest_price == 112.0
+    assert restored.lowest_price == 95.0
+    assert restored.peak_count == 2
+    assert restored.trough_count == 1
 
 
 def test_repository_insert_then_update_persists_the_full_lifecycle():
@@ -126,3 +143,32 @@ def test_get_open_by_symbol_only_returns_the_open_row():
     assert found is not None
     assert found.status == "OPEN"
     assert found.entry_price == 100.0
+
+
+def test_trade_logs_persist_for_a_journal_row():
+    session = make_session()
+    repository = TradeJournalRepository(session)
+
+    entry = TradeJournalEntry(
+        symbol="BTCUSDT",
+        entry_time=datetime.now(UTC),
+        entry_price=100.0,
+        quantity=1.0,
+        entry_reason="PATH_A_DIRECT_RISE",
+    )
+    journal_id = repository.insert(journal_to_entity(entry))
+
+    log = TradeLog(
+        journal_id=journal_id,
+        event_type=LOG_ENTRY,
+        created_at=datetime.now(UTC),
+        message="PATH_A_DIRECT_RISE",
+        payload={"entry_price": 100.0},
+    )
+    log_id = repository.insert_log(trade_log_to_entity(log))
+    assert log_id is not None
+
+    logs = [trade_log_to_domain(row) for row in repository.list_logs(journal_id)]
+    assert len(logs) == 1
+    assert logs[0].event_type == LOG_ENTRY
+    assert logs[0].payload["entry_price"] == 100.0
