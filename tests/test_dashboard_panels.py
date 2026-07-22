@@ -35,17 +35,28 @@ def test_dashboard_cards_render_live_snapshot_values():
     snap = DashboardSnapshot(
         generated_at=datetime.now(UTC),
         quote_balance=1250.5,
+        daily_realized_pnl=12.5,
         daily_pnl_percent=2.5,
         open_position_count=3,
         active_signal_count=7,
+        total_pnl=250.0,
+        scan_elapsed_ms=420.0,
+        api_latency_ms=85.0,
+        ram_mb=128.0,
+        cpu_percent=4.0,
+        trading_hours_active=True,
     )
 
     texts = _texts(build_dashboard_cards(snap))
 
-    assert "$1,250.50" in texts
-    assert "+2.50%" in texts
+    assert "TOTAL PNL" in texts
+    assert "+250.00 USDT" in texts
+    assert "+12.50 USDT (+2.50%)" in texts
     assert "03" in texts
     assert "7" in texts
+    assert "420 ms" in texts
+    assert "85 ms" in texts
+    assert "AKTİF" in texts
 
 
 def test_account_panel_reflects_bot_and_api_status():

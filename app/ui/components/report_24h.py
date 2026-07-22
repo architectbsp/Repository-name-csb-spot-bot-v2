@@ -54,6 +54,7 @@ def _performance_rows(report: PerformanceReport | None) -> list:
             size=13,
             weight=ft.FontWeight.BOLD,
         ),
+        _row("Total PnL", money(report.total_pnl)),
         _row("Win Rate", _fmt_pct(report.win_rate_percent), "#38BDF8"),
         _row("Avg Profit", money(report.average_profit), "#22C55E"),
         _row("Avg Loss", money(report.average_loss), "#EF4444"),

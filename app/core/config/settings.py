@@ -84,6 +84,15 @@ class StrategySettings:
     max_position_hours: int = 24
     scan_interval_seconds: int = 300
 
+    # Trading Hours Constraint (UTC). When enabled, new BUY entries are
+    # blocked during quiet hours and (optionally) on weekends. Open
+    # positions keep being managed. 0/1 ints fit SETTINGS_SCHEMA.
+    trading_hours_enabled: int = 0
+    weekend_closed: int = 1
+    # Quiet window [start, end) UTC -- default 02:00–05:00 passive.
+    quiet_start_hour_utc: int = 2
+    quiet_end_hour_utc: int = 5
+
 
 @dataclass(slots=True)
 class ConnectivitySettings:

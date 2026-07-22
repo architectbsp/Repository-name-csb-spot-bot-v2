@@ -29,6 +29,11 @@ class SettingsEntity(Base):
     min_volume_usd: Mapped[float] = mapped_column(Float, nullable=False)
     max_position_hours: Mapped[int] = mapped_column(Integer, nullable=False)
     scan_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Trading hours (UTC). Defaults keep older DBs upgradeable.
+    trading_hours_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    weekend_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    quiet_start_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    quiet_end_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
 
     # RiskSettings
     stop_loss_percent: Mapped[float] = mapped_column(Float, nullable=False)

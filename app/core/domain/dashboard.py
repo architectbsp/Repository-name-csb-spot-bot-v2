@@ -103,6 +103,15 @@ class DashboardSnapshot:
     open_position_count: int = 0
     active_signal_count: int = 0
 
+    # All-time realized PnL from AnalyticsService (USD).
+    total_pnl: float | None = None
+    # System / ops metrics for the live dashboard cards.
+    scan_elapsed_ms: float | None = None
+    api_latency_ms: float | None = None
+    ram_mb: float | None = None
+    cpu_percent: float | None = None
+    trading_hours_active: bool = True
+
     coins: list[CoinRow] = field(default_factory=list)
     open_positions: list[OpenPositionRow] = field(default_factory=list)
     watch_list: list[WatchRow] = field(default_factory=list)

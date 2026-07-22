@@ -1,4 +1,5 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -122,6 +123,15 @@ class BaseExchange(ABC):
         if wallet is None:
             return 0.0
         return float(wallet.get("free", 0.0))
+
+    def ping_ms(self) -> float:
+        """Round-trip latency to the exchange REST API (ms)."""
+        started = time.perf_counter()
+        if self.client is not None and hasattr(self.client, "fetch_time"):
+            self.client.fetch_time()
+        else:
+            self.fetch_balance()
+        return (time.perf_counter() - started) * 1000.0
 
     @abstractmethod
     def fetch_markets(self):

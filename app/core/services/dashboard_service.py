@@ -30,10 +30,14 @@ from app.core.exchange.market_key import exchange_name, market_key
 from app.core.exchange.models import ConnectionStatus, ExchangeType
 from app.core.market_data.models import NormalizedTicker
 from app.core.services.memory_log import get_memory_log_handler
+from app.core.services.system_metrics import SystemMetricsSampler
+from app.core.services.trading_hours import is_entry_allowed
 from app.core.watch_list import WatchState
 
 
 logger = logging.getLogger(__name__)
+
+_API_PING_MIN_INTERVAL_SECONDS = 15.0
 
 _ACTIVE_WATCH_STATES = {
     WatchState.WATCH_FALLING,
@@ -68,6 +72,9 @@ class DashboardService:
         self._tickers: dict[str, NormalizedTicker] = {}
         self._ticker_lock = threading.Lock()
         self._memory_log = get_memory_log_handler()
+        self._system_metrics = SystemMetricsSampler()
+        self._last_api_latency_ms: float | None = None
+        self._last_api_ping_at: float | None = None
 
     # ---- wiring ---------------------------------------------------------
 
@@ -138,6 +145,17 @@ class DashboardService:
             if self._analytics_service is not None
             else None
         )
+        system = self._system_metrics.sample()
+        scan_ms = None
+        if self._market_scanner is not None:
+            getter = getattr(
+                self._market_scanner, "last_scan_elapsed_ms", None
+            )
+            if callable(getter):
+                scan_ms = getter()
+
+        api_ms = self._sample_api_latency()
+        hours_active = self._trading_hours_active(now)
 
         return DashboardSnapshot(
             generated_at=now,
@@ -153,6 +171,14 @@ class DashboardService:
             day_start_balance=day_start,
             open_position_count=len(open_positions),
             active_signal_count=len(watch_rows),
+            total_pnl=(
+                performance.total_pnl if performance is not None else None
+            ),
+            scan_elapsed_ms=scan_ms,
+            api_latency_ms=api_ms,
+            ram_mb=system.ram_mb,
+            cpu_percent=system.cpu_percent,
+            trading_hours_active=hours_active,
             coins=coin_rows,
             open_positions=open_positions,
             watch_list=watch_rows,
@@ -164,6 +190,44 @@ class DashboardService:
         )
 
     # ---- private helpers ------------------------------------------------
+
+    def _sample_api_latency(self) -> float | None:
+        import time
+
+        if self._exchange_manager is None:
+            return self._last_api_latency_ms
+
+        now = time.perf_counter()
+        if (
+            self._last_api_ping_at is not None
+            and (now - self._last_api_ping_at) < _API_PING_MIN_INTERVAL_SECONDS
+        ):
+            return self._last_api_latency_ms
+
+        try:
+            self._last_api_latency_ms = float(self._exchange_manager.ping_ms())
+            self._last_api_ping_at = now
+        except Exception:
+            logger.debug("[DASHBOARD] API ping failed", exc_info=True)
+            self._last_api_ping_at = now
+
+        return self._last_api_latency_ms
+
+    def _trading_hours_active(self, now: datetime) -> bool:
+        if self._config is None:
+            return True
+        strategy = self._config.strategy
+        return is_entry_allowed(
+            enabled=bool(int(getattr(strategy, "trading_hours_enabled", 0) or 0)),
+            weekend_closed=bool(int(getattr(strategy, "weekend_closed", 1) or 0)),
+            quiet_start_hour_utc=int(
+                getattr(strategy, "quiet_start_hour_utc", 2) or 0
+            ),
+            quiet_end_hour_utc=int(
+                getattr(strategy, "quiet_end_hour_utc", 5) or 0
+            ),
+            now=now,
+        )
 
     def _exchange_status(self) -> tuple[str, list[str], bool, bool]:
         if self._exchange_manager is None:

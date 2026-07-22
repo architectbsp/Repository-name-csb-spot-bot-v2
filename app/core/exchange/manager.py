@@ -145,6 +145,12 @@ class ExchangeManager:
     ) -> float:
         return self._get_exchange(exchange_type).fetch_base_balance(base)
 
+    def ping_ms(self, exchange_type: ExchangeType | None = None) -> float:
+        """REST RTT against one enabled venue (active if omitted)."""
+        if exchange_type is None:
+            exchange_type = self.active_exchange_type()
+        return self._get_exchange(exchange_type).ping_ms()
+
     def place_market_buy(
         self,
         exchange_type: ExchangeType,

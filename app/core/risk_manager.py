@@ -586,8 +586,42 @@ class RiskManager:
             logger.warning("[RISK] Trade rejected: insufficient_balance")
             return False
 
+        if not self._is_within_trading_hours():
+            return False
+
         logger.debug("[RISK] Trade accepted")
         return True
+
+    def _is_within_trading_hours(self) -> bool:
+        """Blocks new entries outside quiet hours / weekends when enabled."""
+        from app.core.services.trading_hours import block_reason, is_entry_allowed
+
+        strategy = getattr(self._config, "strategy", None)
+        if strategy is None:
+            return True
+
+        enabled = bool(int(getattr(strategy, "trading_hours_enabled", 0) or 0))
+        weekend_closed = bool(int(getattr(strategy, "weekend_closed", 1) or 0))
+        quiet_start = int(getattr(strategy, "quiet_start_hour_utc", 2) or 0)
+        quiet_end = int(getattr(strategy, "quiet_end_hour_utc", 5) or 0)
+
+        allowed = is_entry_allowed(
+            enabled=enabled,
+            weekend_closed=weekend_closed,
+            quiet_start_hour_utc=quiet_start,
+            quiet_end_hour_utc=quiet_end,
+        )
+        if allowed:
+            return True
+
+        reason = block_reason(
+            enabled=enabled,
+            weekend_closed=weekend_closed,
+            quiet_start_hour_utc=quiet_start,
+            quiet_end_hour_utc=quiet_end,
+        )
+        logger.warning("[RISK] Trade rejected: trading_hours (%s)", reason)
+        return False
 
     @staticmethod
     def create_trade_request(

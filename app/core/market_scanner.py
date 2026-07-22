@@ -30,6 +30,7 @@ class MarketScanner:
         self._config = None
         self._symbol_filter = None
         self._last_scan_result = []
+        self._last_scan_elapsed_ms: float | None = None
         self._initialized = False
 
     def set_symbol_filter(self, symbol_filter) -> None:
@@ -184,10 +185,16 @@ class MarketScanner:
             if self.has_stopwatch():
                 elapsed = self._stopwatch.stop()
 
+        if elapsed is not None:
+            self._last_scan_elapsed_ms = float(elapsed) * 1000.0
+
         if self.has_event_bus():
             self._event_bus.publish(
                 "market_scanner.tick_completed",
-                {"elapsed": elapsed},
+                {
+                    "elapsed": elapsed,
+                    "elapsed_ms": self._last_scan_elapsed_ms,
+                },
             )
 
     def scan(self) -> None:
@@ -225,6 +232,9 @@ class MarketScanner:
 
     def last_scan_result(self):
         return list(self._last_scan_result)
+
+    def last_scan_elapsed_ms(self) -> float | None:
+        return self._last_scan_elapsed_ms
 
     def fetch_symbols(self):
         def operation():

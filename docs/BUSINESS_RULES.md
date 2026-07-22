@@ -719,9 +719,11 @@ Snapshot contents:
 - **Account / top bar**: enabled exchange name(s), testnet vs live,
   summed quote balance across venues, bot running flag, API connection
   status (`ConnectionStatus.CONNECTED` on any enabled exchange).
-- **Cards**: portfolio balance, signed daily realized PnL % (from
-  RiskManager's UTC day-start balance + realized PnL today), open
-  position count, active watch-signal count.
+- **Cards (row 1)**: Total PnL (all-time realized), Daily PnL (USD + %),
+  open position count, watched/pending signal count.
+- **Cards (row 2)**: volume-scan duration (ms), exchange API latency
+  (REST ping, throttled ~15s), process RAM (MB), process CPU (%),
+  trading-hours AKTİF/PASİF.
 - **Coin table / open positions**: watch-list coins + open positions,
   enriched with last-known ticker (raw price string preferred, §9).
   Unrealized PnL % = `(last - entry) / entry * 100`. Spot side is
@@ -730,16 +732,16 @@ Snapshot contents:
   `WATCH_RISING` / `BUY_PENDING`, and coins in `COOLDOWN` with
   remaining time.
 - **Trade history / 24h report**: closed Trade Journal entries
-  (history panel) and a 24-hour window aggregate (wins/losses/net PnL).
+  (history panel), 24-hour window aggregate, and all-time
+  AnalyticsService metrics (Win Rate, PF, Sharpe, Max DD, Expectancy).
 - **Live log**: tail of an in-memory ring buffer (`MemoryLogHandler`)
   attached to the root logger -- no disk re-read on every poll.
 
 Refresh model: a background Flet `page.run_thread` poll (~2s) rebuilds
 the Dashboard view while the user is on that screen. High-frequency
 `ticker.updated` events only update the DashboardService ticker cache
-(never mutate UI controls from the WebSocket thread). Quote balance is
-the only REST call on a poll tick and is best-effort (failures leave
-the previous/None value).
+(never mutate UI controls from the WebSocket thread). Quote balance and
+throttled API ping are the REST calls on a poll tick (best-effort).
 
 ---
 
@@ -781,6 +783,20 @@ the previous/None value).
 ---
 
 # 10. Market Rules
+
+## Trading Hours Constraint
+
+Optional UTC schedule (`StrategySettings`, Settings UI):
+
+- `trading_hours_enabled` (0/1): when off, entries are always allowed.
+- `weekend_closed` (0/1): when on, Saturday/Sunday UTC block **new BUY
+  entries**.
+- `quiet_start_hour_utc` / `quiet_end_hour_utc`: passive window
+  `[start, end)` (default 02:00–05:00 UTC; wraps midnight if start>end).
+
+Only **new entries** are gated (`RiskManager.can_open_trade`). Open
+positions continue stop/trailing/manual/emergency management regardless
+of the schedule. Dashboard shows TRADING HOURS AKTİF/PASİF.
 
 ## Volume Filter
 
