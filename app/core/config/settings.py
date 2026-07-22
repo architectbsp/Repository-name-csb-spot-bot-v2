@@ -108,10 +108,81 @@ class TimerSettings:
 
 @dataclass(slots=True)
 class ExchangeSettings:
+    """
+    Credentials + identity for ONE exchange connection.
+
+    Sprint 18: BotEngine may hold several of these (one per enabled
+    venue). Legacy single-exchange deploys still populate exactly one
+    via EXCHANGE / EXCHANGE_API_KEY / EXCHANGE_API_SECRET.
+    """
+
     exchange: str = os.getenv("EXCHANGE", "binance").lower()
     api_key: str = os.getenv("EXCHANGE_API_KEY", "")
     api_secret: str = os.getenv("EXCHANGE_API_SECRET", "")
+    # OKX private REST requires a passphrase (`password` in ccxt).
+    passphrase: str = os.getenv("EXCHANGE_PASSPHRASE", "")
     testnet: bool = os.getenv("EXCHANGE_TESTNET", "true").lower() == "true"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_exchange_settings_list() -> list[ExchangeSettings]:
+    """
+    Sprint 18 -- builds one ExchangeSettings per enabled venue.
+
+    Preferred:
+        EXCHANGES=binance,bybit,okx
+        BINANCE_API_KEY=...  BINANCE_API_SECRET=...  BINANCE_TESTNET=true
+        BYBIT_API_KEY=...    ...
+        OKX_API_KEY=... OKX_API_SECRET=... OKX_PASSPHRASE=... OKX_TESTNET=true
+
+    Legacy (still supported when EXCHANGES is unset/empty):
+        EXCHANGE=binance
+        EXCHANGE_API_KEY / EXCHANGE_API_SECRET / EXCHANGE_TESTNET
+        [/ EXCHANGE_PASSPHRASE for OKX]
+    """
+    raw = (os.getenv("EXCHANGES") or "").strip()
+    global_testnet = _env_bool("EXCHANGE_TESTNET", True)
+
+    if not raw:
+        return [
+            ExchangeSettings(
+                exchange=os.getenv("EXCHANGE", "binance").lower(),
+                api_key=os.getenv("EXCHANGE_API_KEY", ""),
+                api_secret=os.getenv("EXCHANGE_API_SECRET", ""),
+                passphrase=os.getenv("EXCHANGE_PASSPHRASE", ""),
+                testnet=global_testnet,
+            )
+        ]
+
+    settings_list: list[ExchangeSettings] = []
+    for part in raw.split(","):
+        name = part.strip().lower()
+        if not name:
+            continue
+        prefix = name.upper()
+        settings_list.append(
+            ExchangeSettings(
+                exchange=name,
+                api_key=os.getenv(f"{prefix}_API_KEY", "")
+                or os.getenv("EXCHANGE_API_KEY", ""),
+                api_secret=os.getenv(f"{prefix}_API_SECRET", "")
+                or os.getenv("EXCHANGE_API_SECRET", ""),
+                passphrase=os.getenv(f"{prefix}_PASSPHRASE", "")
+                or os.getenv("EXCHANGE_PASSPHRASE", ""),
+                testnet=_env_bool(f"{prefix}_TESTNET", global_testnet),
+            )
+        )
+
+    if not settings_list:
+        raise ValueError("EXCHANGES is set but contains no exchange names.")
+
+    return settings_list
 
 
 @dataclass(slots=True)

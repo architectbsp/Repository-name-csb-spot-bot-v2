@@ -126,15 +126,21 @@ def _row(idx, coin, price, change, volume, signal, status, on_click=None):
     )
 
 
-def _open_chart(engine, page, symbol) -> None:
+def _open_chart(engine, page, symbol, exchange_name: str | None = None) -> None:
     if engine is None or page is None:
         return
 
-    try:
-        exchange_type = engine.exchange.active_exchange_type()
-    except Exception:
-        logger.exception("No active exchange -- cannot open chart for %s", symbol)
-        return
+    from app.core.exchange.market_key import try_parse_exchange_type
+
+    exchange_type = try_parse_exchange_type(exchange_name)
+    if exchange_type is None:
+        try:
+            exchange_type = engine.exchange.active_exchange_type()
+        except Exception:
+            logger.exception(
+                "No active exchange -- cannot open chart for %s", symbol
+            )
+            return
 
     open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
 
@@ -150,14 +156,24 @@ def build_coin_table(
         row_controls = [
             _row(
                 idx,
-                coin.symbol,
+                (
+                    f"{coin.symbol} ({coin.exchange})"
+                    if coin.exchange
+                    else coin.symbol
+                ),
                 coin.price_display,
                 signed_percent(coin.change_24h_percent),
                 volume_short(coin.volume_24h),
                 coin.signal,
                 coin.status,
                 on_click=(
-                    (lambda _, symbol=coin.symbol: _open_chart(engine, page, symbol))
+                    (
+                        lambda _,
+                        symbol=coin.symbol,
+                        exchange=coin.exchange: _open_chart(
+                            engine, page, symbol, exchange
+                        )
+                    )
                     if engine is not None and page is not None
                     else None
                 ),

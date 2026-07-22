@@ -1,11 +1,16 @@
 from datetime import UTC, datetime
 
+from app.core.exchange.market_key import market_key
 from app.core.watch_list import WatchState
-
 
 
 def _cfg(config):
     return getattr(config, "strategy", config)
+
+
+def _coin_key(ticker) -> str:
+    """Sprint 18: WatchList/PositionManager identity for this ticker."""
+    return market_key(getattr(ticker, "exchange", None), ticker.symbol)
 
 
 class Strategy:
@@ -75,7 +80,8 @@ class Strategy:
         watch_list,
         ticker,
     ) -> None:
-        state = watch_list.get_state(ticker.symbol)
+        key = _coin_key(ticker)
+        state = watch_list.get_state(key)
 
         if state is None:
             return
@@ -92,7 +98,10 @@ class Strategy:
 
         if (
             self._position_manager is not None
-            and self._position_manager.is_open(ticker.symbol)
+            and self._position_manager.is_open(
+                ticker.symbol,
+                exchange=ticker.exchange,
+            )
         ):
             return
 
@@ -115,12 +124,13 @@ class Strategy:
         WATCH_RISING with identical watch/entry parameters from then on;
         only how a coin *arrives* at WATCH_RISING differs.
         """
+        key = _coin_key(ticker)
         watch_percent = _cfg(self._config).watch_percent
 
         if ticker.change_24h <= -watch_percent:
             # Path B: price is dropping -- start tracking the low first.
             watch_list.begin_falling_watch(
-                ticker.symbol,
+                key,
                 ticker.last_price,
             )
             return
@@ -131,31 +141,33 @@ class Strategy:
             # reference point the further +entry_percent recovery is
             # measured from -- identical treatment to Path B once here.
             watch_list.begin_rising_watch(
-                ticker.symbol,
+                key,
                 ticker.last_price,
             )
 
     def _handle_falling_watch(self, watch_list, ticker) -> None:
+        key = _coin_key(ticker)
         watch_list.record_falling_price(
-            ticker.symbol,
+            key,
             ticker.last_price,
         )
 
-        coin = watch_list.get(ticker.symbol)
+        coin = watch_list.get(key)
 
         if ticker.last_price > coin["lowest_price"]:
             watch_list.begin_rising_watch(
-                ticker.symbol,
+                key,
                 ticker.last_price,
             )
 
     def _handle_rising_watch(self, watch_list, ticker) -> None:
+        key = _coin_key(ticker)
         watch_list.record_rising_price(
-            ticker.symbol,
+            key,
             ticker.last_price,
         )
 
-        coin = watch_list.get(ticker.symbol)
+        coin = watch_list.get(key)
 
         recovery = (
             (ticker.last_price - coin["lowest_price"])
@@ -166,12 +178,12 @@ class Strategy:
             return
 
         watch_list.promote_to_buy_pending(
-            ticker.symbol,
+            key,
             ticker.last_price,
         )
 
         if self._risk_manager is None:
-            watch_list.cancel_buy_pending(ticker.symbol)
+            watch_list.cancel_buy_pending(key)
             return
 
         # Strategy never talks to the exchange directly (BUSINESS_RULES.md
@@ -190,11 +202,11 @@ class Strategy:
         )
 
         if position is None:
-            watch_list.cancel_buy_pending(ticker.symbol)
+            watch_list.cancel_buy_pending(key)
             return
 
         watch_list.promote_to_position_open(
-            ticker.symbol,
+            key,
             position.entry_price,
             position.stop_price,
         )
@@ -243,6 +255,7 @@ class Strategy:
 
         position = self._position_manager.get(
             ticker.symbol,
+            exchange=ticker.exchange,
         )
 
         if position is None:
@@ -250,6 +263,6 @@ class Strategy:
 
         if ticker.last_price > position.entry_price:
             watch_list.update_highest_price(
-                ticker.symbol,
+                _coin_key(ticker),
                 ticker.last_price,
             )

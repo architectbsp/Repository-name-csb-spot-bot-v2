@@ -89,14 +89,57 @@ def test_sync_schema_backfills_not_null_column_with_a_default_on_old_rows():
 
     sync_schema(engine)
 
+    inspector = inspect(engine)
+    pk = inspector.get_pk_constraint("positions")
+    assert pk["constrained_columns"] == ["position_key"]
+
     with engine.connect() as connection:
         row = connection.execute(
-            text("SELECT stop_stage, realized_pnl FROM positions WHERE id = 1")
+            text(
+                "SELECT position_key, stop_stage, realized_pnl "
+                "FROM positions WHERE symbol = 'BTCUSDT'"
+            )
         ).fetchone()
 
-    # NOT NULL columns added by the migration must backfill existing rows
-    # with a usable default rather than leaving them NULL (which would
-    # violate the ORM's non-nullable mapping the next time this row is
-    # loaded).
-    assert row[0] is not None
+    # Sprint 18 rebuilds the PK to position_key and backfills NOT NULL
+    # columns so pre-existing open rows survive startup.
+    assert row[0] == "UNKNOWN:BTCUSDT"
     assert row[1] is not None
+    assert row[2] is not None
+
+
+def test_sync_schema_migrates_symbol_pk_positions_to_position_key():
+    engine = create_engine("sqlite:///:memory:", future=True)
+
+    legacy_metadata = MetaData()
+    Table(
+        "positions",
+        legacy_metadata,
+        Column("symbol", String(30), primary_key=True),
+        Column("exchange", String(20), nullable=False),
+        Column("entry_price", Float, nullable=False),
+        Column("quantity", Float, nullable=False),
+        Column("opened_at", String(40), nullable=False),
+        Column("updated_at", String(40), nullable=False),
+    )
+    legacy_metadata.create_all(bind=engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO positions "
+                "(symbol, exchange, entry_price, quantity, opened_at, updated_at) "
+                "VALUES ('BTC/USDT', 'BINANCE', 100.0, 1.0, '2024-01-01', '2024-01-01')"
+            )
+        )
+
+    sync_schema(engine)
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT position_key, symbol, exchange FROM positions"
+            )
+        ).fetchone()
+
+    assert row == ("BINANCE:BTC/USDT", "BTC/USDT", "BINANCE")

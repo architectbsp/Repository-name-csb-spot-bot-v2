@@ -117,7 +117,17 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
         internet_color = "#22C55E" if snapshot.api_connected else "#F59E0B"
 
     now = datetime.now().strftime("%H:%M")
-    active_exchange = (snapshot.exchange_name if snapshot else "").upper()
+    enabled = {
+        name.upper()
+        for name in (snapshot.enabled_exchanges if snapshot else [])
+    }
+    # Legacy: when only exchange_name is set (older snapshots / tests).
+    if not enabled and snapshot and snapshot.exchange_name:
+        enabled = {
+            part.strip().upper()
+            for part in snapshot.exchange_name.split(",")
+            if part.strip()
+        }
 
     return ft.Column(
         spacing=12,
@@ -152,7 +162,7 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
                     ft.Row(
                         spacing=10,
                         controls=[
-                            _exchange(name, active=(name == active_exchange))
+                            _exchange(name, active=(name in enabled))
                             for name in _EXCHANGES
                         ],
                     ),

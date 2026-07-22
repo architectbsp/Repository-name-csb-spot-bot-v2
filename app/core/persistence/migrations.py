@@ -18,6 +18,7 @@ Sprint so far has evolved the schema (new optional-with-default fields).
 """
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
@@ -40,7 +41,14 @@ def sync_schema(engine: Engine) -> None:
     """
     Creates any missing tables, then adds any missing columns to tables
     that already exist. Safe to call on every startup.
+
+    Sprint 18: the `positions` primary key changed from `symbol` (or a
+    legacy `id`) to composite `position_key`. SQLite cannot ALTER a PK,
+    so that table is rebuilt in place when the old shape is detected.
     """
+    with engine.begin() as connection:
+        _migrate_positions_primary_key(connection, engine)
+
     Base.metadata.create_all(bind=engine)
 
     inspector = inspect(engine)
@@ -80,6 +88,86 @@ def sync_schema(engine: Engine) -> None:
                         f"{default_clause}"
                     )
                 )
+
+
+def _migrate_positions_primary_key(connection, engine: Engine) -> None:
+    """
+    Rebuilds `positions` when it still uses a pre-Sprint-18 primary key
+    (`symbol` or `id`) so open rows survive as `BINANCE:BTC/USDT`-style
+    keys. No-op when the table is missing or already on `position_key`.
+    """
+    inspector = inspect(engine)
+    if "positions" not in inspector.get_table_names():
+        return
+
+    pk = inspector.get_pk_constraint("positions") or {}
+    pk_cols = list(pk.get("constrained_columns") or [])
+    columns = {
+        column_info["name"]
+        for column_info in inspector.get_columns("positions")
+    }
+
+    if pk_cols == ["position_key"] and "position_key" in columns:
+        return
+
+    logger.warning(
+        "[DB MIGRATION] Rebuilding positions table for Sprint 18 "
+        "position_key primary key (was pk=%s)",
+        pk_cols or "?",
+    )
+
+    # Snapshot existing rows with whatever columns are present.
+    rows = connection.execute(text("SELECT * FROM positions")).mappings().all()
+
+    connection.execute(text('DROP TABLE IF EXISTS "positions__sprint18"'))
+    connection.execute(text('ALTER TABLE "positions" RENAME TO "positions__sprint18"'))
+
+    # Recreate the mapped schema (empty) under the original name.
+    Base.metadata.tables["positions"].create(bind=connection, checkfirst=False)
+
+    now = datetime.now(UTC)
+    for row in rows:
+        symbol = row.get("symbol")
+        if not symbol:
+            continue
+        exchange = (row.get("exchange") or "UNKNOWN")
+        if isinstance(exchange, str):
+            exchange = exchange.strip().upper() or "UNKNOWN"
+        else:
+            exchange = "UNKNOWN"
+        position_key = row.get("position_key") or f"{exchange}:{symbol}"
+        opened_at = row.get("opened_at") or row.get("updated_at") or now
+        updated_at = row.get("updated_at") or opened_at
+
+        connection.execute(
+            text(
+                'INSERT INTO "positions" ('
+                "position_key, symbol, exchange, entry_price, quantity, "
+                "stop_price, highest_price, opened_at, updated_at, "
+                "realized_pnl, partial_exits_taken, stop_stage"
+                ") VALUES ("
+                ":position_key, :symbol, :exchange, :entry_price, :quantity, "
+                ":stop_price, :highest_price, :opened_at, :updated_at, "
+                ":realized_pnl, :partial_exits_taken, :stop_stage"
+                ")"
+            ),
+            {
+                "position_key": position_key,
+                "symbol": symbol,
+                "exchange": exchange,
+                "entry_price": float(row.get("entry_price") or 0.0),
+                "quantity": float(row.get("quantity") or 0.0),
+                "stop_price": row.get("stop_price"),
+                "highest_price": row.get("highest_price"),
+                "opened_at": opened_at,
+                "updated_at": updated_at,
+                "realized_pnl": float(row.get("realized_pnl") or 0.0),
+                "partial_exits_taken": int(row.get("partial_exits_taken") or 0),
+                "stop_stage": row.get("stop_stage") or "HARD",
+            },
+        )
+
+    connection.execute(text('DROP TABLE "positions__sprint18"'))
 
 
 def _default_clause(column) -> str:

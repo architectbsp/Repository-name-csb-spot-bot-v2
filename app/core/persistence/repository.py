@@ -38,18 +38,18 @@ class PositionRepository:
 
     def get(
         self,
-        symbol: str,
+        position_key: str,
     ) -> PositionEntity | None:
         return self._session.get(
             PositionEntity,
-            symbol,
+            position_key,
         )
 
     def delete(
         self,
-        symbol: str,
+        position_key: str,
     ) -> bool:
-        position = self.get(symbol)
+        position = self.get(position_key)
 
         if position is None:
             return False

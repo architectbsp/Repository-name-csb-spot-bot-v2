@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.8
+Version: 2.9
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -74,6 +74,15 @@ Changelog (2.7 -> 2.8): advanced Position Sizing (§8) -- hybrid mode
 (default) takes the min of the existing balance/liquidity caps plus
 risk-based, ATR-based and volatility-based caps (editable from the
 Settings screen; falls back gracefully when OHLCV is unavailable).
+
+Changelog (2.8 -> 2.9): simultaneous multi-exchange (§10) -- Binance /
+Bybit / OKX / Kraken / MEXC may be connected at the same time via
+`EXCHANGES=...` (legacy `EXCHANGE=` still works). Each venue keeps its
+own API keys, balance, price stream, watch symbols and open positions.
+Market identity is `(exchange, symbol)` (`market_key`); a ticker from
+exchange A never sizes, opens or closes a position on exchange B.
+Daily-loss treasury and dashboard quote balance are the sum across
+enabled venues; position size still uses that venue's free balance only.
 
 ---
 
@@ -674,9 +683,9 @@ render this DTO.
 
 Snapshot contents:
 
-- **Account / top bar**: active exchange name, testnet vs live, quote
-  balance, bot running flag, API connection status
-  (`ConnectionStatus.CONNECTED` on the enabled exchange).
+- **Account / top bar**: enabled exchange name(s), testnet vs live,
+  summed quote balance across venues, bot running flag, API connection
+  status (`ConnectionStatus.CONNECTED` on any enabled exchange).
 - **Cards**: portfolio balance, signed daily realized PnL % (from
   RiskManager's UTC day-start balance + realized PnL today), open
   position count, active watch-signal count.
@@ -763,7 +772,8 @@ the previous/None value).
 
 ## Multi Exchange Support
 
-The architecture must support multiple exchanges.
+The architecture must support multiple exchanges connected
+**simultaneously** (Sprint 18).
 
 Supported exchanges for MVP architecture:
 
@@ -773,7 +783,27 @@ Supported exchanges for MVP architecture:
 - Kraken
 - MEXC
 
-Only one exchange connection is active at a time.
+Configuration:
+
+- Preferred: `EXCHANGES=binance,bybit,okx` plus per-venue credentials
+  (`BINANCE_API_KEY` / `BINANCE_API_SECRET`, `BYBIT_...`,
+  `OKX_...` + `OKX_PASSPHRASE`, …).
+- Legacy single-exchange: `EXCHANGE=binance` + `EXCHANGE_API_KEY` /
+  `EXCHANGE_API_SECRET` (still supported when `EXCHANGES` is unset).
+
+Isolation rules (non-negotiable):
+
+- Every market-facing key is `(exchange, symbol)` via `market_key`
+  (WatchList, PositionManager, OrderExecution quarantine, dashboard
+  ticker cache, persisted `positions.position_key`).
+- Price ticks, OHLCV candles and order placement for a symbol on
+  exchange A must never act on the same symbol on exchange B.
+- Each venue has its own WebSocket price stream subscription list.
+- Position size is computed from **that venue's** free quote balance;
+  the daily-loss circuit breaker uses the **sum** of free quote
+  balances across every enabled venue as the shared treasury snapshot.
+- `max_open_positions` remains a global cap across all venues (one
+  strategy, one risk budget).
 
 ---
 

@@ -26,6 +26,7 @@ from app.core.domain.dashboard import (
     WatchRow,
 )
 from app.core.domain.trade_journal import STATUS_CLOSED
+from app.core.exchange.market_key import exchange_name, market_key
 from app.core.exchange.models import ConnectionStatus, ExchangeType
 from app.core.market_data.models import NormalizedTicker
 from app.core.services.memory_log import get_memory_log_handler
@@ -95,11 +96,11 @@ class DashboardService:
 
     def on_ticker_updated(self, ticker: NormalizedTicker) -> None:
         """EventBus handler for `ticker.updated` -- caches the latest
-        price for each symbol so the UI poll never hits REST."""
+        price per (exchange, symbol) so the UI poll never hits REST."""
         if ticker is None:
             return
         with self._ticker_lock:
-            self._tickers[ticker.symbol] = ticker
+            self._tickers[_ticker_cache_key(ticker)] = ticker
 
     def seed_tickers_from_scan(self) -> None:
         """Pull MarketScanner's last scan result into the ticker cache
@@ -111,7 +112,7 @@ class DashboardService:
             return
         with self._ticker_lock:
             for ticker in result:
-                self._tickers[ticker.symbol] = ticker
+                self._tickers[_ticker_cache_key(ticker)] = ticker
 
     # ---- snapshot -------------------------------------------------------
 
@@ -119,7 +120,7 @@ class DashboardService:
         now = datetime.now(UTC)
         self.seed_tickers_from_scan()
 
-        exchange_name, api_connected, testnet = self._exchange_status()
+        name, enabled, api_connected, testnet = self._exchange_status()
         balance = self._quote_balance()
         daily_pnl, daily_pct, day_start = self._daily_pnl()
 
@@ -132,7 +133,8 @@ class DashboardService:
         return DashboardSnapshot(
             generated_at=now,
             bot_running=bool(self._bot_running_fn()),
-            exchange_name=exchange_name,
+            exchange_name=name,
+            enabled_exchanges=enabled,
             testnet=testnet,
             api_connected=api_connected,
             quote_balance=balance,
@@ -153,9 +155,9 @@ class DashboardService:
 
     # ---- private helpers ------------------------------------------------
 
-    def _exchange_status(self) -> tuple[str, bool, bool]:
+    def _exchange_status(self) -> tuple[str, list[str], bool, bool]:
         if self._exchange_manager is None:
-            return "-", False, bool(
+            return "-", [], False, bool(
                 self._config.exchange.testnet if self._config else False
             )
 
@@ -163,38 +165,49 @@ class DashboardService:
             self._config.exchange.testnet if self._config is not None else False
         )
 
-        try:
-            exchange_type = self._exchange_manager.active_exchange_type()
-            name = (
-                exchange_type.name
-                if isinstance(exchange_type, ExchangeType)
-                else str(exchange_type)
-            )
-        except Exception:
-            return "-", False, testnet
-
+        enabled_names: list[str] = []
         connected = False
         try:
             for exchange in self._exchange_manager.enabled():
+                et = exchange.state.exchange
+                enabled_names.append(
+                    et.name if isinstance(et, ExchangeType) else str(et)
+                )
                 if exchange.state.status == ConnectionStatus.CONNECTED:
                     connected = True
-                    break
         except Exception:
-            connected = False
+            return "-", [], False, testnet
 
-        return name, connected, testnet
+        if not enabled_names:
+            return "-", [], False, testnet
+
+        return ",".join(enabled_names), enabled_names, connected, testnet
 
     def _quote_balance(self) -> float | None:
+        """Sprint 18: sum free quote balances across every enabled venue."""
         if self._exchange_manager is None:
             return None
         try:
-            exchange_type = self._exchange_manager.active_exchange_type()
-            return float(
-                self._exchange_manager.get_quote_balance(exchange_type)
-            )
+            exchange_types = self._exchange_manager.enabled_exchange_types()
         except Exception:
             logger.debug("Dashboard: quote balance unavailable", exc_info=True)
             return None
+
+        total = 0.0
+        any_ok = False
+        for exchange_type in exchange_types:
+            try:
+                total += float(
+                    self._exchange_manager.get_quote_balance(exchange_type)
+                )
+                any_ok = True
+            except Exception:
+                logger.debug(
+                    "Dashboard: quote balance unavailable for %s",
+                    exchange_type,
+                    exc_info=True,
+                )
+        return total if any_ok else None
 
     def _daily_pnl(self) -> tuple[float | None, float | None, float | None]:
         if self._risk_manager is None:
@@ -208,14 +221,33 @@ class DashboardService:
 
         return realized, (realized / day_start) * 100.0, day_start
 
-    def _ticker(self, symbol: str) -> NormalizedTicker | None:
+    def _ticker(self, symbol: str, exchange=None) -> NormalizedTicker | None:
+        keys = []
+        if exchange is not None:
+            keys.append(market_key(exchange, symbol))
+            keys.append(market_key(exchange, _alt_symbol(symbol)))
+        keys.append(symbol)
+        keys.append(_alt_symbol(symbol))
+
         with self._ticker_lock:
-            ticker = self._tickers.get(symbol)
-            if ticker is not None:
-                return ticker
-            # Tolerate BTCUSDT vs BTC/USDT mismatches between WS and REST.
+            for key in keys:
+                ticker = self._tickers.get(key)
+                if ticker is not None:
+                    return ticker
+
+            # Legacy / missing exchange on Position or WatchList: accept a
+            # unique cached ticker for this symbol across venues.
             alt = _alt_symbol(symbol)
-            return self._tickers.get(alt)
+            matches = [
+                ticker
+                for key, ticker in self._tickers.items()
+                if ticker.symbol in (symbol, alt)
+                or key.endswith(f":{symbol}")
+                or key.endswith(f":{alt}")
+            ]
+            if len(matches) == 1:
+                return matches[0]
+        return None
 
     def _open_position_rows(self) -> list[OpenPositionRow]:
         if self._position_manager is None:
@@ -223,7 +255,8 @@ class DashboardService:
 
         rows: list[OpenPositionRow] = []
         for position in self._position_manager.get_open_positions():
-            ticker = self._ticker(position.symbol)
+            venue = _venue_label(position.exchange)
+            ticker = self._ticker(position.symbol, position.exchange)
             current = ticker.last_price if ticker is not None else None
             pnl_percent = None
             if current is not None and position.entry_price:
@@ -239,6 +272,7 @@ class DashboardService:
                     pnl_percent=pnl_percent,
                     stop_stage=position.stop_stage,
                     quantity=position.quantity,
+                    exchange=venue,
                 )
             )
         return rows
@@ -248,9 +282,10 @@ class DashboardService:
             return []
 
         rows: list[WatchRow] = []
-        for symbol, coin in self._watch_list.list_by_states(_ACTIVE_WATCH_STATES):
+        for key, coin in self._watch_list.list_by_states(_ACTIVE_WATCH_STATES):
+            symbol, venue = _coin_identity(key, coin)
             state = coin["state"]
-            ticker = self._ticker(symbol)
+            ticker = self._ticker(symbol, coin.get("exchange") or venue)
             change = ticker.change_24h if ticker is not None else 0.0
             direction = (
                 "DIP" if state == WatchState.WATCH_FALLING else "RISE"
@@ -261,6 +296,7 @@ class DashboardService:
                     direction=direction,
                     change_display=_format_signed_percent(change),
                     status=_watch_status_label(state),
+                    exchange=venue,
                 )
             )
         return rows
@@ -270,8 +306,9 @@ class DashboardService:
             return []
 
         rows: list[CooldownRow] = []
-        for symbol, coin in self._watch_list.list_by_states({WatchState.COOLDOWN}):
-            remaining = self._watch_list.remaining_cooldown(symbol, now)
+        for key, coin in self._watch_list.list_by_states({WatchState.COOLDOWN}):
+            symbol, venue = _coin_identity(key, coin)
+            remaining = self._watch_list.remaining_cooldown(key, now)
             rows.append(
                 CooldownRow(
                     symbol=symbol,
@@ -279,6 +316,7 @@ class DashboardService:
                     remaining_seconds=(
                         remaining.total_seconds() if remaining is not None else None
                     ),
+                    exchange=venue,
                 )
             )
         return rows
@@ -292,10 +330,11 @@ class DashboardService:
         rows: list[CoinRow] = []
         seen: set[str] = set()
 
-        for symbol, coin in self._watch_list.list_by_states(_COIN_TABLE_STATES):
-            seen.add(symbol)
+        for key, coin in self._watch_list.list_by_states(_COIN_TABLE_STATES):
+            symbol, venue = _coin_identity(key, coin)
+            seen.add(key if ":" in key else market_key(venue, symbol))
             state = coin["state"]
-            ticker = self._ticker(symbol)
+            ticker = self._ticker(symbol, coin.get("exchange") or venue)
             rows.append(
                 CoinRow(
                     symbol=symbol,
@@ -306,14 +345,17 @@ class DashboardService:
                     volume_24h=ticker.volume_24h if ticker is not None else 0.0,
                     signal=_signal_for_state(state),
                     status=str(state),
+                    exchange=venue,
                 )
             )
 
         if self._position_manager is not None:
             for position in self._position_manager.get_open_positions():
-                if position.symbol in seen:
+                venue = _venue_label(position.exchange)
+                pos_key = market_key(position.exchange, position.symbol)
+                if pos_key in seen or position.symbol in seen:
                     continue
-                ticker = self._ticker(position.symbol)
+                ticker = self._ticker(position.symbol, position.exchange)
                 rows.append(
                     CoinRow(
                         symbol=position.symbol,
@@ -326,6 +368,7 @@ class DashboardService:
                         ),
                         signal="HOLD",
                         status="POSITION_OPEN",
+                        exchange=venue,
                     )
                 )
 
@@ -362,6 +405,7 @@ class DashboardService:
                     pnl_percent=entry.pnl_percent,
                     result=_result_label(entry.pnl, entry.exit_reason),
                     exit_reason=entry.exit_reason,
+                    exchange=_venue_label(entry.exchange),
                 )
             )
 
@@ -399,6 +443,27 @@ def _alt_symbol(symbol: str) -> str:
     if symbol.endswith("USDT") and len(symbol) > 4:
         return f"{symbol[:-4]}/USDT"
     return symbol
+
+
+def _ticker_cache_key(ticker: NormalizedTicker) -> str:
+    return market_key(getattr(ticker, "exchange", None), ticker.symbol)
+
+
+def _venue_label(exchange) -> str | None:
+    if exchange is None:
+        return None
+    name = exchange_name(exchange)
+    return None if name == "UNKNOWN" else name
+
+
+def _coin_identity(key: str, coin: dict) -> tuple[str, str | None]:
+    symbol = coin.get("symbol") or key
+    venue = _venue_label(coin.get("exchange"))
+    if venue is None and ":" in key:
+        venue = key.split(":", 1)[0]
+        if not coin.get("symbol"):
+            symbol = key.split(":", 1)[1]
+    return symbol, venue
 
 
 def _price_display(ticker: NormalizedTicker | None) -> str:

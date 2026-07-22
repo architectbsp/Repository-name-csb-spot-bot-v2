@@ -59,9 +59,23 @@ class SettingsEntity(Base):
 class PositionEntity(Base):
     __tablename__ = "positions"
 
+    # Sprint 18: composite identity so the same symbol can be open on
+    # two exchanges at once (`BINANCE:BTC/USDT`). `symbol` alone is no
+    # longer unique across venues.
+    position_key: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+
     symbol: Mapped[str] = mapped_column(
         String(30),
-        primary_key=True,
+        nullable=False,
+    )
+
+    exchange: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="UNKNOWN",
     )
 
     entry_price: Mapped[float] = mapped_column(

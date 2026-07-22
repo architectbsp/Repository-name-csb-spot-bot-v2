@@ -400,16 +400,42 @@ class RiskManager:
         if self._exchange_manager is None:
             return
 
-        try:
-            exchange_type = self._exchange_manager.active_exchange_type()
-            balance = self._exchange_manager.get_quote_balance(exchange_type)
-        except Exception:
+        balance = self._total_quote_balance()
+        if balance is None:
             logger.debug(
                 "[RISK] Skipping daily-reset check: exchange unavailable"
             )
             return
 
         self._sync_trading_day(balance)
+
+    def _total_quote_balance(self) -> float | None:
+        """Sprint 18: sum free quote balances across every enabled
+        exchange for the shared daily-loss treasury snapshot."""
+        if self._exchange_manager is None:
+            return None
+
+        try:
+            exchange_types = self._exchange_manager.enabled_exchange_types()
+        except Exception:
+            return None
+
+        total = 0.0
+        any_ok = False
+        for exchange_type in exchange_types:
+            try:
+                total += float(
+                    self._exchange_manager.get_quote_balance(exchange_type)
+                )
+                any_ok = True
+            except Exception:
+                logger.debug(
+                    "[RISK] Quote balance unavailable for %s",
+                    exchange_type,
+                    exc_info=True,
+                )
+
+        return total if any_ok else None
 
     def current_daily_loss_percent(self) -> float:
         """Realized loss so far today, as a percentage of the day's
@@ -568,8 +594,14 @@ class RiskManager:
             )
             return None
 
+        # Size against THIS venue's free balance (never spend Bybit
+        # money on a Binance order). Daily-loss treasury is the sum
+        # across every enabled venue (Sprint 18 shared risk budget).
         balance = self._exchange_manager.get_quote_balance(exchange_type)
-        self._sync_trading_day(balance)
+        treasury = self._total_quote_balance()
+        self._sync_trading_day(
+            treasury if treasury is not None else balance
+        )
 
         if not self.can_open_trade(
             balance=balance,
@@ -682,7 +714,10 @@ class RiskManager:
 
         symbol = ticker.symbol
 
-        position = self._position_manager.get(symbol)
+        position = self._position_manager.get(
+            symbol,
+            exchange=ticker.exchange,
+        )
 
         if position is None:
             return
@@ -798,6 +833,7 @@ class RiskManager:
             sell_quantity=filled_quantity,
             exit_price=exit_price,
             reason="PARTIAL_TP",
+            exchange=position.exchange,
         )
 
         if realized is None:
@@ -820,6 +856,7 @@ class RiskManager:
                 quantity=filled_quantity,
                 realized_pnl=realized,
                 reason="PARTIAL_TP",
+                exchange=position.exchange,
             )
 
         logger.info(
@@ -896,6 +933,7 @@ class RiskManager:
         position = self._position_manager.get(symbol)
 
         if position is None or position.state.name != "OPEN":
+            # Ambiguous symbol across venues -- try exact lookup failure.
             return False
 
         exchange_type = position.exchange
@@ -917,7 +955,10 @@ class RiskManager:
             reason="MANUAL_CLOSE",
         )
 
-        return not self._position_manager.is_open(symbol)
+        return not self._position_manager.is_open(
+            symbol,
+            exchange=exchange_type,
+        )
 
     def emergency_exit_all(self) -> int:
         """
@@ -962,7 +1003,10 @@ class RiskManager:
                 reason="EMERGENCY_EXIT",
             )
 
-            if not self._position_manager.is_open(position.symbol):
+            if not self._position_manager.is_open(
+                position.symbol,
+                exchange=position.exchange,
+            ):
                 closed += 1
 
         logger.critical(
@@ -1098,6 +1142,7 @@ class RiskManager:
             position.symbol,
             exit_price=exit_price,
             reason=reason,
+            exchange=position.exchange,
         )
 
         self._record_realized_pnl(final_chunk_pnl)
@@ -1109,6 +1154,7 @@ class RiskManager:
                 reason=reason,
                 pnl=getattr(position, "pnl", None),
                 pnl_percent=getattr(position, "pnl_percent", None),
+                exchange=position.exchange,
             )
 
         if self._event_bus is not None:
@@ -1116,6 +1162,7 @@ class RiskManager:
                 "position.closed",
                 {
                     "symbol": position.symbol,
+                    "exchange": position.exchange,
                     "reason": reason,
                     "price": exit_price,
                     "position": position,

@@ -371,10 +371,10 @@ class DummyPositionsBySymbol:
         self._position = position
         self.closed = []
 
-    def get(self, symbol):
+    def get(self, symbol, exchange=None):
         return self._position if symbol == self._position.symbol else None
 
-    def close(self, symbol, *, exit_price, reason):
+    def close(self, symbol, *, exit_price, reason, exchange=None):
         self.closed.append((symbol, exit_price, reason))
         self._position.pnl = (
             exit_price - self._position.entry_price
@@ -513,7 +513,7 @@ class DummyOpenPositionsManager:
     def get_open_positions(self):
         return list(self._positions.values())
 
-    def close(self, symbol, *, exit_price, reason):
+    def close(self, symbol, *, exit_price, reason, exchange=None):
         self.closed.append((symbol, exit_price, reason))
         position = self._positions[symbol]
         position.pnl = (exit_price - position.entry_price) * position.quantity

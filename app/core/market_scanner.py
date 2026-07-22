@@ -204,13 +204,21 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
-            # Isolated data flow (docs/BUSINESS_RULES.md §10): always scan
-            # the currently active exchange, never a hardcoded one, so
-            # watch-list/strategy calculations can never be seeded with
-            # another exchange's ticker data.
-            return self._exchange.get_tickers(
-                self._exchange.active_exchange_type(),
-            )
+            # Sprint 18: scan every enabled venue. Each NormalizedTicker
+            # carries its own ExchangeType so WatchList/Strategy never
+            # mix prices across venues (docs/BUSINESS_RULES.md §10).
+            tickers = []
+            for exchange_type in self._exchange.enabled_exchange_types():
+                try:
+                    tickers.extend(
+                        self._exchange.get_tickers(exchange_type)
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Scanner] get_tickers failed for %s",
+                        exchange_type,
+                    )
+            return tickers
 
         if self.has_rate_limiter():
             operation = self._rate_limiter.wrap(operation)

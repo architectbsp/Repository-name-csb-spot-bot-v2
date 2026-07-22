@@ -94,8 +94,9 @@ def test_duplicate_order_for_same_symbol_is_rejected_before_reaching_exchange():
     exchange = ScriptedExchangeManager([make_order_result("CLOSED")])
     service = make_service(exchange)
 
-    # Simulate an order already in flight for this symbol.
-    service._in_flight.add("BTCUSDT")
+    # Simulate an order already in flight for this market
+    # (Sprint 18: quarantine / in-flight keys are exchange:symbol).
+    service._in_flight.add("BINANCE:BTCUSDT")
 
     result = service.execute("BINANCE", make_trade())
 
@@ -109,7 +110,7 @@ def test_in_flight_flag_is_cleared_after_execution_completes():
 
     service.execute("BINANCE", make_trade())
 
-    assert not service.is_in_flight("BTCUSDT")
+    assert not service.is_in_flight("BINANCE:BTCUSDT")
 
 
 def test_invalid_order_is_rejected_without_retry():
@@ -265,7 +266,7 @@ def test_unreconciled_order_quarantines_the_symbol():
 
     first = service.execute("BINANCE", make_trade())
     assert first.outcome == ExecutionOutcome.UNRECONCILED
-    assert service.is_quarantined("BTCUSDT")
+    assert service.is_quarantined("BINANCE:BTCUSDT")
 
     second = service.execute("BINANCE", make_trade())
     assert second.outcome == ExecutionOutcome.QUARANTINED
@@ -279,7 +280,7 @@ def test_unknown_status_quarantines_the_symbol():
 
     service.execute("BINANCE", make_trade())
 
-    assert service.is_quarantined("BTCUSDT")
+    assert service.is_quarantined("BINANCE:BTCUSDT")
 
 
 def test_clear_quarantine_allows_new_orders_again():
@@ -289,11 +290,11 @@ def test_clear_quarantine_allows_new_orders_again():
     service = make_service(exchange)
 
     service.execute("BINANCE", make_trade())
-    assert service.is_quarantined("BTCUSDT")
+    assert service.is_quarantined("BINANCE:BTCUSDT")
 
-    cleared = service.clear_quarantine("BTCUSDT")
+    cleared = service.clear_quarantine("BINANCE:BTCUSDT")
     assert cleared is True
-    assert not service.is_quarantined("BTCUSDT")
+    assert not service.is_quarantined("BINANCE:BTCUSDT")
 
     result = service.execute("BINANCE", make_trade())
     assert result.outcome == ExecutionOutcome.FILLED
@@ -305,7 +306,7 @@ def test_a_normal_fill_does_not_quarantine_the_symbol():
 
     service.execute("BINANCE", make_trade())
 
-    assert not service.is_quarantined("BTCUSDT")
+    assert not service.is_quarantined("BINANCE:BTCUSDT")
 
 
 def test_concurrent_orders_for_the_same_symbol_only_one_wins():

@@ -18,16 +18,19 @@ class OKXExchange(BaseExchange):
     ) -> None:
         super().__init__(state)
         self.settings = settings
-        self.client = ccxt.okx(
-            {
-                "apiKey": settings.api_key,
-                "secret": settings.api_secret,
-                "enableRateLimit": True,
-                "options": {
-                    "defaultType": "spot",
-                },
-            }
-        )
+        client_config: dict = {
+            "apiKey": settings.api_key,
+            "secret": settings.api_secret,
+            "enableRateLimit": True,
+            "options": {
+                "defaultType": "spot",
+            },
+        }
+        # OKX private REST requires the API passphrase (ccxt: "password").
+        if getattr(settings, "passphrase", ""):
+            client_config["password"] = settings.passphrase
+
+        self.client = ccxt.okx(client_config)
 
         enable_sandbox_mode(
             self.client,

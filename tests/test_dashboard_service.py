@@ -37,6 +37,9 @@ class DummyExchangeManager:
     def active_exchange_type(self):
         return ExchangeType.BINANCE
 
+    def enabled_exchange_types(self):
+        return [ExchangeType.BINANCE]
+
     def enabled(self):
         return [self._exchange]
 

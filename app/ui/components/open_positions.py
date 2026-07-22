@@ -73,15 +73,21 @@ def _position(symbol, side, entry, current, pnl, stage, on_click=None):
     )
 
 
-def _open_chart(engine, page, symbol) -> None:
+def _open_chart(engine, page, symbol, exchange_name: str | None = None) -> None:
     if engine is None or page is None:
         return
 
-    try:
-        exchange_type = engine.exchange.active_exchange_type()
-    except Exception:
-        logger.exception("No active exchange -- cannot open chart for %s", symbol)
-        return
+    from app.core.exchange.market_key import try_parse_exchange_type
+
+    exchange_type = try_parse_exchange_type(exchange_name)
+    if exchange_type is None:
+        try:
+            exchange_type = engine.exchange.active_exchange_type()
+        except Exception:
+            logger.exception(
+                "No active exchange -- cannot open chart for %s", symbol
+            )
+            return
 
     open_coin_chart_dialog(page, engine.chart_service, symbol, exchange_type)
 
@@ -96,21 +102,25 @@ def build_open_positions(
     )
 
     handler_factory = (
-        (lambda symbol: (lambda _: _open_chart(engine, page, symbol)))
+        (
+            lambda symbol, exchange: (
+                lambda _: _open_chart(engine, page, symbol, exchange)
+            )
+        )
         if engine is not None and page is not None
-        else (lambda symbol: None)
+        else (lambda symbol, exchange: None)
     )
 
     if positions:
         cards = [
             _position(
-                p.symbol,
+                f"{p.symbol} ({p.exchange})" if p.exchange else p.symbol,
                 "LONG",
                 f"{p.entry_price:g}",
                 f"{p.current_price:g}" if p.current_price is not None else "-",
                 signed_percent(p.pnl_percent),
                 p.stop_stage,
-                on_click=handler_factory(p.symbol),
+                on_click=handler_factory(p.symbol, p.exchange),
             )
             for p in positions
         ]

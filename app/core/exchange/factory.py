@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.core.config.settings import ExchangeSettings
+from app.core.config.settings import ExchangeSettings, load_exchange_settings_list
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.binance import BinanceExchange
 from app.core.exchange.bybit import BybitExchange
@@ -15,8 +15,9 @@ from app.core.exchange.okx import OKXExchange
 _ExchangeFactoryFn = Callable[[ExchangeState, ExchangeSettings], BaseExchange]
 
 # docs/BUSINESS_RULES.md §10 "Multi Exchange Support": Binance, Bybit, OKX,
-# Kraken and MEXC are supported, but "only one exchange connection is
-# active at a time". The EXCHANGE environment variable selects which one.
+# Kraken and MEXC are supported. Sprint 18 allows multiple enabled
+# connections at once; each keeps its own credentials, balance, stream
+# and market state (isolation rule).
 _EXCHANGE_CLASSES: dict[str, tuple[ExchangeType, _ExchangeFactoryFn]] = {
     "binance": (ExchangeType.BINANCE, BinanceExchange),
     "bybit": (ExchangeType.BYBIT, BybitExchange),
@@ -31,16 +32,7 @@ def supported_exchange_names() -> list[str]:
 
 
 def create_exchange(settings: ExchangeSettings) -> BaseExchange:
-    """
-    Builds the single active exchange integration selected via the
-    EXCHANGE environment variable.
-
-    This is the only place in the codebase allowed to decide which
-    exchange class to instantiate; BotEngine must never hardcode a
-    specific exchange, so that WatchList/Strategy/RiskManager and their
-    price stream always operate on exactly the exchange the operator
-    configured, and never mix data between exchanges.
-    """
+    """Builds a single exchange integration from `settings`."""
     name = (settings.exchange or "").strip().lower()
 
     if name not in _EXCHANGE_CLASSES:
@@ -58,3 +50,24 @@ def create_exchange(settings: ExchangeSettings) -> BaseExchange:
         ),
         settings,
     )
+
+
+def create_exchanges(
+    settings_list: list[ExchangeSettings] | None = None,
+) -> list[BaseExchange]:
+    """
+    Sprint 18 -- builds every enabled exchange from env
+    (`EXCHANGES=...` or legacy `EXCHANGE=...`). Deduplicates by
+    ExchangeType (last wins) so a typo can't register Binance twice.
+    """
+    configured = settings_list if settings_list is not None else load_exchange_settings_list()
+
+    by_type: dict[ExchangeType, BaseExchange] = {}
+    for settings in configured:
+        exchange = create_exchange(settings)
+        by_type[exchange.state.exchange] = exchange
+
+    if not by_type:
+        raise ValueError("No exchanges configured.")
+
+    return list(by_type.values())

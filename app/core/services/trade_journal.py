@@ -25,6 +25,7 @@ import logging
 from datetime import UTC, datetime
 
 from app.core.domain.trade_journal import STATUS_CLOSED, TradeJournalEntry
+from app.core.exchange.market_key import market_key
 from app.core.persistence.mapper import journal_to_domain, journal_to_entity
 
 
@@ -34,11 +35,12 @@ logger = logging.getLogger(__name__)
 class TradeJournal:
     def __init__(self) -> None:
         self._repository = None
-        # Only one open trade per symbol can exist at a time (matches
-        # PositionManager's one-open-position-per-symbol invariant), so a
-        # simple dict keyed by symbol is enough to find the entry a
-        # partial/final exit needs to update.
+        # Sprint 18: one open trade per (exchange, symbol) -- keyed by
+        # market_key so the same coin on two venues never collides.
         self._open_entries: dict[str, TradeJournalEntry] = {}
+
+    def _entry_key(self, symbol: str, exchange=None) -> str:
+        return market_key(exchange, symbol)
 
     def set_repository(self, repository) -> None:
         self._repository = repository
@@ -72,12 +74,13 @@ class TradeJournal:
         if self._repository is not None:
             entry.id = self._repository.insert(journal_to_entity(entry))
 
-        self._open_entries[symbol] = entry
+        self._open_entries[self._entry_key(symbol, exchange)] = entry
 
         logger.info(
-            "[JOURNAL] ENTRY symbol=%s reason=%s price=%.8f qty=%.8f "
-            "wait_minutes=%s rise_events=%d fall_events=%d",
+            "[JOURNAL] ENTRY symbol=%s exchange=%s reason=%s price=%.8f "
+            "qty=%.8f wait_minutes=%s rise_events=%d fall_events=%d",
             symbol,
+            exchange,
             entry_reason,
             entry_price,
             quantity,
@@ -96,8 +99,15 @@ class TradeJournal:
         quantity: float,
         realized_pnl: float,
         reason: str = "PARTIAL_TP",
+        exchange=None,
     ) -> TradeJournalEntry | None:
-        entry = self._open_entries.get(symbol)
+        entry = self._open_entries.get(self._entry_key(symbol, exchange))
+        if entry is None and exchange is None:
+            # Ambiguous legacy lookup: unique open entry for this symbol.
+            matches = [
+                e for e in self._open_entries.values() if e.symbol == symbol
+            ]
+            entry = matches[0] if len(matches) == 1 else None
 
         if entry is None:
             logger.warning(
@@ -143,8 +153,17 @@ class TradeJournal:
         pnl: float | None = None,
         pnl_percent: float | None = None,
         exit_time: datetime | None = None,
+        exchange=None,
     ) -> TradeJournalEntry | None:
-        entry = self._open_entries.pop(symbol, None)
+        key = self._entry_key(symbol, exchange)
+        entry = self._open_entries.pop(key, None)
+
+        if entry is None and exchange is None:
+            matches = [
+                k for k, e in self._open_entries.items() if e.symbol == symbol
+            ]
+            if len(matches) == 1:
+                entry = self._open_entries.pop(matches[0])
 
         if entry is None:
             logger.warning(
@@ -181,8 +200,16 @@ class TradeJournal:
 
         return entry
 
-    def get_open(self, symbol: str) -> TradeJournalEntry | None:
-        return self._open_entries.get(symbol)
+    def get_open(self, symbol: str, exchange=None) -> TradeJournalEntry | None:
+        entry = self._open_entries.get(self._entry_key(symbol, exchange))
+        if entry is not None:
+            return entry
+        if exchange is None:
+            matches = [
+                e for e in self._open_entries.values() if e.symbol == symbol
+            ]
+            return matches[0] if len(matches) == 1 else None
+        return None
 
     def get_last_closed(self, symbol: str) -> TradeJournalEntry | None:
         """

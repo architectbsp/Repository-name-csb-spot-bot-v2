@@ -18,6 +18,9 @@ class CoinRow:
     volume_24h: float
     signal: str  # BUY / WAIT / HOLD
     status: str  # WatchState name or derived label
+    # Sprint 18: venue this row belongs to (e.g. "BINANCE"); None for
+    # legacy single-exchange snapshots / tests.
+    exchange: str | None = None
 
 
 @dataclass(slots=True)
@@ -28,6 +31,7 @@ class OpenPositionRow:
     pnl_percent: float | None
     stop_stage: str
     quantity: float
+    exchange: str | None = None
 
 
 @dataclass(slots=True)
@@ -36,6 +40,7 @@ class WatchRow:
     direction: str  # RISE / DIP (spot is long-only; direction is the watch path)
     change_display: str
     status: str
+    exchange: str | None = None
 
 
 @dataclass(slots=True)
@@ -43,6 +48,7 @@ class CooldownRow:
     symbol: str
     cooldown_until: datetime | None
     remaining_seconds: float | None
+    exchange: str | None = None
 
 
 @dataclass(slots=True)
@@ -51,6 +57,7 @@ class TradeHistoryRow:
     pnl_percent: float | None
     result: str  # KÂR / STOP / KAPANDI
     exit_reason: str | None
+    exchange: str | None = None
 
 
 @dataclass(slots=True)
@@ -75,7 +82,10 @@ class DashboardSnapshot:
     generated_at: datetime
 
     bot_running: bool = False
+    # Sprint 18: comma-joined enabled venue names (e.g. "BINANCE,BYBIT").
     exchange_name: str = "-"
+    # Uppercase names of every currently enabled exchange (top-bar chips).
+    enabled_exchanges: list[str] = field(default_factory=list)
     testnet: bool = False
     api_connected: bool = False
 

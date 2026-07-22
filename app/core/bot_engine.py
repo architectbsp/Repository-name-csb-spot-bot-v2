@@ -16,7 +16,7 @@ from app.core.timeout.timeout import Timeout
 from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
-from app.core.exchange.factory import create_exchange
+from app.core.exchange.factory import create_exchanges
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.chart_service import ChartService
@@ -69,19 +69,16 @@ class BotEngine:
         self.stopwatch = Stopwatch()
         self.exchange_registry = ExchangeRegistry()
 
-        # Only one exchange connection is active at a time
-        # (docs/BUSINESS_RULES.md §10). Which exchange class gets
-        # instantiated is decided entirely by the EXCHANGE environment
-        # variable via create_exchange() -- nothing else in this class may
-        # hardcode a specific exchange, so WatchList/Strategy/RiskManager
-        # and the price stream always operate on exactly the exchange the
-        # operator configured.
-        active_exchange = create_exchange(self.config.exchange)
-
-        self.exchange_registry.register(
-            active_exchange.state.exchange,
-            active_exchange,
-        )
+        # Sprint 18 (docs/BUSINESS_RULES.md §10): one or many exchanges
+        # may be connected at once (EXCHANGES=binance,bybit,... or legacy
+        # EXCHANGE=...). Each keeps its own credentials, balance, stream
+        # and market state -- WatchList/Strategy/RiskManager always act
+        # on the ticker's own venue (isolation rule).
+        for exchange in create_exchanges():
+            self.exchange_registry.register(
+                exchange.state.exchange,
+                exchange,
+            )
 
         self.exchange = ExchangeManager(self.exchange_registry)
         self.order_validator = OrderValidator(self.exchange)
@@ -176,16 +173,28 @@ class BotEngine:
         self.dashboard_service.set_bot_running_fn(lambda: self.running)
 
     def start_price_stream(self) -> None:
-        self.exchange.start_price_stream(
-            self.exchange.active_exchange_type(),
-            self.watch_list.get_symbols(),
-            self.event_bus.publish,
-        )
+        # Per-venue streams only (isolation): never subscribe exchange A's
+        # symbols on exchange B's websocket.
+        grouped = self.watch_list.symbols_by_exchange()
+        if grouped:
+            for exchange_type, symbols in grouped.items():
+                self.exchange.start_price_stream(
+                    exchange_type,
+                    symbols,
+                    self.event_bus.publish,
+                )
+            return
+
+        for exchange_type in self.exchange.enabled_exchange_types():
+            self.exchange.start_price_stream(
+                exchange_type,
+                [],
+                self.event_bus.publish,
+            )
 
     def stop_price_stream(self) -> None:
-        self.exchange.stop_price_stream(
-            self.exchange.active_exchange_type(),
-        )
+        for exchange_type in self.exchange.enabled_exchange_types():
+            self.exchange.stop_price_stream(exchange_type)
 
     def initialize(self):
         for module in (

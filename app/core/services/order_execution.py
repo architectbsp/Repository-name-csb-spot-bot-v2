@@ -152,15 +152,21 @@ class OrderExecutionService:
         in the returned ExecutionResult so callers can react without
         their own try/except around the exchange call.
         """
-        symbol = trade.symbol
+        # Sprint 18: quarantine / in-flight keys are per (exchange, symbol)
+        # so a Binance BTC order never blocks the same symbol on Bybit.
+        from app.core.exchange.market_key import market_key
 
-        blocked = self._begin(symbol)
+        symbol = trade.symbol
+        flight_key = market_key(exchange_type, symbol)
+
+        blocked = self._begin(flight_key)
 
         if blocked is not None:
             logger.warning(
                 "[EXEC] Order rejected before reaching the exchange: "
-                "symbol=%s reason=%s",
+                "symbol=%s exchange=%s reason=%s",
                 symbol,
+                flight_key.split(":", 1)[0],
                 blocked,
             )
             return ExecutionResult(outcome=blocked)
@@ -172,19 +178,19 @@ class OrderExecutionService:
                 ExecutionOutcome.UNRECONCILED,
                 ExecutionOutcome.UNKNOWN_STATUS,
             ):
-                self._quarantine(symbol)
+                self._quarantine(flight_key)
                 logger.critical(
                     "[EXEC] %s is now QUARANTINED (outcome=%s) -- no "
-                    "further orders for this symbol will be submitted "
+                    "further orders for this market will be submitted "
                     "until an operator calls clear_quarantine() after "
                     "verifying the real exchange state by hand.",
-                    symbol,
+                    flight_key,
                     result.outcome,
                 )
 
             return result
         finally:
-            self._end(symbol)
+            self._end(flight_key)
 
     # docs/BUSINESS_RULES.md §8 "Insufficient Balance": retry after 1
     # minute, max 3 times, then abandon the signal -- this uses the same
