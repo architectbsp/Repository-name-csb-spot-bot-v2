@@ -111,25 +111,20 @@ If a business rule changes, this document must be updated before the implementat
 
 # 2. Core Principles
 
-The bot follows a single trading strategy.
+The default lane is **Dip Hunter** (two entry paths into the same FSM):
 
-There are not multiple strategies.
+Entry Path A — price is already rising.
 
-There are only two different entry paths into the same strategy.
+Entry Path B — price is falling first and later reverses.
 
-Entry Path A
+After the reversal begins, both paths become identical. Every coin on a
+given pipeline follows that lifecycle; no module may bypass it.
 
-Price is already rising.
-
-Entry Path B
-
-Price is falling first and later reverses.
-
-After the reversal begins, both paths become identical.
-
-Every coin follows the same lifecycle.
-
-No module may bypass this lifecycle.
+Optional **multi-strategy** mode (`STRATEGIES=dip_hunter,momentum,breakout,scalper`)
+runs named strategies as parallel pipelines. Each pipeline has its own
+WatchList, RiskManager, position book and virtual quote budget
+(`STRATEGY_BUDGET_<NAME>` / preset). Strategies must not share a coin's
+FSM state across pipelines.
 
 ---
 
@@ -139,9 +134,10 @@ Current MVP supports:
 
 - Spot trading only
 - Market orders only
-- Multiple exchange support
-- One active strategy
-- Maximum 10 simultaneous open positions
+- Multiple exchange support (Binance, Bybit, OKX, Kraken, MEXC)
+- One or more named strategies (Dip Hunter default; Momentum / Breakout / Scalper optional)
+- Maximum 10 simultaneous open positions per pipeline (configurable)
+- Offline parameter optimization (grid / genetic → max Profit Factor)
 
 Not included:
 
@@ -150,8 +146,7 @@ Not included:
 - Leverage
 - DCA
 - Grid
-- Portfolio optimization
-- Multiple independent strategies
+- Portfolio optimization (capital allocation across assets)
 
 ---
 
@@ -962,6 +957,31 @@ execution (`python -m app.core.backtest`):
 - Mock fills via `PaperExchangeAdapter` (no live orders).
 - Performance report from `AnalyticsService` (win rate, PnL, Sharpe,
   max drawdown, …).
+
+## Parameter Optimizer
+
+`ParameterOptimizer` sweeps `AppSettings` knobs over the backtest engine
+and ranks trials by **Profit Factor** (grid search or genetic algorithm):
+
+```bash
+python -m app.core.backtest --csv ./data.csv --optimize grid \
+  --param risk.stop_loss_percent:0.5:2.0:0.5 \
+  --param strategy.watch_percent:2:4:1
+```
+
+## Multi-Strategy Pipelines
+
+Set `STRATEGIES=dip_hunter,momentum,breakout,scalper` to run named
+strategies in parallel. Each pipeline has independent risk limits and a
+virtual quote budget (`STRATEGY_BUDGET_DIP_HUNTER`, …). Default when
+unset: single `dip_hunter` lane (unchanged behavior).
+
+## Unified Exchange Interface
+
+All venues implement `BaseExchange` / `ExchangeAdapter` (CCXT-shaped).
+Enable several at once with `EXCHANGES=binance,bybit,okx` and per-venue
+`BINANCE_API_KEY` / `BYBIT_…` / `OKX_PASSPHRASE`. Balances, streams and
+positions stay isolated by `market_key(exchange, symbol)`.
 
 ---
 

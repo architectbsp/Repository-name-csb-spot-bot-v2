@@ -23,7 +23,7 @@ from app.core.risk_manager import RiskManager
 from app.core.services.analytics_service import AnalyticsService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.trade_journal import TradeJournal
-from app.core.strategy import Strategy
+from app.core.strategies.factory import create_strategy
 from app.core.watch_list import WatchList
 
 
@@ -69,6 +69,7 @@ class BacktestEngine:
         fee_rate: float = 0.001,
         change_lookback_bars: int = _DEFAULT_CHANGE_LOOKBACK,
         volume_24h: float | None = None,
+        strategy_name: str = "dip_hunter",
     ) -> None:
         if not candles:
             raise ValueError("Backtest requires at least one candle")
@@ -81,6 +82,7 @@ class BacktestEngine:
         self._quote = quote
         self._fee_rate = fee_rate
         self._change_lookback = max(1, int(change_lookback_bars))
+        self._strategy_name = strategy_name
         # Default liquidity large enough not to starve sizing in tests.
         self._volume_24h = (
             float(volume_24h)
@@ -90,7 +92,7 @@ class BacktestEngine:
 
         self._paper: PaperExchangeAdapter | None = None
         self._watch_list: WatchList | None = None
-        self._strategy: Strategy | None = None
+        self._strategy = None
         self._risk_manager: RiskManager | None = None
         self._analytics: AnalyticsService | None = None
         self._exchange_manager: ExchangeManager | None = None
@@ -179,7 +181,7 @@ class BacktestEngine:
         risk_manager.initialize()
         risk_manager.start()
 
-        strategy = Strategy()
+        strategy = create_strategy(self._strategy_name)
         strategy.set_risk_manager(risk_manager)
         strategy.set_position_manager(position_manager)
         strategy.set_trade_journal(trade_journal)

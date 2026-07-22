@@ -6,6 +6,8 @@ from app.core.position_manager import PositionManager
 from app.core.watch_list import WatchList
 from app.core.risk_manager import RiskManager
 from app.core.strategy import Strategy
+from app.core.strategies.factory import parse_enabled_strategies
+from app.core.strategies.orchestrator import MultiStrategyOrchestrator
 
 from app.core.config.config_manager import CONFIG_UPDATED_EVENT, ConfigManager
 from app.core.config.settings import AppSettings
@@ -181,6 +183,14 @@ class BotEngine:
 
         self.watch_list.set_strategy(self.strategy)
 
+        # Multi-strategy: when STRATEGIES lists 2+ names, replace the
+        # single lane with parallel pipelines (independent WatchList /
+        # RiskManager / budget). Dashboard binds to the primary pipeline.
+        self.strategy_orchestrator: MultiStrategyOrchestrator | None = None
+        self._strategy_names = parse_enabled_strategies()
+        if len(self._strategy_names) > 1:
+            self._activate_multi_strategy_pipelines()
+
         # Sprint 12 -- Live Dashboard: read-only snapshot aggregator the
         # Flet UI polls every couple of seconds. Also caches ticker.updated
         # so panels never REST-fetch prices on each refresh. Wired after
@@ -219,10 +229,71 @@ class BotEngine:
         self.position_reconciler.set_event_bus(self.event_bus)
         self.position_reconciler.set_scheduler(self.scheduler)
 
+    def _activate_multi_strategy_pipelines(self) -> None:
+        """Swap the singleton strategy lane for N isolated pipelines."""
+        orch = MultiStrategyOrchestrator()
+        orch.build(
+            self.exchange,
+            base_config=self.config,
+            strategy_names=self._strategy_names,
+        )
+        primary = orch.primary()
+        if primary is None:
+            raise RuntimeError("Multi-strategy orchestrator built zero pipelines")
+
+        # Keep scheduler/event wiring on the primary watch list so
+        # cooldown jobs and stream symbol grouping still work.
+        primary.watch_list.set_scheduler(self.scheduler)
+        primary.watch_list.set_event_bus(self.event_bus)
+        primary.watch_list.set_rate_limiter(self.rate_limiter)
+        primary.watch_list.set_retry_policy(self.retry_policy)
+        primary.watch_list.set_timeout(self.timeout)
+        primary.watch_list.set_timer(self.timer)
+        primary.watch_list.set_stopwatch(self.stopwatch)
+
+        primary.risk_manager.set_scheduler(self.scheduler)
+        primary.risk_manager.set_event_bus(self.event_bus)
+        primary.risk_manager.set_rate_limiter(self.rate_limiter)
+        primary.risk_manager.set_retry_policy(self.retry_policy)
+        primary.risk_manager.set_timeout(self.timeout)
+        primary.risk_manager.set_timer(self.timer)
+        primary.risk_manager.set_stopwatch(self.stopwatch)
+
+        self.strategy_orchestrator = orch
+        self.watch_list = primary.watch_list
+        self.strategy = primary.strategy
+        self.risk_manager = primary.risk_manager
+        self.position_manager = primary.position_manager
+        self.trade_journal = primary.trade_journal
+        self.order_validator = OrderValidator(self.exchange)
+        self.analytics_service.set_trade_journal(self.trade_journal)
+        self.performance_analytics = self.analytics_service
+        if hasattr(self, "chart_service") and self.chart_service is not None:
+            self.chart_service.set_position_manager(self.position_manager)
+            self.chart_service.set_trade_journal(self.trade_journal)
+
+        logger.info(
+            "[BotEngine] Multi-strategy active: %s",
+            ", ".join(self._strategy_names),
+        )
+
     def start_price_stream(self) -> None:
         # Per-venue streams only (isolation): never subscribe exchange A's
-        # symbols on exchange B's websocket.
-        grouped = self.watch_list.symbols_by_exchange()
+        # symbols on exchange B's websocket. Multi-strategy unions symbols
+        # across every pipeline watch list.
+        grouped: dict = {}
+        watch_lists = (
+            [p.watch_list for p in self.strategy_orchestrator.pipelines]
+            if self.strategy_orchestrator is not None
+            else [self.watch_list]
+        )
+        for watch_list in watch_lists:
+            for exchange_type, symbols in watch_list.symbols_by_exchange().items():
+                bucket = grouped.setdefault(exchange_type, [])
+                for symbol in symbols:
+                    if symbol not in bucket:
+                        bucket.append(symbol)
+
         if grouped:
             for exchange_type, symbols in grouped.items():
                 self.exchange.start_price_stream(
@@ -252,34 +323,56 @@ class BotEngine:
         ):
             module.set_config(self.config)
 
-        self.event_bus.subscribe(
-            "market_scanner.scan_completed",
-            self.watch_list.handle_scan_result,
-        )
-
-        self.event_bus.subscribe(
-            "ticker.updated",
-            self.watch_list.handle_price_update,
-        )
-
-        self.event_bus.subscribe(
-            "ticker.updated",
-            self.risk_manager.on_price_tick,
-        )
+        if self.strategy_orchestrator is not None:
+            self.event_bus.subscribe(
+                "market_scanner.scan_completed",
+                self.strategy_orchestrator.handle_scan_result,
+            )
+            self.event_bus.subscribe(
+                "ticker.updated",
+                self.strategy_orchestrator.handle_price_update,
+            )
+            self.event_bus.subscribe(
+                "position.closed",
+                self.strategy_orchestrator.handle_position_closed,
+            )
+            self.event_bus.subscribe(
+                CONFIG_UPDATED_EVENT,
+                self.strategy_orchestrator.on_config_updated,
+            )
+        else:
+            self.event_bus.subscribe(
+                "market_scanner.scan_completed",
+                self.watch_list.handle_scan_result,
+            )
+            self.event_bus.subscribe(
+                "ticker.updated",
+                self.watch_list.handle_price_update,
+            )
+            self.event_bus.subscribe(
+                "ticker.updated",
+                self.risk_manager.on_price_tick,
+            )
+            self.event_bus.subscribe(
+                "position.closed",
+                self.watch_list.handle_position_closed,
+            )
+            self.event_bus.subscribe(
+                "position.closed",
+                self.position_manager.handle_position_closed,
+            )
+            self.event_bus.subscribe(
+                CONFIG_UPDATED_EVENT,
+                self.strategy.on_config_updated,
+            )
+            self.event_bus.subscribe(
+                CONFIG_UPDATED_EVENT,
+                self.risk_manager.on_config_updated,
+            )
 
         self.event_bus.subscribe(
             "ticker.updated",
             self.dashboard_service.on_ticker_updated,
-        )
-
-        self.event_bus.subscribe(
-            "position.closed",
-            self.watch_list.handle_position_closed,
-        )
-
-        self.event_bus.subscribe(
-            "position.closed",
-            self.position_manager.handle_position_closed,
         )
 
         # ConfigUpdatedEvent: modules already share live AppSettings;
@@ -287,15 +380,7 @@ class BotEngine:
         # (e.g. scanner job interval).
         self.event_bus.subscribe(
             CONFIG_UPDATED_EVENT,
-            self.strategy.on_config_updated,
-        )
-        self.event_bus.subscribe(
-            CONFIG_UPDATED_EVENT,
             self.market_scanner.on_config_updated,
-        )
-        self.event_bus.subscribe(
-            CONFIG_UPDATED_EVENT,
-            self.risk_manager.on_config_updated,
         )
 
         # OrderExecution is built lazily; attach it before reconciler init.
@@ -303,45 +388,55 @@ class BotEngine:
             self.risk_manager.order_execution,
         )
 
-        for module in (
-            self.market_scanner,
-            self.watch_list,
-            self.position_manager,
-            self.risk_manager,
-            self.strategy,
-            self.telegram_notifier,
-            self.position_reconciler,
-        ):
-            module.initialize()
+        self.market_scanner.initialize()
+        if self.strategy_orchestrator is not None:
+            self.strategy_orchestrator.initialize()
+        else:
+            for module in (
+                self.watch_list,
+                self.position_manager,
+                self.risk_manager,
+                self.strategy,
+            ):
+                module.initialize()
+
+        self.telegram_notifier.initialize()
+        self.position_reconciler.initialize()
 
         for position in self.persistence.load_positions():
             self.position_manager.restore(position)
 
     def shutdown(self):
-        for module in (
-            self.position_reconciler,
-            self.telegram_notifier,
-            self.market_scanner,
-            self.watch_list,
-            self.position_manager,
-            self.risk_manager,
-            self.strategy,
-        ):
-            module.shutdown()
+        self.position_reconciler.shutdown()
+        self.telegram_notifier.shutdown()
+        self.market_scanner.shutdown()
+        if self.strategy_orchestrator is not None:
+            self.strategy_orchestrator.shutdown()
+        else:
+            for module in (
+                self.watch_list,
+                self.position_manager,
+                self.risk_manager,
+                self.strategy,
+            ):
+                module.shutdown()
 
     def start(self):
         self.initialize()
 
-        for module in (
-            self.market_scanner,
-            self.watch_list,
-            self.position_manager,
-            self.risk_manager,
-            self.strategy,
-            self.telegram_notifier,
-            self.position_reconciler,
-        ):
-            module.start()
+        self.market_scanner.start()
+        if self.strategy_orchestrator is not None:
+            self.strategy_orchestrator.start()
+        else:
+            for module in (
+                self.watch_list,
+                self.position_manager,
+                self.risk_manager,
+                self.strategy,
+            ):
+                module.start()
+        self.telegram_notifier.start()
+        self.position_reconciler.start()
 
         self.scheduler.start()
         self.worker.start()
@@ -360,16 +455,19 @@ class BotEngine:
 
         self.running = False
 
-        for module in (
-            self.position_reconciler,
-            self.telegram_notifier,
-            self.market_scanner,
-            self.watch_list,
-            self.position_manager,
-            self.risk_manager,
-            self.strategy,
-        ):
-            module.stop()
+        self.position_reconciler.stop()
+        self.telegram_notifier.stop()
+        self.market_scanner.stop()
+        if self.strategy_orchestrator is not None:
+            self.strategy_orchestrator.stop()
+        else:
+            for module in (
+                self.watch_list,
+                self.position_manager,
+                self.risk_manager,
+                self.strategy,
+            ):
+                module.stop()
 
         self.worker.stop()
         self.scheduler.stop()
