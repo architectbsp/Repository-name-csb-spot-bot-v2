@@ -45,6 +45,25 @@ def test_filter_symbols():
     assert result[0].symbol == "B/USDT"
 
 
+def test_filter_symbols_logs_instead_of_printing(capsys, caplog):
+    """
+    Regression guard for B31: filter_symbols() used to print() its
+    summary directly to stdout; it must go through the module logger
+    instead so it respects log level/handlers configuration.
+    """
+    scanner = MarketScanner()
+    scanner.set_config(make_config())
+
+    symbols = [SimpleNamespace(symbol="A/USDT", volume_24h=150)]
+
+    with caplog.at_level("INFO", logger="app.core.market_scanner"):
+        scanner.filter_symbols(symbols)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert any("fetched=1" in record.getMessage() for record in caplog.records)
+
+
 class DummyExchangeManager:
     """Records which exchange type get_tickers() was called with, so we
     can prove fetch_symbols() never hardcodes an exchange (isolated data

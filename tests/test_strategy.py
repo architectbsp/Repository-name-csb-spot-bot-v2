@@ -19,6 +19,18 @@ class DummyPositionManager:
         return False
 
 
+def test_dead_code_entry_points_are_removed():
+    """
+    Regression guard for B19: Strategy previously shipped an
+    on_price_tick()/evaluate_live_signal() pair that referenced a
+    non-existent self._watch_list attribute and was never wired into the
+    event bus. Both must stay removed rather than silently reappearing.
+    """
+    assert not hasattr(Strategy, "on_price_tick")
+    assert not hasattr(Strategy, "evaluate_live_signal")
+    assert not hasattr(Strategy(), "_watch_list")
+
+
 def make_ticker(price, change):
     return SimpleNamespace(
         exchange="BINANCE",

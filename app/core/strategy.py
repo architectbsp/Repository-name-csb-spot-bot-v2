@@ -189,33 +189,3 @@ class Strategy:
                 ticker.symbol,
                 ticker.last_price,
             )
-
-    def on_price_tick(
-        self,
-        ticker: dict,
-    ) -> None:
-        symbol = ticker["symbol"]
-
-        if not self._watch_list.contains(symbol):
-            return
-
-        if self._position_manager.has_position(symbol):
-            self._risk_manager.on_price_tick(ticker)
-            return
-
-        self.evaluate_live_signal(ticker)
-
-    def evaluate_live_signal(
-        self,
-        ticker: dict,
-    ) -> None:
-        """
-        Live websocket strategy entry point.
-
-        Scanner (REST):
-            eligible coin discovery
-
-        WebSocket:
-            entry timing
-        """
-        return

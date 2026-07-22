@@ -238,10 +238,11 @@ class MarketScanner:
             if s.symbol.endswith("/USDT")
         ]
 
-        print(
-            f"[Scanner] fetched={len(symbols)} "
-            f"volume={len(volume_filtered)} "
-            f"usdt={len(usdt_filtered)}"
+        logger.info(
+            "[Scanner] fetched=%d volume=%d usdt=%d",
+            len(symbols),
+            len(volume_filtered),
+            len(usdt_filtered),
         )
 
         return usdt_filtered

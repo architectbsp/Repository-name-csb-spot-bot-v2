@@ -20,6 +20,7 @@ dist/
 
 # Logs
 *.log
+logs/
 
 # Environment
 .env

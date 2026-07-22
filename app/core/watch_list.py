@@ -1,10 +1,14 @@
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+import logging
 import threading
 from typing import Any
 
 from app.core.scheduler.job import Job
+
+
+logger = logging.getLogger(__name__)
 
 
 class WatchState(StrEnum):
@@ -651,8 +655,10 @@ class WatchList:
             if created:
                 added += 1
 
-        print(
-            f"[WatchList] added={added} total={self.size()}"
+        logger.info(
+            "[WatchList] added=%d total=%d",
+            added,
+            self.size(),
         )
 
         return added

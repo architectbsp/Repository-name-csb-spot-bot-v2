@@ -48,6 +48,28 @@ def test_sync_price_stream_uses_the_single_active_exchange():
     ]
 
 
+def test_handle_scan_result_logs_instead_of_printing(capsys, caplog):
+    """
+    Regression guard for B31: handle_scan_result() used to print() its
+    summary directly to stdout; it must go through the module logger
+    instead so it respects log level/handlers configuration.
+    """
+    watchlist = WatchList()
+
+    ticker = SimpleNamespace(symbol="BTCUSDT")
+
+    with caplog.at_level("INFO", logger="app.core.watch_list"):
+        added = watchlist.handle_scan_result([ticker])
+
+    assert added == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert any(
+        "added=1" in record.getMessage() for record in caplog.records
+    )
+
+
 def test_full_state_machine_lifecycle():
     watchlist = WatchList()
 
