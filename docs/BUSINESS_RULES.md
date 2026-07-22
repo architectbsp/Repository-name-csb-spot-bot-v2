@@ -451,19 +451,26 @@ safety_size = min(balance * 99.5%, volume_24h * 0.1%)
   typically smaller than the balance cap, so only the liquidity-safe
   amount is committed (automatic risk distribution across positions).
 
-### Advanced Position Sizing (Risk / ATR / Volatility)
+### Advanced Position Sizing (Fixed Risk / ATR / Kelly)
 
 `position_sizing_mode` (Settings screen):
 
 - **0 = Liquidity-only**: `position_size = safety_size` (legacy behaviour).
-- **1 = Hybrid** (default): also take the min of any advanced caps that
-  can be computed for the symbol. Missing OHLCV never blocks a trade --
-  those caps are skipped and sizing falls back to `safety_size` (plus
-  the risk-based cap, which needs no candles).
+- **1 = Hybrid** (default): min of Fixed Risk + ATR + realized-vol caps.
+- **2 = Fixed Risk**: risk-based cap only (+ hard safety caps).
+- **3 = Volatility / ATR**: ATR-based + optional realized-vol scale.
+- **4 = Kelly Criterion**: stake from closed Trade Journal win-rate /
+  payoff stats (`f* = W - (1-W)/R`), scaled by `kelly_fraction`
+  (default half-Kelly) and hard-capped at 25% of balance. Requires at
+  least `kelly_min_trades` closed trades; otherwise falls back to
+  safety caps only.
+
+Missing OHLCV / journal data never blocks a trade -- those caps are
+skipped and sizing falls back to `safety_size`.
 
 Advanced caps (all use Decimal math; all are Settings-editable):
 
-1. **Risk-based**: size so a hard-stop hit loses at most
+1. **Fixed Risk**: size so a hard-stop hit loses at most
    `risk_per_trade_percent` of the treasury:
    `balance * risk_per_trade% / stop_loss%`.
 2. **ATR-based**: fetch 1h candles from the active exchange only
@@ -650,10 +657,12 @@ Legacy DBs with the old `trade_journal` table name are renamed on
 
 ## Performance Analytics
 
-`PerformanceAnalytics` (`app/core/services/performance_analytics.py`) is
-a read-only module that measures the bot's own trading performance from
-every `CLOSED` Trade Journal entry. It never touches a position, order,
-or risk state -- only summarizes what already happened.
+`AnalyticsService` (`app/core/services/analytics_service.py`, alias of
+`PerformanceAnalytics`) is a read-only module that measures the bot's
+own trading performance from every `CLOSED` Trade Journal entry. It
+never touches a position, order, or risk state -- only summarizes what
+already happened. The live dashboard surfaces these metrics next to the
+24h report.
 
 - **Win Rate**: percentage of closed trades with `pnl > 0`.
 - **Average Profit / Average Loss**: mean `pnl` of winning trades and of
@@ -776,6 +785,17 @@ the previous/None value).
 ## Volume Filter
 
 - Only symbols with a 24-hour trading volume of at least 250,000 USD are eligible for scanning.
+
+## Symbol Filter & Blacklist
+
+`MarketScanner.filter_symbols` also drops:
+
+1. **Leveraged / inverse tokens** via regex on the base asset suffix:
+   `UP`, `DOWN`, `BULL`, `BEAR`, `2L`–`5L`, `2S`–`5S` (e.g. `BTCUP/USDT`,
+   `ETH3L/USDT`).
+2. **Operator blacklist** stored in `symbol_blacklist` and managed from
+   Settings → Coin Kara Listesi (`SymbolFilter`). Matching is by full
+   symbol or base asset.
 
 ---
 

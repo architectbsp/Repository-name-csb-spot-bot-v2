@@ -23,6 +23,7 @@ def test_sync_schema_creates_missing_tables_from_scratch():
     assert "bot_settings" in tables
     assert "trade_journals" in tables
     assert "trade_logs" in tables
+    assert "symbol_blacklist" in tables
 
 
 def test_sync_schema_adds_missing_columns_to_an_old_table_without_losing_data():

@@ -26,10 +26,15 @@ _MAX_DURATION_CHECK_INTERVAL_SECONDS = 60
 _SIZING_OHLCV_TIMEFRAME = "1h"
 _SIZING_MODE_LIQUIDITY_ONLY = 0
 _SIZING_MODE_HYBRID = 1
+_SIZING_MODE_FIXED_RISK = 2
+_SIZING_MODE_ATR = 3
+_SIZING_MODE_KELLY = 4
 # Clamp so a dead-flat market can't blow the vol-scaled size past the
 # balance cap, and a spike can't shrink it to a dust amount.
 _VOL_SCALE_MIN = 0.25
 _VOL_SCALE_MAX = 1.0
+# Never let Kelly size more than this fraction of balance.
+_KELLY_HARD_CAP = 0.25
 
 # Sprint 3: which CloseReason to record depending on which stop level
 # actually triggered (hard vs break-even vs trailing).
@@ -221,20 +226,17 @@ class RiskManager:
         """
         Position sizing (docs/BUSINESS_RULES.md §8).
 
-        Always applies the two hard safety caps:
-          - balance cap:   balance * max_balance_utilization_percent
-          - liquidity cap: 24h volume * max_volume_share_percent
+        Always applies hard safety caps (balance + liquidity). Then, based
+        on `position_sizing_mode`:
 
-        In hybrid mode (position_sizing_mode=1, the default) the size is
-        further reduced by the *smallest* of the Sprint 8 advanced caps
-        that can be computed for this symbol:
+          0 liquidity-only
+          1 hybrid (default): Fixed Risk + ATR + realized-vol
+          2 Fixed Risk only
+          3 Volatility / ATR-based (ATR + optional realized-vol scale)
+          4 Kelly Criterion (from closed Trade Journal stats)
 
-          - risk-based:  (balance * risk_per_trade%) / stop_loss%
-          - ATR-based:   (balance * risk_per_trade%) / (atr*multiplier/price)
-          - volatility:  balance_cap * clamp(target_vol / realized_vol)
-
-        Missing candle data never blocks a trade -- those caps are simply
-        skipped, and sizing falls back to min(balance, liquidity).
+        Missing candle / journal data never blocks a trade -- those caps
+        are skipped and sizing falls back to the hard safety floors.
         """
         if balance <= 0:
             return 0.0
@@ -253,22 +255,49 @@ class RiskManager:
             ) / Decimal("100")
             caps.append(liquidity_cap)
 
-        sizing_mode = int(getattr(self._risk, "position_sizing_mode", _SIZING_MODE_HYBRID))
+        sizing_mode = int(
+            getattr(self._risk, "position_sizing_mode", _SIZING_MODE_HYBRID)
+        )
 
-        if sizing_mode == _SIZING_MODE_HYBRID:
+        use_risk = sizing_mode in (
+            _SIZING_MODE_HYBRID,
+            _SIZING_MODE_FIXED_RISK,
+        )
+        use_atr = sizing_mode in (
+            _SIZING_MODE_HYBRID,
+            _SIZING_MODE_ATR,
+        )
+        use_vol = sizing_mode in (
+            _SIZING_MODE_HYBRID,
+            _SIZING_MODE_ATR,
+        )
+        use_kelly = sizing_mode == _SIZING_MODE_KELLY
+
+        if use_risk:
             risk_cap = self._risk_based_cap(balance_dec)
             if risk_cap is not None:
                 caps.append(risk_cap)
 
-            candles = self._fetch_sizing_candles(symbol, exchange_type)
-            if candles and price is not None and price > 0:
-                atr_cap = self._atr_based_cap(balance_dec, price, candles)
-                if atr_cap is not None:
-                    caps.append(atr_cap)
+        candles = (
+            self._fetch_sizing_candles(symbol, exchange_type)
+            if (use_atr or use_vol)
+            else []
+        )
 
-                vol_cap = self._volatility_based_cap(balance_cap, candles)
-                if vol_cap is not None:
-                    caps.append(vol_cap)
+        if use_atr and candles and price is not None and price > 0:
+            atr_cap = self._atr_based_cap(balance_dec, price, candles)
+            if atr_cap is not None:
+                caps.append(atr_cap)
+
+        if use_vol and candles:
+            vol_cap = self._volatility_based_cap(balance_cap, candles)
+            if vol_cap is not None:
+                caps.append(vol_cap)
+
+        if use_kelly:
+            kelly_cap = self._kelly_based_cap(balance_dec)
+            if kelly_cap is not None:
+                caps.append(kelly_cap)
 
         return float(min(caps))
 
@@ -333,6 +362,53 @@ class RiskManager:
         scale = target / realized
         scale = max(_VOL_SCALE_MIN, min(_VOL_SCALE_MAX, scale))
         return balance_cap * Decimal(str(scale))
+
+    def _kelly_based_cap(self, balance: Decimal) -> Decimal | None:
+        """
+        Kelly Criterion stake from closed Trade Journal stats:
+
+            f* = W - (1 - W) / R
+            size = balance * kelly_fraction * f*
+
+        where W = win rate and R = avg_win / abs(avg_loss). Returns None
+        until `kelly_min_trades` closed trades exist (or f* <= 0).
+        """
+        if self._trade_journal is None:
+            return None
+
+        from app.core.domain.trade_journal import STATUS_CLOSED
+
+        min_trades = int(getattr(self._risk, "kelly_min_trades", 10) or 10)
+        fraction = float(getattr(self._risk, "kelly_fraction", 0.5) or 0.0)
+        if fraction <= 0 or min_trades <= 0:
+            return None
+
+        closed = [
+            entry
+            for entry in self._trade_journal.list_all()
+            if entry.status == STATUS_CLOSED and entry.pnl is not None
+        ]
+        if len(closed) < min_trades:
+            return None
+
+        wins = [entry.pnl for entry in closed if entry.pnl > 0]
+        losses = [entry.pnl for entry in closed if entry.pnl < 0]
+        if not wins or not losses:
+            return None
+
+        win_rate = len(wins) / len(closed)
+        avg_win = sum(wins) / len(wins)
+        avg_loss = abs(sum(losses) / len(losses))
+        if avg_loss <= 0:
+            return None
+
+        reward_risk = avg_win / avg_loss
+        f_star = win_rate - ((1.0 - win_rate) / reward_risk)
+        if f_star <= 0:
+            return None
+
+        stake = min(f_star * fraction, _KELLY_HARD_CAP)
+        return balance * Decimal(str(stake))
 
     def _fetch_sizing_candles(self, symbol: str | None, exchange_type):
         if (

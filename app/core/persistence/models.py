@@ -47,10 +47,27 @@ class SettingsEntity(Base):
     atr_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
     volatility_target_percent: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
     volatility_lookback: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    # Kelly Criterion sizing (mode=4). Fraction of full Kelly to deploy
+    # (0.5 = half-Kelly) and minimum closed trades before Kelly activates.
+    kelly_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    kelly_min_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     partial_tp_activation_percent: Mapped[float] = mapped_column(Float, nullable=False)
     partial_tp_sell_percent: Mapped[float] = mapped_column(Float, nullable=False)
 
     updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class SymbolBlacklistEntity(Base):
+    """Operator-managed coin blacklist (Settings UI)."""
+
+    __tablename__ = "symbol_blacklist"
+
+    symbol: Mapped[str] = mapped_column(String(30), primary_key=True)
+    note: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
     )

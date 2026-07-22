@@ -45,6 +45,26 @@ def test_filter_symbols():
     assert result[0].symbol == "B/USDT"
 
 
+def test_filter_symbols_blocks_leveraged_and_blacklist():
+    from app.core.services.symbol_filter import SymbolFilter
+
+    scanner = MarketScanner()
+    scanner.set_config(make_config())
+    filt = SymbolFilter()
+    filt.add("SCAM/USDT")
+    scanner.set_symbol_filter(filt)
+
+    symbols = [
+        SimpleNamespace(symbol="BTC/USDT", volume_24h=150),
+        SimpleNamespace(symbol="BTCUP/USDT", volume_24h=150),
+        SimpleNamespace(symbol="ETH3L/USDT", volume_24h=150),
+        SimpleNamespace(symbol="SCAM/USDT", volume_24h=150),
+    ]
+
+    result = scanner.filter_symbols(symbols)
+    assert [s.symbol for s in result] == ["BTC/USDT"]
+
+
 def test_filter_symbols_logs_instead_of_printing(capsys, caplog):
     """
     Regression guard for B31: filter_symbols() used to print() its

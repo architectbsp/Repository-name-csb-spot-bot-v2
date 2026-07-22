@@ -13,6 +13,7 @@ from app.core.persistence.protocols import (
 from app.core.persistence.repository import (
     PositionRepository,
     SettingsRepository,
+    SymbolBlacklistRepository,
     TradeJournalRepository,
 )
 
@@ -69,6 +70,9 @@ class PersistenceService:
 
     def trade_journal_repository(self) -> TradeJournalRepositoryProtocol:
         return TradeJournalRepository(self.create_session())
+
+    def symbol_blacklist_repository(self) -> SymbolBlacklistRepository:
+        return SymbolBlacklistRepository(self.create_session())
 
     def load_positions(self) -> list[Position]:
         repository = self.position_repository()

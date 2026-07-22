@@ -74,7 +74,11 @@ def _build_view(
     page: ft.Page,
 ):
     if view_name == SETTINGS:
-        return build_settings_view(engine.config, engine.settings_store)
+        return build_settings_view(
+            engine.config,
+            engine.settings_store,
+            engine=engine,
+        )
 
     snapshot = engine.dashboard_service.build_snapshot()
     return build_dashboard_view(engine, page, snapshot)

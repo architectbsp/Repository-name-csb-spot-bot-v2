@@ -45,10 +45,12 @@ class RiskSettings:
     # volume to a single trade.
     max_volume_share_percent: float = 0.1
 
-    # Sprint 8 -- Advanced Position Sizing (docs/BUSINESS_RULES.md §8):
-    # 0 = liquidity-only (legacy: min(balance_cap, liquidity_cap)),
-    # 1 = hybrid (default): also take the min of risk-based, ATR-based
-    #     and volatility-based caps when candle data is available.
+    # Position sizing mode (docs/BUSINESS_RULES.md §8):
+    # 0 = liquidity-only (min(balance_cap, liquidity_cap)),
+    # 1 = hybrid (default): min of Fixed Risk + ATR + realized-vol caps,
+    # 2 = Fixed Risk only (+ hard safety caps),
+    # 3 = Volatility / ATR-based only (+ hard safety caps),
+    # 4 = Kelly Criterion (+ hard safety caps).
     position_sizing_mode: int = 1
     # How much of the treasury (percent) may be lost if the hard stop
     # fires -- drives both risk-based and ATR-based sizing.
@@ -62,6 +64,10 @@ class RiskSettings:
     # volatility cap entirely.
     volatility_target_percent: float = 2.0
     volatility_lookback: int = 20
+    # Kelly: fraction of full-Kelly stake (0.5 = half-Kelly) and minimum
+    # closed trades required before Kelly sizing activates.
+    kelly_fraction: float = 0.5
+    kelly_min_trades: int = 10
 
 
 @dataclass(slots=True)

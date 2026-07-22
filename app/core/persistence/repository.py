@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from app.core.persistence.models import (
     PositionEntity,
     SettingsEntity,
+    SymbolBlacklistEntity,
     TradeJournalEntity,
     TradeLogEntity,
 )
@@ -70,6 +73,35 @@ class PositionRepository:
             self._session.query(PositionEntity)
             .all()
         )
+
+
+class SymbolBlacklistRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def list_all(self) -> list[SymbolBlacklistEntity]:
+        return (
+            self._session.query(SymbolBlacklistEntity)
+            .order_by(SymbolBlacklistEntity.symbol.asc())
+            .all()
+        )
+
+    def add(self, symbol: str, note: str | None = None) -> None:
+        entity = SymbolBlacklistEntity(
+            symbol=symbol,
+            note=note,
+            created_at=datetime.now(UTC),
+        )
+        self._session.merge(entity)
+        self._session.commit()
+
+    def remove(self, symbol: str) -> bool:
+        entity = self._session.get(SymbolBlacklistEntity, symbol)
+        if entity is None:
+            return False
+        self._session.delete(entity)
+        self._session.commit()
+        return True
 
 
 class TradeJournalRepository:

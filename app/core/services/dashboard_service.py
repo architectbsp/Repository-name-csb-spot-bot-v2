@@ -61,6 +61,7 @@ class DashboardService:
         self._trade_journal = None
         self._risk_manager = None
         self._market_scanner = None
+        self._analytics_service = None
         self._config: AppSettings | None = None
         self._bot_running_fn = lambda: False
 
@@ -87,6 +88,9 @@ class DashboardService:
 
     def set_market_scanner(self, market_scanner) -> None:
         self._market_scanner = market_scanner
+
+    def set_analytics_service(self, analytics_service) -> None:
+        self._analytics_service = analytics_service
 
     def set_config(self, config: AppSettings) -> None:
         self._config = config
@@ -129,6 +133,11 @@ class DashboardService:
         cooldown_rows = self._cooldown_rows(now)
         coin_rows = self._coin_rows()
         history_rows, report = self._history_and_report_24h(now)
+        performance = (
+            self._analytics_service.generate_report()
+            if self._analytics_service is not None
+            else None
+        )
 
         return DashboardSnapshot(
             generated_at=now,
@@ -150,6 +159,7 @@ class DashboardService:
             cooldowns=cooldown_rows,
             trade_history=history_rows,
             report_24h=report,
+            performance=performance,
             logs=self._memory_log.recent(limit=30),
         )
 

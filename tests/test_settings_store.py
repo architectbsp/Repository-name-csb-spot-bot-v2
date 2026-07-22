@@ -141,6 +141,8 @@ def test_schema_covers_every_field_the_user_requested():
         "atr_multiplier",
         "volatility_target_percent",
         "volatility_lookback",
+        "kelly_fraction",
+        "kelly_min_trades",
         "max_position_hours",
         "max_daily_loss_percent",
         "partial_tp_activation_percent",

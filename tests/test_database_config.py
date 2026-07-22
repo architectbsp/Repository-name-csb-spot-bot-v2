@@ -100,6 +100,7 @@ def test_persistence_service_from_url_exposes_protocol_repos():
     tables = set(inspector.get_table_names())
     assert "trade_journals" in tables
     assert "trade_logs" in tables
+    assert "symbol_blacklist" in tables
 
 
 def test_create_db_engine_sqlite_memory_syncs_schema():

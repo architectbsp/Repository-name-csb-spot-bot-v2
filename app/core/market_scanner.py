@@ -28,8 +28,12 @@ class MarketScanner:
         self._timer = None
         self._stopwatch = None
         self._config = None
+        self._symbol_filter = None
         self._last_scan_result = []
         self._initialized = False
+
+    def set_symbol_filter(self, symbol_filter) -> None:
+        self._symbol_filter = symbol_filter
 
     def start(self) -> None:
         if not self.is_initialized():
@@ -266,14 +270,28 @@ class MarketScanner:
             if s.symbol.endswith("/USDT")
         ]
 
+        if self._symbol_filter is None:
+            filtered = usdt_filtered
+            blocked = 0
+        else:
+            filtered = []
+            blocked = 0
+            for ticker in usdt_filtered:
+                if self._symbol_filter.is_blocked(ticker.symbol):
+                    blocked += 1
+                    continue
+                filtered.append(ticker)
+
         logger.info(
-            "[Scanner] fetched=%d volume=%d usdt=%d",
+            "[Scanner] fetched=%d volume=%d usdt=%d blocked=%d kept=%d",
             len(symbols),
             len(volume_filtered),
             len(usdt_filtered),
+            blocked,
+            len(filtered),
         )
 
-        return usdt_filtered
+        return filtered
 
     def __repr__(self) -> str:
         return (

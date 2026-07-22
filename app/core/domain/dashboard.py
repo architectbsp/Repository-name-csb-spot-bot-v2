@@ -9,6 +9,8 @@ unit-testable without a live exchange).
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.core.domain.performance import PerformanceReport
+
 
 @dataclass(slots=True)
 class CoinRow:
@@ -107,4 +109,6 @@ class DashboardSnapshot:
     cooldowns: list[CooldownRow] = field(default_factory=list)
     trade_history: list[TradeHistoryRow] = field(default_factory=list)
     report_24h: Report24h = field(default_factory=Report24h)
+    # All-time closed-trade analytics (AnalyticsService).
+    performance: PerformanceReport | None = None
     logs: list[LogRow] = field(default_factory=list)

@@ -69,7 +69,9 @@ def test_settings_view_has_one_field_per_schema_entry():
     view = build_settings_view(config, store)
     _, fields = _collect(view)
 
-    assert len(fields) == len(SETTINGS_SCHEMA)
+    # Schema knobs + the blacklist symbol input on the Settings screen.
+    assert len(fields) == len(SETTINGS_SCHEMA) + 1
+    assert any("Sembol" in label for label in fields)
 
 
 def test_saving_valid_changes_updates_the_live_config():

@@ -23,8 +23,9 @@ from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.chart_service import ChartService
 from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
-from app.core.services.performance_analytics import PerformanceAnalytics
+from app.core.services.analytics_service import AnalyticsService
 from app.core.services.position_reconciler import PositionReconciler
+from app.core.services.symbol_filter import SymbolFilter
 from app.core.services.telegram_client import TelegramClient
 from app.core.services.telegram_notifier import TelegramNotifier
 from app.core.services.trade_journal import TradeJournal
@@ -131,11 +132,18 @@ class BotEngine:
             self.persistence.trade_journal_repository(),
         )
 
-        # Sprint 7 -- Performance Analytics: reads exclusively from the
-        # Trade Journal's permanent closed-trade history; never touches
-        # positions/orders/risk state itself.
-        self.performance_analytics = PerformanceAnalytics()
-        self.performance_analytics.set_trade_journal(self.trade_journal)
+        # Performance Analytics (AnalyticsService): closed-trade metrics
+        # for the dashboard / Kelly sizing. Alias kept for older callers.
+        self.analytics_service = AnalyticsService()
+        self.analytics_service.set_trade_journal(self.trade_journal)
+        self.performance_analytics = self.analytics_service
+
+        # Leveraged-token regex + operator blacklist (Settings UI).
+        self.symbol_filter = SymbolFilter()
+        self.symbol_filter.set_repository(
+            self.persistence.symbol_blacklist_repository(),
+        )
+        self.market_scanner.set_symbol_filter(self.symbol_filter)
 
         # Sprint 6 -- Coin charts: assembles OHLCV candles (own exchange
         # only, per the data-isolation rule) plus Entry/Stop/TP/Trailing
@@ -184,6 +192,7 @@ class BotEngine:
         self.dashboard_service.set_trade_journal(self.trade_journal)
         self.dashboard_service.set_risk_manager(self.risk_manager)
         self.dashboard_service.set_market_scanner(self.market_scanner)
+        self.dashboard_service.set_analytics_service(self.analytics_service)
         self.dashboard_service.set_config(self.config)
         self.dashboard_service.set_bot_running_fn(lambda: self.running)
 
