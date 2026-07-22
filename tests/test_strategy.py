@@ -15,8 +15,11 @@ class DummyConfig:
 
 
 class DummyPositionManager:
-    def is_open(self, symbol):
+    def is_open(self, symbol, exchange=None):
         return False
+
+    def get(self, symbol, exchange=None):
+        return None
 
 
 def test_dead_code_entry_points_are_removed():

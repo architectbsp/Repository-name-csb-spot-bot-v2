@@ -2,9 +2,13 @@ import logging
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from app.core.domain.position import Position
+from app.core.domain.position import CloseReason, Position
 from app.core.scheduler.job import Job
 from app.core.services.order_execution import ExecutionOutcome, OrderExecutionService
+from app.core.services.volatility import (
+    compute_atr,
+    compute_realized_volatility_percent,
+)
 from app.core.trading.models import TradeRequest, TradeSide
 
 
@@ -16,14 +20,23 @@ _DAILY_RESET_CHECK_INTERVAL_SECONDS = 60
 _MAX_DURATION_JOB_NAME = "risk_manager_max_duration_check"
 _MAX_DURATION_CHECK_INTERVAL_SECONDS = 60
 
-# Sprint 3: which close_reason to record depending on which stop level
-# actually triggered, instead of a single generic "STOP_LOSS" label that
-# couldn't distinguish a hard-stop crash from a break-even or trailing
-# exit (needed for an accurate Trade Journal down the line).
+# Sprint 8: fixed OHLCV timeframe for ATR / realized-vol sizing. Not a
+# Settings knob (SETTINGS_SCHEMA is numeric-only); 1h + atr_period=14
+# gives a ~14h lookback appropriate for this spot swing bot.
+_SIZING_OHLCV_TIMEFRAME = "1h"
+_SIZING_MODE_LIQUIDITY_ONLY = 0
+_SIZING_MODE_HYBRID = 1
+# Clamp so a dead-flat market can't blow the vol-scaled size past the
+# balance cap, and a spike can't shrink it to a dust amount.
+_VOL_SCALE_MIN = 0.25
+_VOL_SCALE_MAX = 1.0
+
+# Sprint 3: which CloseReason to record depending on which stop level
+# actually triggered (hard vs break-even vs trailing).
 _STOP_STAGE_CLOSE_REASONS = {
-    "HARD": "HARD_STOP",
-    "BREAK_EVEN": "BREAK_EVEN_STOP",
-    "TRAILING": "TRAILING_STOP",
+    "HARD": CloseReason.STOP_LOSS,
+    "BREAK_EVEN": CloseReason.BREAK_EVEN_STOP,
+    "TRAILING": CloseReason.TRAILING_STOP,
 }
 
 
@@ -75,6 +88,8 @@ class RiskManager:
         self._trading_day: date | None = None
         self._day_start_balance: float | None = None
         self._realized_pnl_today: float = 0.0
+        # Sprint 11: fire risk.daily_loss_limit at most once per UTC day.
+        self._daily_loss_alerted: bool = False
 
         # Sprint 4: built lazily on first real order submission (see
         # _get_order_execution) so every setter above has already run by
@@ -172,11 +187,21 @@ class RiskManager:
                 self._exchange_manager,
                 retry_policy=self._retry_policy,
                 timeout=self._timeout,
+                pending_timeout_seconds=30.0,
             )
         return self._order_execution
 
+    @property
+    def order_execution(self) -> OrderExecutionService:
+        return self._get_order_execution()
+
     def set_config(self, config):
         self._config = config
+
+    def on_config_updated(self, event) -> None:
+        """EventBus `config.updated` -- risk knobs are read live via
+        `self._risk` on every decision; no local cache to invalidate."""
+        return None
 
     @property
     def _risk(self):
@@ -188,22 +213,28 @@ class RiskManager:
         self,
         balance: float,
         volume_24h: float | None = None,
+        *,
+        price: float | None = None,
+        symbol: str | None = None,
+        exchange_type=None,
     ) -> float:
         """
-        Dynamic, liquidity-based position sizing
-        (docs/BUSINESS_RULES.md §8): the treasury's own size is not what
-        drives the trade amount -- the smaller of two independent caps
-        is always used, computed with Decimal to avoid float drift on a
-        value that directly determines money at risk:
+        Position sizing (docs/BUSINESS_RULES.md §8).
 
-          - balance cap:   balance * 99.5%   (commission/slippage headroom)
-          - liquidity cap: 24h volume * 0.1% ("binde 1")
+        Always applies the two hard safety caps:
+          - balance cap:   balance * max_balance_utilization_percent
+          - liquidity cap: 24h volume * max_volume_share_percent
 
-        Small treasury (liquidity cap >= balance cap): the whole 99.5% of
-        the balance is committed to the single trade.
-        Large treasury (liquidity cap < balance cap): only the
-        liquidity-safe amount is committed; the remainder stays in the
-        treasury for other opportunities (automatic risk distribution).
+        In hybrid mode (position_sizing_mode=1, the default) the size is
+        further reduced by the *smallest* of the Sprint 8 advanced caps
+        that can be computed for this symbol:
+
+          - risk-based:  (balance * risk_per_trade%) / stop_loss%
+          - ATR-based:   (balance * risk_per_trade%) / (atr*multiplier/price)
+          - volatility:  balance_cap * clamp(target_vol / realized_vol)
+
+        Missing candle data never blocks a trade -- those caps are simply
+        skipped, and sizing falls back to min(balance, liquidity).
         """
         if balance <= 0:
             return 0.0
@@ -213,23 +244,140 @@ class RiskManager:
             str(self._risk.max_balance_utilization_percent)
         ) / Decimal("100")
 
-        if volume_24h is None or volume_24h <= 0:
-            # No liquidity data available -- fall back to the balance cap.
-            return float(balance_cap)
+        caps: list[Decimal] = [balance_cap]
 
-        volume_dec = Decimal(str(volume_24h))
-        liquidity_cap = volume_dec * Decimal(
-            str(self._risk.max_volume_share_percent)
-        ) / Decimal("100")
+        if volume_24h is not None and volume_24h > 0:
+            volume_dec = Decimal(str(volume_24h))
+            liquidity_cap = volume_dec * Decimal(
+                str(self._risk.max_volume_share_percent)
+            ) / Decimal("100")
+            caps.append(liquidity_cap)
 
-        return float(min(balance_cap, liquidity_cap))
+        sizing_mode = int(getattr(self._risk, "position_sizing_mode", _SIZING_MODE_HYBRID))
+
+        if sizing_mode == _SIZING_MODE_HYBRID:
+            risk_cap = self._risk_based_cap(balance_dec)
+            if risk_cap is not None:
+                caps.append(risk_cap)
+
+            candles = self._fetch_sizing_candles(symbol, exchange_type)
+            if candles and price is not None and price > 0:
+                atr_cap = self._atr_based_cap(balance_dec, price, candles)
+                if atr_cap is not None:
+                    caps.append(atr_cap)
+
+                vol_cap = self._volatility_based_cap(balance_cap, candles)
+                if vol_cap is not None:
+                    caps.append(vol_cap)
+
+        return float(min(caps))
+
+    def _risk_based_cap(self, balance: Decimal) -> Decimal | None:
+        """Size so that a hard-stop hit loses at most risk_per_trade% of
+        the treasury. None when stop_loss_percent is unset/zero."""
+        stop_pct = float(getattr(self._risk, "stop_loss_percent", 0.0) or 0.0)
+        risk_pct = float(getattr(self._risk, "risk_per_trade_percent", 0.0) or 0.0)
+
+        if stop_pct <= 0 or risk_pct <= 0:
+            return None
+
+        risk_amount = balance * Decimal(str(risk_pct)) / Decimal("100")
+        return risk_amount / (Decimal(str(stop_pct)) / Decimal("100"))
+
+    def _atr_based_cap(
+        self,
+        balance: Decimal,
+        price: float,
+        candles,
+    ) -> Decimal | None:
+        """Size so that an ATR*multiplier move against the position loses
+        at most risk_per_trade% of the treasury."""
+        period = int(getattr(self._risk, "atr_period", 14) or 14)
+        multiplier = float(getattr(self._risk, "atr_multiplier", 2.0) or 0.0)
+        risk_pct = float(getattr(self._risk, "risk_per_trade_percent", 0.0) or 0.0)
+
+        if multiplier <= 0 or risk_pct <= 0 or price <= 0:
+            return None
+
+        atr = compute_atr(candles, period=period)
+        if atr is None or atr <= 0:
+            return None
+
+        stop_distance = atr * multiplier
+        if stop_distance <= 0:
+            return None
+
+        risk_amount = balance * Decimal(str(risk_pct)) / Decimal("100")
+        # position_value * (stop_distance / price) = risk_amount
+        # => position_value = risk_amount * price / stop_distance
+        return risk_amount * Decimal(str(price)) / Decimal(str(stop_distance))
+
+    def _volatility_based_cap(
+        self,
+        balance_cap: Decimal,
+        candles,
+    ) -> Decimal | None:
+        """Scale the balance cap by target_vol / realized_vol, clamped so
+        a quiet market never exceeds the balance cap and a wild market
+        never sizes below VOL_SCALE_MIN of it."""
+        target = float(getattr(self._risk, "volatility_target_percent", 0.0) or 0.0)
+        lookback = int(getattr(self._risk, "volatility_lookback", 20) or 20)
+
+        if target <= 0:
+            return None
+
+        realized = compute_realized_volatility_percent(candles, lookback=lookback)
+        if realized is None or realized <= 0:
+            return None
+
+        scale = target / realized
+        scale = max(_VOL_SCALE_MIN, min(_VOL_SCALE_MAX, scale))
+        return balance_cap * Decimal(str(scale))
+
+    def _fetch_sizing_candles(self, symbol: str | None, exchange_type):
+        if (
+            symbol is None
+            or exchange_type is None
+            or self._exchange_manager is None
+        ):
+            return []
+
+        period = int(getattr(self._risk, "atr_period", 14) or 14)
+        lookback = int(getattr(self._risk, "volatility_lookback", 20) or 20)
+        # +2 for the prior-close needed by ATR / return math.
+        limit = max(period, lookback) + 2
+
+        try:
+            return self._exchange_manager.fetch_ohlcv(
+                exchange_type,
+                symbol,
+                timeframe=_SIZING_OHLCV_TIMEFRAME,
+                limit=limit,
+            )
+        except Exception:
+            logger.debug(
+                "[RISK] Sizing OHLCV fetch failed for %s -- skipping ATR/vol caps",
+                symbol,
+                exc_info=True,
+            )
+            return []
 
     def has_sufficient_balance(
         self,
         balance: float,
         volume_24h: float | None = None,
+        *,
+        price: float | None = None,
+        symbol: str | None = None,
+        exchange_type=None,
     ) -> bool:
-        return self.calculate_position_size(balance, volume_24h) > 0.0
+        return self.calculate_position_size(
+            balance,
+            volume_24h,
+            price=price,
+            symbol=symbol,
+            exchange_type=exchange_type,
+        ) > 0.0
 
     def is_daily_loss_limit_reached(self, daily_loss_percent: float) -> bool:
         return daily_loss_percent >= self._risk.max_daily_loss_percent
@@ -249,6 +397,7 @@ class RiskManager:
         self._trading_day = today
         self._day_start_balance = balance
         self._realized_pnl_today = 0.0
+        self._daily_loss_alerted = False
 
         logger.info(
             "[RISK] New UTC trading day started; day_start_balance=%.8f",
@@ -262,16 +411,42 @@ class RiskManager:
         if self._exchange_manager is None:
             return
 
-        try:
-            exchange_type = self._exchange_manager.active_exchange_type()
-            balance = self._exchange_manager.get_quote_balance(exchange_type)
-        except Exception:
+        balance = self._total_quote_balance()
+        if balance is None:
             logger.debug(
                 "[RISK] Skipping daily-reset check: exchange unavailable"
             )
             return
 
         self._sync_trading_day(balance)
+
+    def _total_quote_balance(self) -> float | None:
+        """Sprint 18: sum free quote balances across every enabled
+        exchange for the shared daily-loss treasury snapshot."""
+        if self._exchange_manager is None:
+            return None
+
+        try:
+            exchange_types = self._exchange_manager.enabled_exchange_types()
+        except Exception:
+            return None
+
+        total = 0.0
+        any_ok = False
+        for exchange_type in exchange_types:
+            try:
+                total += float(
+                    self._exchange_manager.get_quote_balance(exchange_type)
+                )
+                any_ok = True
+            except Exception:
+                logger.debug(
+                    "[RISK] Quote balance unavailable for %s",
+                    exchange_type,
+                    exc_info=True,
+                )
+
+        return total if any_ok else None
 
     def current_daily_loss_percent(self) -> float:
         """Realized loss so far today, as a percentage of the day's
@@ -283,6 +458,16 @@ class RiskManager:
         loss = max(0.0, -self._realized_pnl_today)
         return (loss / self._day_start_balance) * 100
 
+    def realized_pnl_today(self) -> float:
+        """Sprint 12 -- signed realized PnL accumulated since the UTC
+        day boundary (positive = profit, negative = loss)."""
+        return self._realized_pnl_today
+
+    def day_start_balance(self) -> float | None:
+        """Sprint 12 -- treasury snapshot taken at the start of the
+        current UTC trading day, or None before the first sync."""
+        return self._day_start_balance
+
     def _record_realized_pnl(self, pnl: float) -> None:
         self._realized_pnl_today += pnl
 
@@ -293,6 +478,18 @@ class RiskManager:
                 self.current_daily_loss_percent(),
                 self._risk.max_daily_loss_percent,
             )
+            if not self._daily_loss_alerted:
+                self._daily_loss_alerted = True
+                if self._event_bus is not None:
+                    self._event_bus.publish(
+                        "risk.daily_loss_limit",
+                        {
+                            "daily_loss_percent": (
+                                self.current_daily_loss_percent()
+                            ),
+                            "limit_percent": self._risk.max_daily_loss_percent,
+                        },
+                    )
 
     def can_open_trade(
         self,
@@ -420,8 +617,14 @@ class RiskManager:
             )
             return None
 
+        # Size against THIS venue's free balance (never spend Bybit
+        # money on a Binance order). Daily-loss treasury is the sum
+        # across every enabled venue (Sprint 18 shared risk budget).
         balance = self._exchange_manager.get_quote_balance(exchange_type)
-        self._sync_trading_day(balance)
+        treasury = self._total_quote_balance()
+        self._sync_trading_day(
+            treasury if treasury is not None else balance
+        )
 
         if not self.can_open_trade(
             balance=balance,
@@ -430,7 +633,13 @@ class RiskManager:
         ):
             return None
 
-        position_value = self.calculate_position_size(balance, volume_24h)
+        position_value = self.calculate_position_size(
+            balance,
+            volume_24h,
+            price=price,
+            symbol=symbol,
+            exchange_type=exchange_type,
+        )
 
         if position_value <= 0:
             return None
@@ -508,6 +717,19 @@ class RiskManager:
             stop_price,
         )
 
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "position.opened",
+                {
+                    "symbol": symbol,
+                    "exchange": getattr(exchange_type, "name", exchange_type),
+                    "entry_price": entry_price,
+                    "quantity": position.quantity,
+                    "stop_price": stop_price,
+                    "position": position,
+                },
+            )
+
         return position
 
     def on_price_tick(
@@ -528,7 +750,10 @@ class RiskManager:
 
         symbol = ticker.symbol
 
-        position = self._position_manager.get(symbol)
+        position = self._position_manager.get(
+            symbol,
+            exchange=ticker.exchange,
+        )
 
         if position is None:
             return
@@ -643,7 +868,8 @@ class RiskManager:
             position.symbol,
             sell_quantity=filled_quantity,
             exit_price=exit_price,
-            reason="PARTIAL_TP",
+            reason=CloseReason.PARTIAL_TP,
+            exchange=position.exchange,
         )
 
         if realized is None:
@@ -665,7 +891,8 @@ class RiskManager:
                 exit_price=exit_price,
                 quantity=filled_quantity,
                 realized_pnl=realized,
-                reason="PARTIAL_TP",
+                reason=CloseReason.PARTIAL_TP,
+                exchange=position.exchange,
             )
 
         logger.info(
@@ -683,6 +910,9 @@ class RiskManager:
                 "position.partial_exit",
                 {
                     "symbol": position.symbol,
+                    "exchange": getattr(
+                        position.exchange, "name", position.exchange
+                    ),
                     "quantity": filled_quantity,
                     "exit_price": exit_price,
                     "realized_pnl": realized,
@@ -742,6 +972,7 @@ class RiskManager:
         position = self._position_manager.get(symbol)
 
         if position is None or position.state.name != "OPEN":
+            # Ambiguous symbol across venues -- try exact lookup failure.
             return False
 
         exchange_type = position.exchange
@@ -760,10 +991,13 @@ class RiskManager:
             position,
             exchange_type=exchange_type,
             fallback_price=position.entry_price,
-            reason="MANUAL_CLOSE",
+            reason=CloseReason.MANUAL,
         )
 
-        return not self._position_manager.is_open(symbol)
+        return not self._position_manager.is_open(
+            symbol,
+            exchange=exchange_type,
+        )
 
     def emergency_exit_all(self) -> int:
         """
@@ -805,10 +1039,13 @@ class RiskManager:
                 position,
                 exchange_type=exchange_type,
                 fallback_price=position.entry_price,
-                reason="EMERGENCY_EXIT",
+                reason=CloseReason.EMERGENCY,
             )
 
-            if not self._position_manager.is_open(position.symbol):
+            if not self._position_manager.is_open(
+                position.symbol,
+                exchange=position.exchange,
+            ):
                 closed += 1
 
         logger.critical(
@@ -869,7 +1106,7 @@ class RiskManager:
                 position,
                 exchange_type=exchange_type,
                 fallback_price=position.entry_price,
-                reason="MAX_DURATION",
+                reason=CloseReason.MAX_DURATION,
             )
 
     def _close_position_with_market_sell(
@@ -944,6 +1181,7 @@ class RiskManager:
             position.symbol,
             exit_price=exit_price,
             reason=reason,
+            exchange=position.exchange,
         )
 
         self._record_realized_pnl(final_chunk_pnl)
@@ -955,6 +1193,7 @@ class RiskManager:
                 reason=reason,
                 pnl=getattr(position, "pnl", None),
                 pnl_percent=getattr(position, "pnl_percent", None),
+                exchange=position.exchange,
             )
 
         if self._event_bus is not None:
@@ -962,6 +1201,7 @@ class RiskManager:
                 "position.closed",
                 {
                     "symbol": position.symbol,
+                    "exchange": position.exchange,
                     "reason": reason,
                     "price": exit_price,
                     "position": position,

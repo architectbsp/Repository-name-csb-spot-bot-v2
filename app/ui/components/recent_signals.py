@@ -1,8 +1,10 @@
 import flet as ft
 
+from app.core.domain.dashboard import DashboardSnapshot, WatchRow
+
 
 def _row(symbol, direction, change, status):
-    color = "#22C55E" if direction == "LONG" else "#EF4444"
+    color = "#22C55E" if direction == "RISE" else "#F59E0B"
 
     return ft.Row(
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -15,7 +17,23 @@ def _row(symbol, direction, change, status):
     )
 
 
-def build_recent_signals():
+def _empty():
+    return ft.Text(
+        "İzlenen coin yok",
+        color="#64748B",
+        size=12,
+    )
+
+
+def build_recent_signals(snapshot: DashboardSnapshot | None = None):
+    rows: list[WatchRow] = list(snapshot.watch_list) if snapshot else []
+    count = str(len(rows))
+    body = (
+        [_row(r.symbol, r.direction, r.change_display, r.status) for r in rows[:8]]
+        if rows
+        else [_empty()]
+    )
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -39,20 +57,10 @@ def build_recent_signals():
                             weight=ft.FontWeight.BOLD,
                             size=15,
                         ),
-                        ft.Text("18", color="#C5CDD8"),
+                        ft.Text(count, color="#C5CDD8"),
                     ],
                 ),
-                _row("INJ/USDT", "LONG", "+2.67%", "%6 Bekleniyor"),
-                _row("RNDR/USDT", "LONG", "+4.12%", "%6 Bekleniyor"),
-                _row("TIA/USDT", "LONG", "+3.15%", "%6 Bekleniyor"),
-                _row("OP/USDT", "SHORT", "-3.01%", "Dip Takip"),
-                _row("ARB/USDT", "SHORT", "-2.78%", "Dip Takip"),
-                ft.Divider(height=10, color="#1B2435"),
-                ft.Text(
-                    "Tümünü Görüntüle",
-                    color="#C5CDD8",
-                    text_align=ft.TextAlign.CENTER,
-                ),
+                *body,
             ],
         ),
     )

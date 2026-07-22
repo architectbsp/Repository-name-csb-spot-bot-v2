@@ -10,6 +10,26 @@ class PositionState(StrEnum):
     CLOSED = "CLOSED"
 
 
+class CloseReason(StrEnum):
+    """
+    Every full (or documented partial) exit must record one of these.
+
+    Prompt / production set:
+      STOP_LOSS, TRAILING_STOP, PARTIAL_TP, MANUAL, EMERGENCY, MAX_DAILY_LOSS
+    Plus stage-aware extras used by this bot:
+      BREAK_EVEN_STOP, MAX_DURATION
+    """
+
+    STOP_LOSS = "STOP_LOSS"
+    BREAK_EVEN_STOP = "BREAK_EVEN_STOP"
+    TRAILING_STOP = "TRAILING_STOP"
+    PARTIAL_TP = "PARTIAL_TP"
+    MANUAL = "MANUAL"
+    EMERGENCY = "EMERGENCY"
+    MAX_DURATION = "MAX_DURATION"
+    MAX_DAILY_LOSS = "MAX_DAILY_LOSS"
+
+
 @dataclass(slots=True)
 class Position:
     symbol: str
@@ -38,6 +58,6 @@ class Position:
     partial_exits_taken: int = 0
     # Which stop is currently active: "HARD" (the original fixed stop),
     # "BREAK_EVEN" (moved to entry price) or "TRAILING" (following the
-    # highest price). Drives the close_reason recorded when the stop
-    # actually triggers, instead of always logging a generic "STOP_LOSS".
+    # highest price). Drives the CloseReason recorded when the stop
+    # actually triggers.
     stop_stage: str = "HARD"

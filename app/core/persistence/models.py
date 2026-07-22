@@ -39,6 +39,14 @@ class SettingsEntity(Base):
     max_daily_loss_percent: Mapped[float] = mapped_column(Float, nullable=False)
     max_balance_utilization_percent: Mapped[float] = mapped_column(Float, nullable=False)
     max_volume_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    # Sprint 8 -- Advanced Position Sizing. Defaults keep existing DBs
+    # upgradeable via sync_schema() without wiping the settings row.
+    position_sizing_mode: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    risk_per_trade_percent: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    atr_period: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    atr_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
+    volatility_target_percent: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
+    volatility_lookback: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
     partial_tp_activation_percent: Mapped[float] = mapped_column(Float, nullable=False)
     partial_tp_sell_percent: Mapped[float] = mapped_column(Float, nullable=False)
 
@@ -51,9 +59,23 @@ class SettingsEntity(Base):
 class PositionEntity(Base):
     __tablename__ = "positions"
 
+    # Sprint 18: composite identity so the same symbol can be open on
+    # two exchanges at once (`BINANCE:BTC/USDT`). `symbol` alone is no
+    # longer unique across venues.
+    position_key: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+    )
+
     symbol: Mapped[str] = mapped_column(
         String(30),
-        primary_key=True,
+        nullable=False,
+    )
+
+    exchange: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="UNKNOWN",
     )
 
     entry_price: Mapped[float] = mapped_column(

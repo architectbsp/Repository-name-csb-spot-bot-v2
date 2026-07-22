@@ -1,5 +1,8 @@
 import flet as ft
 
+from app.core.domain.dashboard import CooldownRow, DashboardSnapshot
+from app.ui.formatting import duration_hms, hhmmss
+
 
 def _row(symbol, stop_time, remaining):
     return ft.Row(
@@ -12,7 +15,22 @@ def _row(symbol, stop_time, remaining):
     )
 
 
-def build_cooldown():
+def build_cooldown(snapshot: DashboardSnapshot | None = None):
+    rows: list[CooldownRow] = list(snapshot.cooldowns) if snapshot else []
+    count = str(len(rows))
+    body = (
+        [
+            _row(
+                r.symbol,
+                hhmmss(r.cooldown_until),
+                duration_hms(r.remaining_seconds),
+            )
+            for r in rows[:8]
+        ]
+        if rows
+        else [ft.Text("Cooldown yok", color="#64748B", size=12)]
+    )
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -36,20 +54,10 @@ def build_cooldown():
                             size=15,
                             weight=ft.FontWeight.BOLD,
                         ),
-                        ft.Text("6", color="#C5CDD8"),
+                        ft.Text(count, color="#C5CDD8"),
                     ],
                 ),
-                _row("AAVE/USDT", "08:45:12", "11:32:41"),
-                _row("APE/USDT", "07:22:18", "10:09:47"),
-                _row("BLUR/USDT", "06:35:05", "09:22:34"),
-                _row("SAND/USDT", "05:12:44", "08:01:13"),
-                _row("MANA/USDT", "04:01:33", "06:49:02"),
-                ft.Divider(height=10, color="#1B2435"),
-                ft.Text(
-                    "Tümünü Görüntüle",
-                    color="#C5CDD8",
-                    text_align=ft.TextAlign.CENTER,
-                ),
+                *body,
             ],
         ),
     )

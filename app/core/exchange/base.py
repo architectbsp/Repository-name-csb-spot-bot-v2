@@ -115,6 +115,14 @@ class BaseExchange(ABC):
 
         return float(wallet.get("free", 0.0))
 
+    def fetch_base_balance(self, base: str) -> float:
+        """Free balance of a base asset (e.g. BTC from BTC/USDT)."""
+        balance = self.fetch_balance()
+        wallet = balance.get(base)
+        if wallet is None:
+            return 0.0
+        return float(wallet.get("free", 0.0))
+
     @abstractmethod
     def fetch_markets(self):
         ...

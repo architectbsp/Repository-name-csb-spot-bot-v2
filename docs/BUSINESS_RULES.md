@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.6
+Version: 3.1
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -32,8 +32,8 @@ Changelog (2.2 -> 2.3): added Position Lifecycle management (§8) --
 Partial Take Profit / Scale Out (configurable, disabled by default),
 Manual Close and Emergency Exit, all routed through the same
 OrderExecutionService pipeline as every other exit; close_reason is now
-stage-aware (HARD_STOP/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL_CLOSE/
-EMERGENCY_EXIT/MAX_DURATION) instead of a single generic "STOP_LOSS"
+stage-aware (STOP_LOSS/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL/
+EMERGENCY/MAX_DURATION) via the `CloseReason` enum
 label; `position.pnl` on a fully-closed position now reflects the total
 realized PnL across all partial exits plus the final exit, not just the
 last chunk; added a lightweight additive SQLite schema-sync so a
@@ -62,6 +62,38 @@ activation) / Trailing-shadow overlay levels and Entry/Exit point
 markers, sourced from the open Position or, once closed, the most
 recent Trade Journal entry for that symbol. Read-only, drawn with Flet's
 built-in canvas (no new charting dependency).
+
+Changelog (2.6 -> 2.7): replaced every hardcoded mock panel on the
+desktop dashboard with a live `DashboardSnapshot` (§8) rebuilt every
+~2s from BotEngine modules (positions, watch/cooldown, trade journal,
+daily PnL, quote balance, in-memory log tail). Ticker prices for the UI
+come from an in-memory cache fed by `ticker.updated` (plus the last
+MarketScanner result) -- the poll never REST-fetches every coin's price.
+
+Changelog (2.7 -> 2.8): advanced Position Sizing (§8) -- hybrid mode
+(default) takes the min of the existing balance/liquidity caps plus
+risk-based, ATR-based and volatility-based caps (editable from the
+Settings screen; falls back gracefully when OHLCV is unavailable).
+
+Changelog (2.8 -> 2.9): simultaneous multi-exchange (§10) -- Binance /
+Bybit / OKX / Kraken / MEXC may be connected at the same time via
+`EXCHANGES=...` (legacy `EXCHANGE=` still works). Each venue keeps its
+own API keys, balance, price stream, watch symbols and open positions.
+Market identity is `(exchange, symbol)` (`market_key`); a ticker from
+exchange A never sizes, opens or closes a position on exchange B.
+Daily-loss treasury and dashboard quote balance are the sum across
+enabled venues; position size still uses that venue's free balance only.
+
+Changelog (2.9 -> 3.0): Telegram notifications (§8) -- optional Bot API
+alerts for BUY / SELL / STOP / ERROR / API disconnect / internet
+disconnect plus daily and weekly PnL summaries. Secrets stay in env
+(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`); a Telegram outage must never
+block trading.
+
+Changelog (3.0 -> 3.1): database backend abstraction (§11) -- the same
+repository layer runs on SQLite (default), PostgreSQL or MariaDB/MySQL
+via `DATABASE_URL` or `DB_BACKEND` + `DB_*` env vars. Schema sync is
+dialect-aware; optional drivers live in `requirements-db.txt`.
 
 ---
 
@@ -398,8 +430,7 @@ IDLE
 ## Position Size - Dynamic Sizing & Liquidity Filter
 
 Position size is **not** a fixed percentage of the treasury. It is
-computed dynamically from two independent caps, and the **smaller** of
-the two is always used:
+always bounded by two hard safety caps, and the **smaller** is used:
 
 1. **Balance cap**: at most 99.5% of the available account balance may
    be committed to a single trade. The remaining 0.5% headroom exists so
@@ -410,18 +441,45 @@ the two is always used:
    order can never meaningfully move the market or fail to fill cleanly.
 
 ```
-position_size = min(balance * 99.5%, volume_24h * 0.1%)
+safety_size = min(balance * 99.5%, volume_24h * 0.1%)
 ```
 
 - **Small treasury scenario** (e.g. $1,000): the liquidity cap is
   typically far larger than the balance cap, so `min()` resolves to the
-  balance cap -> the bot commits 99.5% of the account to the single
-  trade.
+  balance cap.
 - **Large treasury scenario** (e.g. $100,000+): the liquidity cap is
-  typically smaller than the balance cap, so `min()` resolves to the
-  liquidity cap -> only the liquidity-safe amount is committed, and the
-  remaining balance stays free for other opportunities (automatic risk
-  distribution across positions).
+  typically smaller than the balance cap, so only the liquidity-safe
+  amount is committed (automatic risk distribution across positions).
+
+### Advanced Position Sizing (Risk / ATR / Volatility)
+
+`position_sizing_mode` (Settings screen):
+
+- **0 = Liquidity-only**: `position_size = safety_size` (legacy behaviour).
+- **1 = Hybrid** (default): also take the min of any advanced caps that
+  can be computed for the symbol. Missing OHLCV never blocks a trade --
+  those caps are skipped and sizing falls back to `safety_size` (plus
+  the risk-based cap, which needs no candles).
+
+Advanced caps (all use Decimal math; all are Settings-editable):
+
+1. **Risk-based**: size so a hard-stop hit loses at most
+   `risk_per_trade_percent` of the treasury:
+   `balance * risk_per_trade% / stop_loss%`.
+2. **ATR-based**: fetch 1h candles from the active exchange only
+   (isolation rule), compute ATR(`atr_period`), treat
+   `ATR * atr_multiplier` as the stop distance:
+   `balance * risk_per_trade% * price / (ATR * atr_multiplier)`.
+3. **Volatility-based**: scale the balance cap by
+   `volatility_target_percent / realized_vol%` (close-to-close sample
+   stdev over `volatility_lookback` returns), clamped to
+   `[0.25, 1.0]` so a quiet market never exceeds the balance cap and a
+   spike never shrinks size below a quarter of it. Set
+   `volatility_target_percent = 0` to disable this cap.
+
+```
+position_size = min(safety_size, risk_cap?, atr_cap?, vol_cap?)
+```
 
 ---
 
@@ -497,13 +555,18 @@ guarantees:
 - **Retry policy**: only transient network errors and insufficient-balance
   rejections are retried (see "Insufficient Balance" above for the exact
   numbers); any other exchange rejection (invalid order, generic exchange
-  error) is never retried.
+  error) is never retried. Waits use exponential backoff
+  (`delay * 2^(attempt-1)`, capped) for submit and cancel retries.
 - **Timeout**: the blocking exchange call is bounded; a call that never
   returns cannot hang the bot forever.
-- **Pending order reconciliation**: market orders are expected to fill
-  immediately. If the exchange instead reports one as still open, it is
-  polled a bounded number of times, then cancellation is attempted (with
-  its own retries) before giving up.
+- **Pending order timeout**: open/limit-style orders are polled for ~30s
+  (configurable via `pending_timeout_seconds`), then cancellation is
+  attempted (with its own retries) before giving up / quarantining.
+- **Balance reconciliation** (`PositionReconciler`): on a scheduler
+  interval, each OPEN local position's quantity is compared to the
+  exchange free base-asset balance. A clear shortfall publishes
+  `position.reconcile_mismatch` + `order.needs_manual_review` and
+  quarantines that market (Unknown Order / DB drift).
 - **Unknown order status handling**: a status this module does not
   recognize as filled/open/terminal is never guessed at (never silently
   treated as filled or as safe to ignore).
@@ -535,19 +598,19 @@ reconciliation, quarantine) described above -- there is no separate
   loss/profit tracked for the circuit breaker.
 - **Manual Close** (`close_position_manually(symbol)`): an
   operator-initiated full close, independent of any price trigger.
-  Recorded with `close_reason="MANUAL_CLOSE"`.
+  Recorded with `close_reason="MANUAL"`.
 - **Emergency Exit** (`emergency_exit_all()`): force-closes every open
   position immediately regardless of price or state -- an operator
   "panic button" distinct from the daily loss breaker (which only
   blocks *new* entries; this actively exits existing ones). Recorded
-  with `close_reason="EMERGENCY_EXIT"`.
-- **Close reason is stop-stage-aware**: when the ordinary stop-loss
-  check closes a position, the recorded `close_reason` reflects which
-  stop was actually active at the time --
-  `HARD_STOP`/`BREAK_EVEN_STOP`/`TRAILING_STOP` -- instead of a single
-  generic `STOP_LOSS` string, so the Trade Journal (see below) can tell
-  these apart. The Maximum Position Duration force-close is recorded as
-  `MAX_DURATION`.
+  with `close_reason="EMERGENCY"`. UI: Open Positions → Emergency Exit.
+- **Close reason (`CloseReason` enum)**: every exit records one of
+  `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` / `PARTIAL_TP` /
+  `MANUAL` / `EMERGENCY` / `MAX_DURATION` / `MAX_DAILY_LOSS`. Hard stop
+  uses `STOP_LOSS` (stage-aware extras distinguish break-even / trailing).
+  `MAX_DAILY_LOSS` is reserved for a future force-close path; today the
+  daily-loss breaker only blocks *new* entries. Maximum Position Duration
+  force-close is recorded as `MAX_DURATION`.
 
 ---
 
@@ -627,6 +690,40 @@ external charting/plotting dependency was added, consistent with the
 minimal pinned-dependency policy (§10/B29). Clicking a coin row in the
 coin table or an open-position card opens this chart in a modal dialog.
 
+## Live Dashboard
+
+`DashboardService` (`app/core/services/dashboard_service.py`) assembles
+a single read-only `DashboardSnapshot` for the Flet UI. Panels never
+poke PositionManager / WatchList / RiskManager directly -- they only
+render this DTO.
+
+Snapshot contents:
+
+- **Account / top bar**: enabled exchange name(s), testnet vs live,
+  summed quote balance across venues, bot running flag, API connection
+  status (`ConnectionStatus.CONNECTED` on any enabled exchange).
+- **Cards**: portfolio balance, signed daily realized PnL % (from
+  RiskManager's UTC day-start balance + realized PnL today), open
+  position count, active watch-signal count.
+- **Coin table / open positions**: watch-list coins + open positions,
+  enriched with last-known ticker (raw price string preferred, §9).
+  Unrealized PnL % = `(last - entry) / entry * 100`. Spot side is
+  always LONG.
+- **Watch list / cooldown**: coins in `WATCH_FALLING` /
+  `WATCH_RISING` / `BUY_PENDING`, and coins in `COOLDOWN` with
+  remaining time.
+- **Trade history / 24h report**: closed Trade Journal entries
+  (history panel) and a 24-hour window aggregate (wins/losses/net PnL).
+- **Live log**: tail of an in-memory ring buffer (`MemoryLogHandler`)
+  attached to the root logger -- no disk re-read on every poll.
+
+Refresh model: a background Flet `page.run_thread` poll (~2s) rebuilds
+the Dashboard view while the user is on that screen. High-frequency
+`ticker.updated` events only update the DashboardService ticker cache
+(never mutate UI controls from the WebSocket thread). Quote balance is
+the only REST call on a poll tick and is best-effort (failures leave
+the previous/None value).
+
 ---
 
 # 9. Precision & Data Integrity
@@ -691,7 +788,8 @@ coin table or an open-position card opens this chart in a modal dialog.
 
 ## Multi Exchange Support
 
-The architecture must support multiple exchanges.
+The architecture must support multiple exchanges connected
+**simultaneously** (Sprint 18).
 
 Supported exchanges for MVP architecture:
 
@@ -701,7 +799,56 @@ Supported exchanges for MVP architecture:
 - Kraken
 - MEXC
 
-Only one exchange connection is active at a time.
+Configuration:
+
+- Preferred: `EXCHANGES=binance,bybit,okx` plus per-venue credentials
+  (`BINANCE_API_KEY` / `BINANCE_API_SECRET`, `BYBIT_...`,
+  `OKX_...` + `OKX_PASSPHRASE`, …).
+- Legacy single-exchange: `EXCHANGE=binance` + `EXCHANGE_API_KEY` /
+  `EXCHANGE_API_SECRET` (still supported when `EXCHANGES` is unset).
+
+Isolation rules (non-negotiable):
+
+- Every market-facing key is `(exchange, symbol)` via `market_key`
+  (WatchList, PositionManager, OrderExecution quarantine, dashboard
+  ticker cache, persisted `positions.position_key`).
+- Price ticks, OHLCV candles and order placement for a symbol on
+  exchange A must never act on the same symbol on exchange B.
+- Each venue has its own WebSocket price stream subscription list.
+- Position size is computed from **that venue's** free quote balance;
+  the daily-loss circuit breaker uses the **sum** of free quote
+  balances across every enabled venue as the shared treasury snapshot.
+- `max_open_positions` remains a global cap across all venues (one
+  strategy, one risk budget).
+
+---
+
+## Telegram Notifications
+
+`TelegramNotifier` (`app/core/services/telegram_notifier.py`) is an
+optional, read-only operator channel. It never places orders and never
+mutates Position / Risk / WatchList state. Send failures are logged and
+ignored so a Telegram outage cannot interrupt trading.
+
+Configuration (environment only -- never stored in SQLite):
+
+- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (required to enable)
+- `TELEGRAM_ENABLED` (optional explicit on/off; defaults to on when both
+  credentials are present)
+- `TELEGRAM_DAILY_SUMMARY_HOUR` (UTC hour, default `0`)
+- `TELEGRAM_WEEKLY_SUMMARY_WEEKDAY` (Monday=0 … Sunday=6, default `0`)
+
+Alert types:
+
+| Event | Source |
+|---|---|
+| **BUY** | `position.opened` after a filled market buy |
+| **SELL** | `position.closed` / `position.partial_exit` (non-stop reasons) |
+| **STOP** | `position.closed` with `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` |
+| **ERROR** | `order.needs_manual_review`, `risk.daily_loss_limit` |
+| **API Disconnect** | websocket close/error or exchange `ConnectionStatus` flip |
+| **Internet Disconnect** | periodic probe of `api.telegram.org` (state-change only) |
+| **Daily / Weekly Summary** | closed-trade PnL window from Trade Journal |
 
 ---
 
@@ -716,8 +863,9 @@ Only one exchange connection is active at a time.
   profit activation/sell %) may be hardcoded in source.
 - Every such parameter is defined once in `SETTINGS_SCHEMA`
   (`app/core/config/settings_store.py`), editable from the Settings
-  screen, and persisted to SQLite (`bot_settings` table) so it survives
-  restarts.
+  screen, and persisted to the configured database (`bot_settings`
+  table -- SQLite by default, optionally PostgreSQL or MariaDB) so it
+  survives restarts.
 - Saving a change from the Settings screen applies it to the running bot
   immediately -- Strategy, WatchList, RiskManager and MarketScanner all
   read the shared, mutable configuration object fresh on every use, so
@@ -725,9 +873,32 @@ Only one exchange connection is active at a time.
 
 ---
 
+## Database Backend
+
+Persistence is accessed only through repository protocols
+(`SettingsRepository`, `PositionRepository`, `TradeJournalRepository`).
+Callers must not open raw SQL connections or branch on dialect.
+
+Supported backends (Sprint 13):
+
+| Backend | How to select |
+|---|---|
+| **SQLite** (default) | unset / `DB_BACKEND=sqlite` / `DB_PATH=...` |
+| **PostgreSQL** | `DB_BACKEND=postgresql` + `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, or a full `DATABASE_URL` |
+| **MariaDB / MySQL** | `DB_BACKEND=mariadb` (or `mysql`) + the same `DB_*` fields, or `DATABASE_URL` |
+
+`DATABASE_URL` always wins when set. Optional drivers:
+`pip install -r requirements-db.txt` (`psycopg`, `PyMySQL`). Schema
+evolution uses the dialect-aware `sync_schema()` helper (no Alembic).
+
+---
+
 ## Internet Connection
 
 - If the internet connection is lost, the system retries every 10 seconds until connectivity is restored.
+- When Telegram is enabled, an internet / Telegram-API outage also emits a
+  one-shot **INTERNET DISCONNECT** alert (and a reconnect alert when the
+  probe succeeds again). Trading continues independently of Telegram.
 
 ---
 

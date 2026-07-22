@@ -35,23 +35,29 @@ class ExchangeManager:
     def enabled(self) -> list[BaseExchange]:
         return self._registry.enabled()
 
-    def active_exchange_type(self) -> ExchangeType:
+    def enabled_exchange_types(self) -> list[ExchangeType]:
         """
-        Returns the single currently-enabled exchange type.
-
-        Per docs/BUSINESS_RULES.md §10, only one exchange connection is
-        active at a time. Every caller that needs "the exchange we are
-        trading on right now" (MarketScanner, WatchList's price-stream
-        sync, BotEngine's price-stream start/stop) must resolve it through
-        this single method instead of hardcoding an exchange, so no code
-        path can ever mix data between exchanges.
+        Sprint 18 -- every currently-enabled exchange type, in registry
+        order. Prefer this over active_exchange_type() whenever the
+        caller can (and should) operate on all venues.
         """
         enabled = self._registry.enabled()
 
         if not enabled:
             raise RuntimeError("No enabled exchange is registered.")
 
-        return enabled[0].state.exchange
+        return [exchange.state.exchange for exchange in enabled]
+
+    def active_exchange_type(self) -> ExchangeType:
+        """
+        Back-compat shim: returns the first enabled exchange type.
+
+        Sprint 18 allows multiple simultaneous connections -- new code
+        should call enabled_exchange_types() and iterate. This method
+        remains for single-exchange call sites (charts opened without a
+        row-level exchange, legacy tests).
+        """
+        return self.enabled_exchange_types()[0]
 
     def get_price_stream(
         self,
@@ -131,6 +137,13 @@ class ExchangeManager:
         ).fetch_quote_balance(
             quote,
         )
+
+    def get_base_balance(
+        self,
+        exchange_type: ExchangeType,
+        base: str,
+    ) -> float:
+        return self._get_exchange(exchange_type).fetch_base_balance(base)
 
     def place_market_buy(
         self,

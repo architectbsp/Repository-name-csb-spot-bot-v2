@@ -7,6 +7,7 @@ from app.core.watch_list import WatchList
 from app.core.risk_manager import RiskManager
 from app.core.strategy import Strategy
 
+from app.core.config.config_manager import CONFIG_UPDATED_EVENT, ConfigManager
 from app.core.config.settings import AppSettings
 from app.core.config.settings_store import SettingsStore
 from app.core.event_bus.event_bus import EventBus
@@ -16,12 +17,16 @@ from app.core.timeout.timeout import Timeout
 from app.core.rate_limiter.rate_limiter import RateLimiter
 from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
-from app.core.exchange.factory import create_exchange
+from app.core.exchange.factory import create_exchanges
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.services.chart_service import ChartService
+from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.performance_analytics import PerformanceAnalytics
+from app.core.services.position_reconciler import PositionReconciler
+from app.core.services.telegram_client import TelegramClient
+from app.core.services.telegram_notifier import TelegramNotifier
 from app.core.services.trade_journal import TradeJournal
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
@@ -49,11 +54,22 @@ class BotEngine:
         self.settings_store.load_into(self.config)
 
         self.event_bus = EventBus()
+
+        # ConfigManager singleton: Settings UI + EventBus `config.updated`
+        # for runtime reload (Strategy / Scanner / RiskManager observers).
+        self.config_manager = ConfigManager.instance()
+        self.config_manager.configure(
+            self.config,
+            self.settings_store,
+            self.event_bus,
+        )
         self.scheduler = Scheduler()
         self.worker = Worker(self.scheduler)
         self.retry_policy = RetryPolicy(
             self.config.retry_policy.max_attempts,
             self.config.retry_policy.delay,
+            backoff_factor=2.0,
+            max_delay=300.0,
         )
         self.timeout = Timeout(
             self.config.timeout.seconds,
@@ -68,19 +84,16 @@ class BotEngine:
         self.stopwatch = Stopwatch()
         self.exchange_registry = ExchangeRegistry()
 
-        # Only one exchange connection is active at a time
-        # (docs/BUSINESS_RULES.md §10). Which exchange class gets
-        # instantiated is decided entirely by the EXCHANGE environment
-        # variable via create_exchange() -- nothing else in this class may
-        # hardcode a specific exchange, so WatchList/Strategy/RiskManager
-        # and the price stream always operate on exactly the exchange the
-        # operator configured.
-        active_exchange = create_exchange(self.config.exchange)
-
-        self.exchange_registry.register(
-            active_exchange.state.exchange,
-            active_exchange,
-        )
+        # Sprint 18 (docs/BUSINESS_RULES.md §10): one or many exchanges
+        # may be connected at once (EXCHANGES=binance,bybit,... or legacy
+        # EXCHANGE=...). Each keeps its own credentials, balance, stream
+        # and market state -- WatchList/Strategy/RiskManager always act
+        # on the ticker's own venue (isolation rule).
+        for exchange in create_exchanges():
+            self.exchange_registry.register(
+                exchange.state.exchange,
+                exchange,
+            )
 
         self.exchange = ExchangeManager(self.exchange_registry)
         self.order_validator = OrderValidator(self.exchange)
@@ -160,17 +173,66 @@ class BotEngine:
 
         self.watch_list.set_strategy(self.strategy)
 
-    def start_price_stream(self) -> None:
-        self.exchange.start_price_stream(
-            self.exchange.active_exchange_type(),
-            self.watch_list.get_symbols(),
-            self.event_bus.publish,
+        # Sprint 12 -- Live Dashboard: read-only snapshot aggregator the
+        # Flet UI polls every couple of seconds. Also caches ticker.updated
+        # so panels never REST-fetch prices on each refresh. Wired after
+        # risk_manager/strategy so every dependency is already constructed.
+        self.dashboard_service = DashboardService()
+        self.dashboard_service.set_exchange_manager(self.exchange)
+        self.dashboard_service.set_position_manager(self.position_manager)
+        self.dashboard_service.set_watch_list(self.watch_list)
+        self.dashboard_service.set_trade_journal(self.trade_journal)
+        self.dashboard_service.set_risk_manager(self.risk_manager)
+        self.dashboard_service.set_market_scanner(self.market_scanner)
+        self.dashboard_service.set_config(self.config)
+        self.dashboard_service.set_bot_running_fn(lambda: self.running)
+
+        # Sprint 11 -- Telegram: opt-in via TELEGRAM_BOT_TOKEN +
+        # TELEGRAM_CHAT_ID. Notifier only sends; trading paths never
+        # depend on Telegram being reachable.
+        self.telegram_client = TelegramClient(
+            self.config.telegram.bot_token,
+            self.config.telegram.chat_id,
         )
+        self.telegram_notifier = TelegramNotifier(self.telegram_client)
+        self.telegram_notifier.set_config(self.config)
+        self.telegram_notifier.set_event_bus(self.event_bus)
+        self.telegram_notifier.set_scheduler(self.scheduler)
+        self.telegram_notifier.set_exchange_manager(self.exchange)
+        self.telegram_notifier.set_trade_journal(self.trade_journal)
+        self.telegram_notifier.set_risk_manager(self.risk_manager)
+        self.telegram_notifier.set_position_manager(self.position_manager)
+
+        # Balance ↔ local OPEN positions sync (Unknown Order / DB drift).
+        self.position_reconciler = PositionReconciler()
+        self.position_reconciler.set_exchange_manager(self.exchange)
+        self.position_reconciler.set_position_manager(self.position_manager)
+        self.position_reconciler.set_event_bus(self.event_bus)
+        self.position_reconciler.set_scheduler(self.scheduler)
+
+    def start_price_stream(self) -> None:
+        # Per-venue streams only (isolation): never subscribe exchange A's
+        # symbols on exchange B's websocket.
+        grouped = self.watch_list.symbols_by_exchange()
+        if grouped:
+            for exchange_type, symbols in grouped.items():
+                self.exchange.start_price_stream(
+                    exchange_type,
+                    symbols,
+                    self.event_bus.publish,
+                )
+            return
+
+        for exchange_type in self.exchange.enabled_exchange_types():
+            self.exchange.start_price_stream(
+                exchange_type,
+                [],
+                self.event_bus.publish,
+            )
 
     def stop_price_stream(self) -> None:
-        self.exchange.stop_price_stream(
-            self.exchange.active_exchange_type(),
-        )
+        for exchange_type in self.exchange.enabled_exchange_types():
+            self.exchange.stop_price_stream(exchange_type)
 
     def initialize(self):
         for module in (
@@ -197,6 +259,11 @@ class BotEngine:
         )
 
         self.event_bus.subscribe(
+            "ticker.updated",
+            self.dashboard_service.on_ticker_updated,
+        )
+
+        self.event_bus.subscribe(
             "position.closed",
             self.watch_list.handle_position_closed,
         )
@@ -206,12 +273,35 @@ class BotEngine:
             self.position_manager.handle_position_closed,
         )
 
+        # ConfigUpdatedEvent: modules already share live AppSettings;
+        # handlers refresh anything that was snapshotted at initialize
+        # (e.g. scanner job interval).
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.strategy.on_config_updated,
+        )
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.market_scanner.on_config_updated,
+        )
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.risk_manager.on_config_updated,
+        )
+
+        # OrderExecution is built lazily; attach it before reconciler init.
+        self.position_reconciler.set_order_execution(
+            self.risk_manager.order_execution,
+        )
+
         for module in (
             self.market_scanner,
             self.watch_list,
             self.position_manager,
             self.risk_manager,
             self.strategy,
+            self.telegram_notifier,
+            self.position_reconciler,
         ):
             module.initialize()
 
@@ -220,6 +310,8 @@ class BotEngine:
 
     def shutdown(self):
         for module in (
+            self.position_reconciler,
+            self.telegram_notifier,
             self.market_scanner,
             self.watch_list,
             self.position_manager,
@@ -237,6 +329,8 @@ class BotEngine:
             self.position_manager,
             self.risk_manager,
             self.strategy,
+            self.telegram_notifier,
+            self.position_reconciler,
         ):
             module.start()
 
@@ -258,6 +352,8 @@ class BotEngine:
         self.running = False
 
         for module in (
+            self.position_reconciler,
+            self.telegram_notifier,
             self.market_scanner,
             self.watch_list,
             self.position_manager,

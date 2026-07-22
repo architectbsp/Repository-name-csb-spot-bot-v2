@@ -45,8 +45,9 @@ class SettingField:
 #     by trailing_activation_percent below, so there is exactly one knob
 #     and it can never drift out of sync with itself.
 #   - "capital %": replaced by dynamic liquidity-based sizing (§8); the
-#     two knobs that now control position sizing are
-#     max_balance_utilization_percent and max_volume_share_percent below.
+#     knobs that now control position sizing are
+#     max_balance_utilization_percent, max_volume_share_percent and the
+#     Sprint 8 advanced sizing fields (risk_per_trade / ATR / volatility).
 #   - "take profit activation": there is no separate fixed take-profit
 #     target -- profit is realized via the trailing stop reversal, whose
 #     activation is trailing_activation_percent.
@@ -64,6 +65,42 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     SettingField("risk", "max_daily_loss_percent", "Günlük Maks. Zarar Limiti", float, 1.0, 100.0),
     SettingField("risk", "max_balance_utilization_percent", "Maks. Bakiye Kullanımı", float, 1.0, 100.0),
     SettingField("risk", "max_volume_share_percent", "Maks. 24s Hacim Payı", float, 0.001, 100.0),
+    SettingField(
+        "risk",
+        "position_sizing_mode",
+        "Pozisyon Boyutu Modu (0=Likidite, 1=Hibrit Risk/ATR/Vol)",
+        int,
+        0,
+        1,
+        unit="",
+    ),
+    SettingField(
+        "risk",
+        "risk_per_trade_percent",
+        "İşlem Başına Risk (Risk-Based / ATR)",
+        float,
+        0.1,
+        20.0,
+    ),
+    SettingField("risk", "atr_period", "ATR Periyodu", int, 2, 100, unit="mum"),
+    SettingField("risk", "atr_multiplier", "ATR Stop Çarpanı", float, 0.5, 10.0, unit="x"),
+    SettingField(
+        "risk",
+        "volatility_target_percent",
+        "Hedef Volatilite (0 = kapalı)",
+        float,
+        0.0,
+        50.0,
+    ),
+    SettingField(
+        "risk",
+        "volatility_lookback",
+        "Volatilite Lookback",
+        int,
+        5,
+        200,
+        unit="mum",
+    ),
     SettingField("risk", "partial_tp_activation_percent", "Kısmi Kar Alma Eşiği (0 = kapalı)", float, 0.0, 90.0),
     SettingField("risk", "partial_tp_sell_percent", "Kısmi Kar Alma Satış Oranı", float, 1.0, 99.0),
 )

@@ -60,7 +60,7 @@ class ChartService:
             limit=limit,
         ))
 
-        position = self._open_position(symbol)
+        position = self._open_position(symbol, exchange_type)
 
         if position is not None:
             self._apply_open_position(chart, position)
@@ -101,11 +101,18 @@ class ChartService:
             )
             return []
 
-    def _open_position(self, symbol: str) -> Position | None:
+    def _open_position(
+        self,
+        symbol: str,
+        exchange_type: ExchangeType | None = None,
+    ) -> Position | None:
         if self._position_manager is None:
             return None
 
-        position = self._position_manager.get(symbol)
+        position = self._position_manager.get(
+            symbol,
+            exchange=exchange_type,
+        )
 
         if position is None or position.state != PositionState.OPEN:
             return None

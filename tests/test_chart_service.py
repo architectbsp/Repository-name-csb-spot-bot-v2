@@ -33,7 +33,7 @@ class DummyPositionManager:
     def __init__(self, positions=None):
         self._positions = positions or {}
 
-    def get(self, symbol):
+    def get(self, symbol, exchange=None):
         return self._positions.get(symbol)
 
 

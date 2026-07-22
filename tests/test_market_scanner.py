@@ -65,48 +65,57 @@ def test_filter_symbols_logs_instead_of_printing(capsys, caplog):
 
 
 class DummyExchangeManager:
-    """Records which exchange type get_tickers() was called with, so we
-    can prove fetch_symbols() never hardcodes an exchange (isolated data
-    flow, docs/BUSINESS_RULES.md §9)."""
+    """Records which exchange types get_tickers() was called with so we
+    can prove Sprint 18 scans every enabled venue (isolation rule --
+    docs/BUSINESS_RULES.md §10)."""
 
-    def __init__(self, active_type):
-        self._active_type = active_type
+    def __init__(self, enabled_types):
+        self._enabled_types = list(enabled_types)
         self.get_tickers_calls = []
 
+    def enabled_exchange_types(self):
+        return list(self._enabled_types)
+
     def active_exchange_type(self):
-        return self._active_type
+        return self._enabled_types[0]
 
     def get_tickers(self, exchange_type):
         self.get_tickers_calls.append(exchange_type)
-        return ["ticker-1", "ticker-2"]
+        return [f"ticker-{exchange_type.name}"]
 
 
-def test_fetch_symbols_uses_the_active_exchange_dynamically():
+def test_fetch_symbols_scans_every_enabled_exchange():
     scanner = MarketScanner()
     scanner.set_config(make_config())
 
-    exchange_manager = DummyExchangeManager(ExchangeType.BYBIT)
+    exchange_manager = DummyExchangeManager(
+        [ExchangeType.BINANCE, ExchangeType.BYBIT]
+    )
     scanner.set_exchange(exchange_manager)
 
     result = scanner.fetch_symbols()
 
-    assert result == ["ticker-1", "ticker-2"]
-    assert exchange_manager.get_tickers_calls == [ExchangeType.BYBIT]
+    assert result == ["ticker-BINANCE", "ticker-BYBIT"]
+    assert exchange_manager.get_tickers_calls == [
+        ExchangeType.BINANCE,
+        ExchangeType.BYBIT,
+    ]
 
 
-def test_fetch_symbols_follows_active_exchange_when_it_changes():
+def test_fetch_symbols_follows_enabled_set_when_it_changes():
     scanner = MarketScanner()
     scanner.set_config(make_config())
 
-    exchange_manager = DummyExchangeManager(ExchangeType.OKX)
+    exchange_manager = DummyExchangeManager([ExchangeType.OKX])
     scanner.set_exchange(exchange_manager)
 
     scanner.fetch_symbols()
 
-    exchange_manager._active_type = ExchangeType.KRAKEN
+    exchange_manager._enabled_types = [ExchangeType.KRAKEN, ExchangeType.MEXC]
     scanner.fetch_symbols()
 
     assert exchange_manager.get_tickers_calls == [
         ExchangeType.OKX,
         ExchangeType.KRAKEN,
+        ExchangeType.MEXC,
     ]

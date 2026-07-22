@@ -1,16 +1,21 @@
 import json
 from datetime import UTC, datetime
 
-from app.core.persistence.models import PositionEntity, TradeJournalEntity
 from app.core.domain.position import Position
 from app.core.domain.trade_journal import TradeJournalEntry
+from app.core.exchange.market_key import market_key, try_parse_exchange_type
+from app.core.persistence.models import PositionEntity, TradeJournalEntity
 
 
 def to_entity(position: Position) -> PositionEntity:
     now = datetime.now(UTC)
+    exchange = position.exchange
+    key = market_key(exchange, position.symbol)
 
     return PositionEntity(
+        position_key=key,
         symbol=position.symbol,
+        exchange=key.split(":", 1)[0],
         entry_price=position.entry_price,
         quantity=position.quantity,
         stop_price=position.stop_price,
@@ -24,6 +29,10 @@ def to_entity(position: Position) -> PositionEntity:
 
 
 def to_domain(entity: PositionEntity) -> Position:
+    exchange = try_parse_exchange_type(
+        getattr(entity, "exchange", None)
+    )
+
     return Position(
         symbol=entity.symbol,
         entry_price=entity.entry_price,
@@ -34,6 +43,7 @@ def to_domain(entity: PositionEntity) -> Position:
         realized_pnl=entity.realized_pnl,
         partial_exits_taken=entity.partial_exits_taken,
         stop_stage=entity.stop_stage,
+        exchange=exchange,
     )
 
 

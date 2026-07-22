@@ -108,6 +108,14 @@ class BinancePriceStream(PriceStream):
     def _on_open(self, ws):
         self._connected.set()
         logger.info("Binance websocket connected")
+        if self._callback:
+            self._callback(
+                "exchange.connected",
+                {
+                    "stream": "BinancePriceStream",
+                    "exchange": "BINANCE",
+                },
+            )
         if not self._symbols:
             return
 
@@ -169,6 +177,15 @@ class BinancePriceStream(PriceStream):
     ):
         self._connected.clear()
         logger.exception("Binance websocket error: %s", error)
+        if self._callback:
+            self._callback(
+                "exchange.disconnected",
+                {
+                    "stream": "BinancePriceStream",
+                    "exchange": "BINANCE",
+                    "error": str(error),
+                },
+            )
 
     def _on_close(
         self,
@@ -182,6 +199,15 @@ class BinancePriceStream(PriceStream):
             code,
             msg,
         )
+        if self._callback:
+            self._callback(
+                "exchange.disconnected",
+                {
+                    "stream": "BinancePriceStream",
+                    "exchange": "BINANCE",
+                    "detail": f"closed ({code}): {msg}",
+                },
+            )
 
     def _on_ping(
         self,

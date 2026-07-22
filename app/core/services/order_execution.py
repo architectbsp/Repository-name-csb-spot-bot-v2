@@ -91,14 +91,22 @@ class OrderExecutionService:
         retry_policy=None,
         timeout=None,
         pending_poll_interval: float = 1.0,
-        pending_poll_attempts: int = 5,
+        # ~30s pending window by default (prompt: pending order timeout).
+        pending_poll_attempts: int = 30,
         cancel_retry_attempts: int = 3,
+        pending_timeout_seconds: float | None = None,
     ) -> None:
         self._exchange_manager = exchange_manager
         self._retry_policy = retry_policy
         self._timeout = timeout
         self._pending_poll_interval = pending_poll_interval
-        self._pending_poll_attempts = pending_poll_attempts
+        if pending_timeout_seconds is not None and pending_poll_interval > 0:
+            self._pending_poll_attempts = max(
+                1,
+                int(pending_timeout_seconds / pending_poll_interval),
+            )
+        else:
+            self._pending_poll_attempts = pending_poll_attempts
         self._cancel_retry_attempts = cancel_retry_attempts
 
         self._lock = threading.Lock()
@@ -127,6 +135,10 @@ class OrderExecutionService:
                 return True
             return False
 
+    def quarantine(self, market: str) -> None:
+        """Public quarantine entry used by PositionReconciler."""
+        self._quarantine(market)
+
     def _begin(self, symbol: str) -> ExecutionOutcome | None:
         with self._lock:
             if symbol in self._quarantined:
@@ -152,15 +164,21 @@ class OrderExecutionService:
         in the returned ExecutionResult so callers can react without
         their own try/except around the exchange call.
         """
-        symbol = trade.symbol
+        # Sprint 18: quarantine / in-flight keys are per (exchange, symbol)
+        # so a Binance BTC order never blocks the same symbol on Bybit.
+        from app.core.exchange.market_key import market_key
 
-        blocked = self._begin(symbol)
+        symbol = trade.symbol
+        flight_key = market_key(exchange_type, symbol)
+
+        blocked = self._begin(flight_key)
 
         if blocked is not None:
             logger.warning(
                 "[EXEC] Order rejected before reaching the exchange: "
-                "symbol=%s reason=%s",
+                "symbol=%s exchange=%s reason=%s",
                 symbol,
+                flight_key.split(":", 1)[0],
                 blocked,
             )
             return ExecutionResult(outcome=blocked)
@@ -172,19 +190,19 @@ class OrderExecutionService:
                 ExecutionOutcome.UNRECONCILED,
                 ExecutionOutcome.UNKNOWN_STATUS,
             ):
-                self._quarantine(symbol)
+                self._quarantine(flight_key)
                 logger.critical(
                     "[EXEC] %s is now QUARANTINED (outcome=%s) -- no "
-                    "further orders for this symbol will be submitted "
+                    "further orders for this market will be submitted "
                     "until an operator calls clear_quarantine() after "
                     "verifying the real exchange state by hand.",
-                    symbol,
+                    flight_key,
                     result.outcome,
                 )
 
             return result
         finally:
-            self._end(symbol)
+            self._end(flight_key)
 
     # docs/BUSINESS_RULES.md §8 "Insufficient Balance": retry after 1
     # minute, max 3 times, then abandon the signal -- this uses the same
@@ -209,7 +227,6 @@ class OrderExecutionService:
         max_attempts = (
             self._retry_policy.max_attempts() if self._retry_policy is not None else 1
         )
-        delay = self._retry_policy.delay() if self._retry_policy is not None else 0
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -219,9 +236,14 @@ class OrderExecutionService:
             except self._RETRIABLE_EXCEPTIONS as exc:
                 if attempt >= max_attempts:
                     raise
+                delay = (
+                    self._retry_policy.delay_for_attempt(attempt)
+                    if self._retry_policy is not None
+                    else 0
+                )
                 logger.warning(
                     "[EXEC] Retriable error on attempt %d/%d, retrying "
-                    "in %.0fs: %s",
+                    "in %.1fs (exponential backoff): %s",
                     attempt,
                     max_attempts,
                     delay,
@@ -379,7 +401,6 @@ class OrderExecutionService:
     def _cancel_with_retry(self, exchange_type, trade, result) -> ExecutionResult:
         order_id = getattr(result, "order_id", None)
         symbol = trade.symbol
-        delay = self._retry_policy.delay() if self._retry_policy is not None else 1.0
 
         for attempt in range(1, self._cancel_retry_attempts + 1):
             try:
@@ -393,14 +414,20 @@ class OrderExecutionService:
                     outcome=ExecutionOutcome.TIMED_OUT, order_result=result
                 )
             except Exception as exc:
+                delay = (
+                    self._retry_policy.delay_for_attempt(attempt)
+                    if self._retry_policy is not None
+                    else min(8.0, 1.0 * (2 ** (attempt - 1)))
+                )
                 logger.error(
                     "[EXEC] Cancel attempt %d/%d failed symbol=%s "
-                    "order_id=%s error=%s",
+                    "order_id=%s error=%s -- backoff %.1fs",
                     attempt,
                     self._cancel_retry_attempts,
                     symbol,
                     order_id,
                     exc,
+                    delay,
                 )
                 if attempt < self._cancel_retry_attempts and delay > 0:
                     time.sleep(delay)

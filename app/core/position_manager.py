@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from app.core.domain.position import Position, PositionState
+from app.core.exchange.market_key import market_key
 from app.core.persistence.mapper import to_entity
 
 
@@ -9,6 +10,8 @@ MAX_OPEN_POSITIONS = 10  # docs/BUSINESS_RULES.md §3/§8: max 10 simultaneous p
 
 class PositionManager:
     def __init__(self) -> None:
+        # Sprint 18: keyed by market_key(exchange, symbol) so the same
+        # coin can be open on two venues without colliding.
         self._positions: dict[str, Position] = {}
         self._repository = None
         self._initialized = False
@@ -33,55 +36,80 @@ class PositionManager:
     def stop(self) -> None:
         self._running = False
 
+    def _key_for(self, position: Position) -> str:
+        return market_key(position.exchange, position.symbol)
+
+    def _resolve_key(self, symbol: str, exchange=None) -> str | None:
+        if exchange is not None:
+            return market_key(exchange, symbol)
+
+        if symbol in self._positions:
+            return symbol
+
+        matches = [
+            key
+            for key, position in self._positions.items()
+            if position.symbol == symbol
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     def add(self, position: Position) -> bool:
-        if position.symbol in self._positions:
+        key = self._key_for(position)
+
+        if key in self._positions:
             return False
 
         if len(self._positions) >= MAX_OPEN_POSITIONS:
             return False
 
-        self._positions[position.symbol] = position
+        self._positions[key] = position
 
         if self._repository is not None:
-            self._repository.save(
-                to_entity(position),
-            )
+            self._repository.save(to_entity(position))
 
         return True
 
     def restore(self, position: Position) -> bool:
-        if position.symbol in self._positions:
+        key = self._key_for(position)
+
+        if key in self._positions:
             return False
 
         if len(self._positions) >= MAX_OPEN_POSITIONS:
             return False
 
-        self._positions[position.symbol] = position
+        self._positions[key] = position
         return True
 
-    def get(self, symbol: str) -> Position | None:
-        return self._positions.get(symbol)
+    def get(self, symbol: str, exchange=None) -> Position | None:
+        key = self._resolve_key(symbol, exchange)
+        if key is None:
+            return None
+        return self._positions.get(key)
 
-    def contains(self, symbol: str) -> bool:
-        return symbol in self._positions
+    def contains(self, symbol: str, exchange=None) -> bool:
+        return self._resolve_key(symbol, exchange) is not None
 
-    def remove(self, symbol: str) -> bool:
-        if symbol not in self._positions:
+    def remove(self, symbol: str, exchange=None) -> bool:
+        key = self._resolve_key(symbol, exchange)
+        if key is None or key not in self._positions:
             return False
 
-        del self._positions[symbol]
+        del self._positions[key]
 
         if self._repository is not None:
-            self._repository.delete(symbol)
+            self._repository.delete(key)
 
         return True
 
-
-    def handle_position_closed(
-        self,
-        event: dict,
-    ) -> None:
-        self.remove(event["symbol"])
+    def handle_position_closed(self, event: dict) -> None:
+        exchange = event.get("exchange")
+        position = event.get("position")
+        if exchange is None and position is not None:
+            exchange = getattr(position, "exchange", None)
+        self.remove(event["symbol"], exchange=exchange)
 
     def close(
         self,
@@ -89,9 +117,13 @@ class PositionManager:
         *,
         exit_price: float | None = None,
         reason: str | None = None,
+        exchange=None,
     ) -> bool:
-        position = self._positions.get(symbol)
+        key = self._resolve_key(symbol, exchange)
+        if key is None:
+            return False
 
+        position = self._positions.get(key)
         if position is None:
             return False
 
@@ -101,14 +133,6 @@ class PositionManager:
         position.close_reason = reason
 
         if exit_price is not None:
-            # Sprint 3: position.pnl is the TOTAL realized PnL for the
-            # whole trade, including any earlier partial scale-out(s)
-            # (position.realized_pnl) plus the PnL from closing out
-            # whatever quantity remains right now. This is what a Trade
-            # Journal / dashboard should show as "how much did this
-            # trade make" -- RiskManager tracks the daily-loss-limit
-            # increment separately so a partial exit's PnL is never
-            # double-counted there.
             final_chunk_pnl = (
                 exit_price - position.entry_price
             ) * position.quantity
@@ -121,9 +145,7 @@ class PositionManager:
             ) * 100
 
         if self._repository is not None:
-            self._repository.save(
-                to_entity(position),
-            )
+            self._repository.save(to_entity(position))
 
         return True
 
@@ -134,22 +156,13 @@ class PositionManager:
         sell_quantity: float,
         exit_price: float,
         reason: str = "PARTIAL_TP",
+        exchange=None,
     ) -> float | None:
-        """
-        Sprint 3 -- Scale Out / Partial Take Profit: sells off part of an
-        open position without closing it. Reduces `quantity`, banks the
-        realized PnL from the sold slice into `realized_pnl` (kept
-        separate from `pnl`, which is only ever set when the position
-        fully closes), and leaves the position OPEN with the remaining
-        quantity so stop/trailing/break-even logic keeps managing it.
+        key = self._resolve_key(symbol, exchange)
+        if key is None:
+            return None
 
-        Returns the realized PnL from this scale-out, or None if the
-        position doesn't exist, isn't open, or `sell_quantity` is not
-        strictly between 0 and the position's current quantity (selling
-        the entire remaining quantity must go through close() instead,
-        so a position is never left open with 0 quantity).
-        """
-        position = self._positions.get(symbol)
+        position = self._positions.get(key)
 
         if position is None or position.state != PositionState.OPEN:
             return None
@@ -164,14 +177,12 @@ class PositionManager:
         position.partial_exits_taken += 1
 
         if self._repository is not None:
-            self._repository.save(
-                to_entity(position),
-            )
+            self._repository.save(to_entity(position))
 
         return realized
 
-    def is_open(self, symbol: str) -> bool:
-        position = self._positions.get(symbol)
+    def is_open(self, symbol: str, exchange=None) -> bool:
+        position = self.get(symbol, exchange=exchange)
 
         if position is None:
             return False

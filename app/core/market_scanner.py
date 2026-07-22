@@ -104,6 +104,26 @@ class MarketScanner:
     def get_config(self):
         return self._config
 
+    def on_config_updated(self, event) -> None:
+        """Apply a new scan_interval_seconds to the scheduled job without
+        restarting the bot (ConfigUpdatedEvent / ConfigManager.save)."""
+        if self._config is None or self._scheduler is None:
+            return
+        if not self._scheduler.has_job("market_scanner"):
+            return
+        job = self._scheduler.get("market_scanner")
+        if job is None:
+            return
+        new_interval = float(self._config.strategy.scan_interval_seconds)
+        if job.interval == new_interval:
+            return
+        job.interval = new_interval
+        self._scheduler.schedule(job)
+        logger.info(
+            "[Scanner] scan_interval updated to %ss via config.updated",
+            new_interval,
+        )
+
     def initialize(self) -> None:
         if self.is_initialized():
             return
@@ -204,13 +224,21 @@ class MarketScanner:
 
     def fetch_symbols(self):
         def operation():
-            # Isolated data flow (docs/BUSINESS_RULES.md §10): always scan
-            # the currently active exchange, never a hardcoded one, so
-            # watch-list/strategy calculations can never be seeded with
-            # another exchange's ticker data.
-            return self._exchange.get_tickers(
-                self._exchange.active_exchange_type(),
-            )
+            # Sprint 18: scan every enabled venue. Each NormalizedTicker
+            # carries its own ExchangeType so WatchList/Strategy never
+            # mix prices across venues (docs/BUSINESS_RULES.md §10).
+            tickers = []
+            for exchange_type in self._exchange.enabled_exchange_types():
+                try:
+                    tickers.extend(
+                        self._exchange.get_tickers(exchange_type)
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Scanner] get_tickers failed for %s",
+                        exchange_type,
+                    )
+            return tickers
 
         if self.has_rate_limiter():
             operation = self._rate_limiter.wrap(operation)

@@ -1,5 +1,7 @@
 import flet as ft
 
+from app.core.domain.dashboard import DashboardSnapshot, LogRow
+
 
 def _log(time, level, text):
     colors = {
@@ -21,12 +23,20 @@ def _log(time, level, text):
                 weight=ft.FontWeight.BOLD,
                 color=colors.get(level, "#FFFFFF"),
             ),
-            ft.Text(text, expand=True, size=12, color="white"),
+            ft.Text(text, expand=True, size=12, color="white", no_wrap=True),
         ],
     )
 
 
-def build_bot_log():
+def build_bot_log(snapshot: DashboardSnapshot | None = None):
+    rows: list[LogRow] = list(snapshot.logs) if snapshot else []
+    # Newest at the bottom of the ring buffer -- show newest last (tail).
+    body = (
+        [_log(r.time_display, r.level, r.message) for r in rows[-12:]]
+        if rows
+        else [ft.Text("Henüz log yok", color="#64748B", size=12)]
+    )
+
     return ft.Container(
         expand=True,
         bgcolor="#0B1220",
@@ -40,6 +50,7 @@ def build_bot_log():
         padding=15,
         content=ft.Column(
             spacing=10,
+            scroll=ft.ScrollMode.AUTO,
             controls=[
                 ft.Text(
                     "CANLI LOG",
@@ -47,13 +58,7 @@ def build_bot_log():
                     size=15,
                     weight=ft.FontWeight.BOLD,
                 ),
-                _log("10:15:30", "INFO", "İnternet bağlantısı kontrol edildi: Bağlı"),
-                _log("10:15:25", "TRADE", "BTC/USDT - Trailing stop güncellendi"),
-                _log("10:15:20", "INFO", "Piyasa verileri güncellendi"),
-                _log("10:15:15", "TRADE", "SOL/USDT giriş sinyali algılandı"),
-                _log("10:15:10", "API", "Bybit ticker verileri alındı"),
-                _log("10:15:05", "TRADE", "ETH/USDT take profit gerçekleşti"),
-                _log("10:15:00", "INFO", "Bot döngüsü tamamlandı"),
+                *body,
             ],
         ),
     )
