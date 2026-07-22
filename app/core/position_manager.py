@@ -101,9 +101,19 @@ class PositionManager:
         position.close_reason = reason
 
         if exit_price is not None:
-            position.pnl = (
+            # Sprint 3: position.pnl is the TOTAL realized PnL for the
+            # whole trade, including any earlier partial scale-out(s)
+            # (position.realized_pnl) plus the PnL from closing out
+            # whatever quantity remains right now. This is what a Trade
+            # Journal / dashboard should show as "how much did this
+            # trade make" -- RiskManager tracks the daily-loss-limit
+            # increment separately so a partial exit's PnL is never
+            # double-counted there.
+            final_chunk_pnl = (
                 exit_price - position.entry_price
             ) * position.quantity
+
+            position.pnl = position.realized_pnl + final_chunk_pnl
 
             position.pnl_percent = (
                 (exit_price - position.entry_price)
@@ -116,6 +126,49 @@ class PositionManager:
             )
 
         return True
+
+    def scale_out(
+        self,
+        symbol: str,
+        *,
+        sell_quantity: float,
+        exit_price: float,
+        reason: str = "PARTIAL_TP",
+    ) -> float | None:
+        """
+        Sprint 3 -- Scale Out / Partial Take Profit: sells off part of an
+        open position without closing it. Reduces `quantity`, banks the
+        realized PnL from the sold slice into `realized_pnl` (kept
+        separate from `pnl`, which is only ever set when the position
+        fully closes), and leaves the position OPEN with the remaining
+        quantity so stop/trailing/break-even logic keeps managing it.
+
+        Returns the realized PnL from this scale-out, or None if the
+        position doesn't exist, isn't open, or `sell_quantity` is not
+        strictly between 0 and the position's current quantity (selling
+        the entire remaining quantity must go through close() instead,
+        so a position is never left open with 0 quantity).
+        """
+        position = self._positions.get(symbol)
+
+        if position is None or position.state != PositionState.OPEN:
+            return None
+
+        if sell_quantity <= 0 or sell_quantity >= position.quantity:
+            return None
+
+        realized = (exit_price - position.entry_price) * sell_quantity
+
+        position.quantity -= sell_quantity
+        position.realized_pnl += realized
+        position.partial_exits_taken += 1
+
+        if self._repository is not None:
+            self._repository.save(
+                to_entity(position),
+            )
+
+        return realized
 
     def is_open(self, symbol: str) -> bool:
         position = self._positions.get(symbol)

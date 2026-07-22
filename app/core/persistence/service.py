@@ -1,16 +1,18 @@
 from sqlalchemy.orm import Session
 
 from app.core.domain.position import Position
-from app.core.persistence.database import Base
 from app.core.persistence.database import SessionLocal
 from app.core.persistence.database import engine
 from app.core.persistence.mapper import to_domain
+from app.core.persistence.migrations import sync_schema
 from app.core.persistence.repository import PositionRepository, SettingsRepository
 
 
 class PersistenceService:
     def __init__(self) -> None:
-        Base.metadata.create_all(bind=engine)
+        # Creates missing tables AND adds missing columns to tables from
+        # an older schema version -- see migrations.py docstring.
+        sync_schema(engine)
 
     def create_session(self) -> Session:
         return SessionLocal()

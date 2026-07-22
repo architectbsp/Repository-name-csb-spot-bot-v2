@@ -15,6 +15,9 @@ def to_entity(position: Position) -> PositionEntity:
         highest_price=position.highest_price,
         opened_at=position.opened_at,
         updated_at=now,
+        realized_pnl=position.realized_pnl,
+        partial_exits_taken=position.partial_exits_taken,
+        stop_stage=position.stop_stage,
     )
 
 
@@ -26,4 +29,7 @@ def to_domain(entity: PositionEntity) -> Position:
         opened_at=entity.opened_at,
         stop_price=entity.stop_price,
         highest_price=entity.highest_price,
+        realized_pnl=entity.realized_pnl,
+        partial_exits_taken=entity.partial_exits_taken,
+        stop_stage=entity.stop_stage,
     )

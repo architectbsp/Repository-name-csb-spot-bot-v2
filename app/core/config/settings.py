@@ -28,6 +28,15 @@ class RiskSettings:
     # BUSINESS_RULES.md §8: "callback rate" -- trail 2.5% below the peak.
     trailing_percent: float = 2.5
 
+    # Sprint 3 -- Scale Out / Partial Take Profit (docs/BUSINESS_RULES.md
+    # §8 Order Execution Safety / Position Lifecycle): once unrealized
+    # profit reaches this threshold, sell partial_tp_sell_percent% of the
+    # position and keep managing the remainder normally. 0 (or below)
+    # disables the feature entirely -- the existing single-exit behavior
+    # is preserved unless an operator explicitly turns this on.
+    partial_tp_activation_percent: float = 0.0
+    partial_tp_sell_percent: float = 50.0
+
     # BUSINESS_RULES.md §8 Position Size: dynamic liquidity-based sizing.
     # Never commit more than 99.5% of the balance to a single trade
     # (headroom for commission/slippage).

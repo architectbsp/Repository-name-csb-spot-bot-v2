@@ -38,6 +38,8 @@ class SettingsEntity(Base):
     max_daily_loss_percent: Mapped[float] = mapped_column(Float, nullable=False)
     max_balance_utilization_percent: Mapped[float] = mapped_column(Float, nullable=False)
     max_volume_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    partial_tp_activation_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    partial_tp_sell_percent: Mapped[float] = mapped_column(Float, nullable=False)
 
     updated_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
@@ -81,4 +83,23 @@ class PositionEntity(Base):
     updated_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
+    )
+
+    # Sprint 3 -- Scale Out / Partial Take Profit / accurate close reason.
+    realized_pnl: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    partial_exits_taken: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    stop_stage: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="HARD",
     )

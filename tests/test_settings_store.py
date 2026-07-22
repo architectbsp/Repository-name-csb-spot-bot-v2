@@ -137,4 +137,6 @@ def test_schema_covers_every_field_the_user_requested():
         "max_volume_share_percent",
         "max_position_hours",
         "max_daily_loss_percent",
+        "partial_tp_activation_percent",
+        "partial_tp_sell_percent",
     }

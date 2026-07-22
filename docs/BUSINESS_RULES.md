@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 2.2
+Version: 2.3
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -27,6 +27,18 @@ reconciliation (poll -> cancel-with-retry), unknown-status handling and
 symbol quarantine. Previously RiskManager called the exchange directly
 with none of these protections, even though RetryPolicy/Timeout were
 already wired in and unused.
+
+Changelog (2.2 -> 2.3): added Position Lifecycle management (§8) --
+Partial Take Profit / Scale Out (configurable, disabled by default),
+Manual Close and Emergency Exit, all routed through the same
+OrderExecutionService pipeline as every other exit; close_reason is now
+stage-aware (HARD_STOP/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL_CLOSE/
+EMERGENCY_EXIT/MAX_DURATION) instead of a single generic "STOP_LOSS"
+label; `position.pnl` on a fully-closed position now reflects the total
+realized PnL across all partial exits plus the final exit, not just the
+last chunk; added a lightweight additive SQLite schema-sync so a
+database from a previous version never breaks the app on startup when a
+Sprint adds a new persisted column.
 
 ---
 
@@ -479,6 +491,43 @@ guarantees:
 
 ---
 
+## Position Lifecycle (Partial TP / Manual Close / Emergency Exit)
+
+A position is no longer only ever fully opened once and fully closed
+once. Three additional lifecycle actions exist, all implemented on
+`RiskManager` and all routed through the exact same
+`OrderExecutionService` pipeline (duplicate protection, retry, timeout,
+reconciliation, quarantine) described above -- there is no separate
+"shortcut" order path for any of them:
+
+- **Partial Take Profit / Scale Out** (`check_partial_take_profit`,
+  called on every price tick alongside break-even/trailing/stop-loss):
+  once unrealized profit reaches the configurable
+  `partial_tp_activation_percent` (0 = disabled, the default), sells
+  `partial_tp_sell_percent`% of the position and leaves the remainder
+  open under the exact same stop/break-even/trailing management as
+  before. Fires at most once per position (`partial_exits_taken`
+  guards this). The realized PnL from the partial sell is banked on the
+  position (`realized_pnl`) and immediately counted against the daily
+  loss/profit tracked for the circuit breaker.
+- **Manual Close** (`close_position_manually(symbol)`): an
+  operator-initiated full close, independent of any price trigger.
+  Recorded with `close_reason="MANUAL_CLOSE"`.
+- **Emergency Exit** (`emergency_exit_all()`): force-closes every open
+  position immediately regardless of price or state -- an operator
+  "panic button" distinct from the daily loss breaker (which only
+  blocks *new* entries; this actively exits existing ones). Recorded
+  with `close_reason="EMERGENCY_EXIT"`.
+- **Close reason is stop-stage-aware**: when the ordinary stop-loss
+  check closes a position, the recorded `close_reason` reflects which
+  stop was actually active at the time --
+  `HARD_STOP`/`BREAK_EVEN_STOP`/`TRAILING_STOP` -- instead of a single
+  generic `STOP_LOSS` string, so a future Trade Journal (Sprint 5) can
+  tell these apart. The Maximum Position Duration force-close is
+  recorded as `MAX_DURATION`.
+
+---
+
 # 9. Precision & Data Integrity
 
 ## Reading and Displaying Exchange Data
@@ -562,8 +611,8 @@ Only one exchange connection is active at a time.
 - No strategy or risk parameter referenced anywhere in this document
   (watch %, entry %, stop loss, break-even/trailing activation, trailing
   %, cooldown, max open positions, scan interval, min volume, dynamic
-  sizing caps, max position duration, daily loss limit) may be hardcoded
-  in source.
+  sizing caps, max position duration, daily loss limit, partial take-
+  profit activation/sell %) may be hardcoded in source.
 - Every such parameter is defined once in `SETTINGS_SCHEMA`
   (`app/core/config/settings_store.py`), editable from the Settings
   screen, and persisted to SQLite (`bot_settings` table) so it survives
@@ -630,6 +679,14 @@ The following behaviors are not allowed:
 - Treating an unrecognized order status as filled or as safe to ignore.
 - Submitting a new order for a quarantined symbol without an operator
   first clearing the quarantine.
+- Sending a manual close, emergency exit, or partial take-profit order
+  through any path other than `OrderExecutionService` (e.g. calling the
+  exchange manager directly, bypassing retry/reconciliation/quarantine).
+- Firing automatic partial take-profit more than once for the same
+  position.
+- Scale Out reducing a position's quantity to zero (or below) while
+  leaving it marked OPEN -- selling the entire remaining quantity must
+  go through a full `close()`, never `scale_out()`.
 
 ---
 

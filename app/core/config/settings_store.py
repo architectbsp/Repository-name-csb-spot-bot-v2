@@ -64,6 +64,8 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     SettingField("risk", "max_daily_loss_percent", "Günlük Maks. Zarar Limiti", float, 1.0, 100.0),
     SettingField("risk", "max_balance_utilization_percent", "Maks. Bakiye Kullanımı", float, 1.0, 100.0),
     SettingField("risk", "max_volume_share_percent", "Maks. 24s Hacim Payı", float, 0.001, 100.0),
+    SettingField("risk", "partial_tp_activation_percent", "Kısmi Kar Alma Eşiği (0 = kapalı)", float, 0.0, 90.0),
+    SettingField("risk", "partial_tp_sell_percent", "Kısmi Kar Alma Satış Oranı", float, 1.0, 99.0),
 )
 
 _SCHEMA_BY_NAME: dict[str, SettingField] = {field.name: field for field in SETTINGS_SCHEMA}

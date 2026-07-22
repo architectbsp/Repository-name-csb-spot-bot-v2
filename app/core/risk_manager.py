@@ -16,6 +16,16 @@ _DAILY_RESET_CHECK_INTERVAL_SECONDS = 60
 _MAX_DURATION_JOB_NAME = "risk_manager_max_duration_check"
 _MAX_DURATION_CHECK_INTERVAL_SECONDS = 60
 
+# Sprint 3: which close_reason to record depending on which stop level
+# actually triggered, instead of a single generic "STOP_LOSS" label that
+# couldn't distinguish a hard-stop crash from a break-even or trailing
+# exit (needed for an accurate Trade Journal down the line).
+_STOP_STAGE_CLOSE_REASONS = {
+    "HARD": "HARD_STOP",
+    "BREAK_EVEN": "BREAK_EVEN_STOP",
+    "TRAILING": "TRAILING_STOP",
+}
+
 
 def _raw_price(ticker, fallback: float) -> str:
     """
@@ -551,9 +561,119 @@ class RiskManager:
         position,
         ticker,
     ) -> None:
+        self.check_partial_take_profit(position, ticker)
         self.check_break_even(position, ticker)
         self.check_trailing(position, ticker)
         self.check_stop_loss(position, ticker)
+
+    def check_partial_take_profit(self, position, ticker) -> None:
+        """
+        Sprint 3 -- Scale Out / Partial Take Profit: once unrealized
+        profit reaches `risk.partial_tp_activation_percent`, sells
+        `risk.partial_tp_sell_percent`% of the position and keeps
+        managing the remainder normally (stop/break-even/trailing keep
+        operating on the reduced quantity). Disabled by default
+        (activation <= 0); fires at most once per position.
+        """
+        activation = self._risk.partial_tp_activation_percent
+
+        if activation <= 0:
+            return
+
+        if getattr(position, "partial_exits_taken", 0) > 0:
+            return
+
+        if position.state.name != "OPEN":
+            return
+
+        profit = (
+            (ticker.last_price - position.entry_price) / position.entry_price
+        ) * 100
+
+        if profit < activation:
+            return
+
+        sell_percent = self._risk.partial_tp_sell_percent
+        sell_quantity = position.quantity * (sell_percent / 100)
+
+        if sell_quantity <= 0 or sell_quantity >= position.quantity:
+            return
+
+        trade = TradeRequest(
+            symbol=position.symbol,
+            quantity=Decimal(str(sell_quantity)),
+            side=TradeSide.SELL,
+        )
+
+        logger.info(
+            "[PARTIAL TP] symbol=%s profit=%.2f%% selling=%.8f (%.0f%% of "
+            "position)",
+            position.symbol,
+            profit,
+            sell_quantity,
+            sell_percent,
+        )
+
+        execution = self._get_order_execution().execute(ticker.exchange, trade)
+
+        self._publish_execution_alert(
+            symbol=position.symbol, side="SELL", execution=execution
+        )
+
+        if not execution.is_filled or execution.order_result is None:
+            logger.warning(
+                "[PARTIAL TP] Scale-out not filled for %s (outcome=%s "
+                "error=%s)",
+                position.symbol,
+                execution.outcome,
+                execution.error,
+            )
+            return
+
+        result = execution.order_result
+        exit_price = result.average_price or ticker.last_price
+        filled_quantity = result.filled_quantity or sell_quantity
+
+        realized = self._position_manager.scale_out(
+            position.symbol,
+            sell_quantity=filled_quantity,
+            exit_price=exit_price,
+            reason="PARTIAL_TP",
+        )
+
+        if realized is None:
+            logger.error(
+                "[PARTIAL TP] scale_out() rejected the fill for %s -- "
+                "position left unchanged",
+                position.symbol,
+            )
+            return
+
+        # docs/BUSINESS_RULES.md §8 Daily Loss Limit: this partial exit's
+        # PnL is realized right now, independent of whatever happens to
+        # the remainder later.
+        self._record_realized_pnl(realized)
+
+        logger.info(
+            "[PARTIAL TP] symbol=%s sold=%.8f exit=%.8f realized_pnl=%.8f "
+            "remaining_qty=%.8f",
+            position.symbol,
+            filled_quantity,
+            exit_price,
+            realized,
+            position.quantity,
+        )
+
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                "position.partial_exit",
+                {
+                    "symbol": position.symbol,
+                    "quantity": filled_quantity,
+                    "exit_price": exit_price,
+                    "realized_pnl": realized,
+                },
+            )
 
     def check_stop_loss(self, position, ticker) -> None:
         if position.stop_price is None:
@@ -579,12 +699,111 @@ class RiskManager:
             position.stop_price,
         )
 
+        stage = getattr(position, "stop_stage", "HARD")
+        reason = _STOP_STAGE_CLOSE_REASONS.get(stage, "STOP_LOSS")
+
         self._close_position_with_market_sell(
             position,
             exchange_type=ticker.exchange,
             fallback_price=last_price,
-            reason="STOP_LOSS",
+            reason=reason,
         )
+
+    def close_position_manually(self, symbol: str) -> bool:
+        """
+        Sprint 3 -- Manual Close: an operator-initiated exit, independent
+        of any price/stop/duration trigger. Goes through the exact same
+        OrderExecutionService pipeline (duplicate protection, retry,
+        reconciliation) as every other exit path -- there is no
+        "shortcut" order path anywhere in this class.
+
+        Returns True if the position ends up CLOSED, False if it didn't
+        exist, wasn't open, had no recorded exchange, or the sell could
+        not be confirmed filled (in which case it remains OPEN and the
+        operator can try again).
+        """
+        if self._position_manager is None:
+            return False
+
+        position = self._position_manager.get(symbol)
+
+        if position is None or position.state.name != "OPEN":
+            return False
+
+        exchange_type = position.exchange
+
+        if exchange_type is None:
+            logger.error(
+                "[MANUAL CLOSE] %s has no recorded exchange; refusing to "
+                "guess which exchange to sell on",
+                symbol,
+            )
+            return False
+
+        logger.warning("[MANUAL CLOSE] Operator requested close for %s", symbol)
+
+        self._close_position_with_market_sell(
+            position,
+            exchange_type=exchange_type,
+            fallback_price=position.entry_price,
+            reason="MANUAL_CLOSE",
+        )
+
+        return not self._position_manager.is_open(symbol)
+
+    def emergency_exit_all(self) -> int:
+        """
+        Sprint 3 -- Emergency Exit: force-closes every open position
+        immediately, regardless of price, stop level or state -- an
+        operator "panic button" for going fully flat (e.g. ahead of
+        maintenance, a black-swan event, or a manual risk decision this
+        bot's own logic wouldn't otherwise make). Unlike the daily-loss
+        circuit breaker (which only stops *new* trades from being
+        opened), this actively exits every existing one.
+
+        Returns how many positions were actually confirmed closed.
+        """
+        if self._position_manager is None:
+            return 0
+
+        open_positions = list(self._position_manager.get_open_positions())
+
+        logger.critical(
+            "[EMERGENCY EXIT] Operator triggered emergency exit for %d "
+            "open position(s)",
+            len(open_positions),
+        )
+
+        closed = 0
+
+        for position in open_positions:
+            exchange_type = position.exchange
+
+            if exchange_type is None:
+                logger.error(
+                    "[EMERGENCY EXIT] %s has no recorded exchange; "
+                    "skipping",
+                    position.symbol,
+                )
+                continue
+
+            self._close_position_with_market_sell(
+                position,
+                exchange_type=exchange_type,
+                fallback_price=position.entry_price,
+                reason="EMERGENCY_EXIT",
+            )
+
+            if not self._position_manager.is_open(position.symbol):
+                closed += 1
+
+        logger.critical(
+            "[EMERGENCY EXIT] Closed %d/%d open position(s)",
+            closed,
+            len(open_positions),
+        )
+
+        return closed
 
     def _check_max_duration_positions(self) -> None:
         """
@@ -698,18 +917,22 @@ class RiskManager:
         if exit_price is None or exit_price <= 0:
             exit_price = fallback_price
 
+        # docs/BUSINESS_RULES.md §8 Daily Loss Limit: computed from the
+        # quantity/entry_price *before* close() runs, i.e. only the PnL
+        # from whatever is being closed right now. Any earlier partial
+        # scale-out's PnL (Sprint 3) was already recorded via
+        # _record_realized_pnl at the time it happened, so re-reading
+        # position.pnl after close() (which now includes that earlier
+        # amount too) would double-count it.
+        final_chunk_pnl = (exit_price - position.entry_price) * position.quantity
+
         self._position_manager.close(
             position.symbol,
             exit_price=exit_price,
             reason=reason,
         )
 
-        # docs/BUSINESS_RULES.md §8 Daily Loss Limit: only *realized* PnL
-        # counts towards the daily circuit breaker.
-        realized_pnl = getattr(position, "pnl", None)
-
-        if realized_pnl is not None:
-            self._record_realized_pnl(realized_pnl)
+        self._record_realized_pnl(final_chunk_pnl)
 
         if self._event_bus is not None:
             self._event_bus.publish(
@@ -737,11 +960,13 @@ class RiskManager:
 
         if position.stop_price is None:
             position.stop_price = position.entry_price
+            position.stop_stage = "BREAK_EVEN"
             logger.debug("[BREAK-EVEN] Activated for %s", position.symbol)
             return
 
         if position.stop_price < position.entry_price:
             position.stop_price = position.entry_price
+            position.stop_stage = "BREAK_EVEN"
             logger.debug("[BREAK-EVEN] Updated for %s", position.symbol)
 
     def check_trailing(self, position, ticker) -> None:
@@ -776,4 +1001,5 @@ class RiskManager:
             or trailing_stop > position.stop_price
         ):
             position.stop_price = trailing_stop
+            position.stop_stage = "TRAILING"
             logger.debug("[TRAILING] Updated for %s to %.8f", position.symbol, trailing_stop)

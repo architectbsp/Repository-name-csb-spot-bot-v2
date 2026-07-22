@@ -28,3 +28,16 @@ class Position:
     # §9 isolated data flow). Used to guard against ever acting on a
     # position using price ticks from a different exchange.
     exchange: ExchangeType | None = None
+    # Sprint 3 -- Scale Out / Partial Take Profit: PnL already banked
+    # from partial exits while the position is still OPEN (separate from
+    # `pnl`, which is only set once the position fully closes).
+    realized_pnl: float = 0.0
+    # How many partial scale-out sells have already been executed for
+    # this position. Used to make sure automatic partial take-profit
+    # only fires once per position.
+    partial_exits_taken: int = 0
+    # Which stop is currently active: "HARD" (the original fixed stop),
+    # "BREAK_EVEN" (moved to entry price) or "TRAILING" (following the
+    # highest price). Drives the close_reason recorded when the stop
+    # actually triggers, instead of always logging a generic "STOP_LOSS".
+    stop_stage: str = "HARD"

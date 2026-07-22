@@ -2,12 +2,20 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+from app.core.domain.position import Position, PositionState
 from app.core.exchange.models import OrderResult
+from app.core.position_manager import PositionManager
 from app.core.risk_manager import RiskManager
 from app.core.trading.models import TradeSide
 
 
-def make_config(max_open_positions=3, stop_loss_percent=5.0, max_position_hours=24):
+def make_config(
+    max_open_positions=3,
+    stop_loss_percent=5.0,
+    max_position_hours=24,
+    partial_tp_activation_percent=0.0,
+    partial_tp_sell_percent=50.0,
+):
     return SimpleNamespace(
         risk=SimpleNamespace(
             max_daily_loss_percent=5,
@@ -17,6 +25,8 @@ def make_config(max_open_positions=3, stop_loss_percent=5.0, max_position_hours=
             trailing_percent=5.0,
             max_balance_utilization_percent=99.5,
             max_volume_share_percent=0.1,
+            partial_tp_activation_percent=partial_tp_activation_percent,
+            partial_tp_sell_percent=partial_tp_sell_percent,
         ),
         strategy=SimpleNamespace(
             max_position_hours=max_position_hours,
@@ -426,7 +436,7 @@ def test_on_price_tick_processes_ticks_from_the_same_exchange():
     # Same exchange as the position -> the stop-loss sell should execute.
     assert len(exchange_manager.executed_trades) == 1
     assert exchange_manager.executed_trades[0][0] == "BYBIT"
-    assert positions.closed == [("BTCUSDT", 100.0, "STOP_LOSS")]
+    assert positions.closed == [("BTCUSDT", 100.0, "HARD_STOP")]
     # The realized loss (100 - 100) * 1 = 0 here since the mocked fill
     # price is 100; see test_check_stop_loss_records_realized_pnl below
     # for a case with an actual loss recorded.
@@ -633,3 +643,163 @@ def test_check_break_even_and_trailing_share_the_same_activation_threshold():
 
     rm.check_trailing(position, ticker_at_activation)
     assert position.highest_price == 110.0
+
+
+class ScaleOutExchangeManager(DummyExchangeManager):
+    """Like DummyExchangeManager, but the SELL fill price is configurable
+    (the base dummy hardcodes average_price=100.0, which makes it
+    impossible to assert a non-zero realized PnL)."""
+
+    def __init__(self, exit_price, **kwargs):
+        super().__init__(**kwargs)
+        self._exit_price = exit_price
+
+    def execute_trade(self, exchange_type, trade):
+        self.executed_trades.append((exchange_type, trade))
+        filled_quantity = float(trade.quantity)
+
+        return OrderResult(
+            order_id="order-1",
+            symbol=trade.symbol,
+            side="SELL",
+            status="CLOSED",
+            requested_quantity=filled_quantity,
+            filled_quantity=filled_quantity,
+            average_price=self._exit_price,
+            cost=filled_quantity * self._exit_price,
+            raw={},
+        )
+
+
+def make_open_position(symbol="BTCUSDT", entry_price=100.0, quantity=10.0, exchange="BINANCE"):
+    return Position(
+        symbol=symbol,
+        entry_price=entry_price,
+        quantity=quantity,
+        opened_at=datetime.now(UTC),
+        stop_price=entry_price * 0.9,
+        exchange=exchange,
+    )
+
+
+def test_check_partial_take_profit_sells_configured_percent_and_keeps_remainder_open():
+    rm = RiskManager()
+    rm.set_config(
+        make_config(partial_tp_activation_percent=5.0, partial_tp_sell_percent=50.0)
+    )
+
+    exchange_manager = ScaleOutExchangeManager(exit_price=110.0, balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+    rm.set_order_validator(DummyOrderValidator())
+
+    position_manager = PositionManager()
+    position = make_open_position()
+    position_manager.add(position)
+    rm.set_position_manager(position_manager)
+
+    ticker = SimpleNamespace(symbol="BTCUSDT", last_price=110.0, exchange="BINANCE")
+
+    rm.check_partial_take_profit(position, ticker)
+
+    assert position.quantity == 5.0
+    assert position.partial_exits_taken == 1
+    assert position.realized_pnl == (110.0 - 100.0) * 5.0
+    assert position.state == PositionState.OPEN
+    assert len(exchange_manager.executed_trades) == 1
+    assert exchange_manager.executed_trades[0][1].side == TradeSide.SELL
+
+    # Fires at most once per position -- a second tick above the
+    # threshold must be a no-op even though price is still elevated.
+    rm.check_partial_take_profit(position, ticker)
+    assert len(exchange_manager.executed_trades) == 1
+    assert position.quantity == 5.0
+
+
+def test_check_partial_take_profit_disabled_by_default():
+    rm = RiskManager()
+    rm.set_config(make_config())  # partial_tp_activation_percent=0.0 by default
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    position = make_open_position()
+    ticker = SimpleNamespace(symbol="BTCUSDT", last_price=200.0, exchange="BINANCE")
+
+    rm.check_partial_take_profit(position, ticker)
+
+    assert position.quantity == 10.0
+    assert position.partial_exits_taken == 0
+    assert exchange_manager.executed_trades == []
+
+
+def test_check_partial_take_profit_waits_for_activation_threshold():
+    rm = RiskManager()
+    rm.set_config(make_config(partial_tp_activation_percent=5.0))
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    position = make_open_position()
+    # Only +2% -- below the 5% activation threshold configured above.
+    ticker = SimpleNamespace(symbol="BTCUSDT", last_price=102.0, exchange="BINANCE")
+
+    rm.check_partial_take_profit(position, ticker)
+
+    assert position.quantity == 10.0
+    assert exchange_manager.executed_trades == []
+
+
+def test_close_position_manually_force_closes_via_market_sell():
+    rm = RiskManager()
+    rm.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    position_manager = PositionManager()
+    position_manager.add(make_open_position(quantity=1.0))
+    rm.set_position_manager(position_manager)
+
+    assert rm.close_position_manually("BTCUSDT") is True
+    assert not position_manager.is_open("BTCUSDT")
+    assert position_manager.get("BTCUSDT").close_reason == "MANUAL_CLOSE"
+    assert len(exchange_manager.executed_trades) == 1
+
+
+def test_close_position_manually_returns_false_for_unknown_symbol():
+    rm = RiskManager()
+    rm.set_config(make_config())
+    rm.set_position_manager(PositionManager())
+
+    assert rm.close_position_manually("NOPE") is False
+
+
+def test_emergency_exit_all_force_closes_every_open_position():
+    rm = RiskManager()
+    rm.set_config(make_config())
+
+    exchange_manager = DummyExchangeManager(balance=1000.0)
+    rm.set_exchange_manager(exchange_manager)
+
+    position_manager = PositionManager()
+    position_manager.add(make_open_position(symbol="BTCUSDT", quantity=1.0))
+    position_manager.add(
+        make_open_position(symbol="ETHUSDT", entry_price=50.0, quantity=2.0)
+    )
+    rm.set_position_manager(position_manager)
+
+    closed_count = rm.emergency_exit_all()
+
+    assert closed_count == 2
+    assert not position_manager.is_open("BTCUSDT")
+    assert not position_manager.is_open("ETHUSDT")
+    assert position_manager.get("BTCUSDT").close_reason == "EMERGENCY_EXIT"
+    assert position_manager.get("ETHUSDT").close_reason == "EMERGENCY_EXIT"
+
+
+def test_emergency_exit_all_returns_zero_when_no_open_positions():
+    rm = RiskManager()
+    rm.set_config(make_config())
+    rm.set_position_manager(PositionManager())
+
+    assert rm.emergency_exit_all() == 0
