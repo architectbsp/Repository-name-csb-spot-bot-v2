@@ -1,21 +1,18 @@
 """
-Lightweight, dependency-free schema sync for the SQLite database.
+Lightweight, Alembic-free schema sync.
 
-This project intentionally does not pull in Alembic. `Base.metadata.create_all()`
-only ever *creates missing tables* -- it never adds columns to a table that
-already exists. Every time a Sprint adds a new persisted field (e.g.
-`partial_tp_activation_percent`, `realized_pnl`, `stop_stage`, ...) any
-pre-existing `csb_spot_bot.db` from a previous run would otherwise start
-raising `sqlite3.OperationalError: no such column: ...` the moment that
-column is read or written, corrupting the whole app on startup.
+`Base.metadata.create_all()` only creates *missing tables* -- it never
+adds columns to a table that already exists. `sync_schema()` closes that
+gap for every supported backend (SQLite, PostgreSQL, MariaDB/MySQL): for
+every mapped column it runs `ALTER TABLE ... ADD COLUMN ...` when needed.
 
-`sync_schema()` closes that gap for SQLite: for every mapped table/column
-declared on the ORM models, it checks `PRAGMA table_info(<table>)` and runs
-`ALTER TABLE ... ADD COLUMN ...` for anything that's missing, using the
-column's default value (or NULL) so existing rows stay valid. It never
-drops or renames a column -- it is purely additive, matching how every
-Sprint so far has evolved the schema (new optional-with-default fields).
+Sprint 18: the `positions` primary key changed to `position_key`. SQLite
+(and other engines that already have the old shape) rebuild that table
+in place; fresh Postgres/MariaDB installs just get the correct schema
+from create_all().
 """
+
+from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
@@ -25,12 +22,7 @@ from sqlalchemy.engine import Engine
 
 from app.core.persistence.database import Base
 
-# Importing the models module (for its side effect of registering every
-# table on Base.metadata) is required here: whichever module imports
-# sync_schema first must not have to remember to also import
-# app.core.persistence.models itself, or Base.metadata.sorted_tables
-# would silently be empty and create_all()/the column-diff below would
-# see nothing to do.
+# Importing the models module registers every table on Base.metadata.
 import app.core.persistence.models  # noqa: F401,E402
 
 
@@ -41,10 +33,6 @@ def sync_schema(engine: Engine) -> None:
     """
     Creates any missing tables, then adds any missing columns to tables
     that already exist. Safe to call on every startup.
-
-    Sprint 18: the `positions` primary key changed from `symbol` (or a
-    legacy `id`) to composite `position_key`. SQLite cannot ALTER a PK,
-    so that table is rebuilt in place when the old shape is detected.
     """
     with engine.begin() as connection:
         _migrate_positions_primary_key(connection, engine)
@@ -53,12 +41,11 @@ def sync_schema(engine: Engine) -> None:
 
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
+    preparer = engine.dialect.identifier_preparer
 
     with engine.begin() as connection:
         for table in Base.metadata.sorted_tables:
             if table.name not in existing_tables:
-                # Just created above by create_all(); every column is
-                # already present.
                 continue
 
             existing_columns = {
@@ -72,19 +59,22 @@ def sync_schema(engine: Engine) -> None:
 
                 ddl_type = column.type.compile(dialect=engine.dialect)
                 default_clause = _default_clause(column)
+                table_sql = preparer.quote(table.name)
+                column_sql = preparer.quote(column.name)
 
                 logger.warning(
                     "[DB MIGRATION] Adding missing column %s.%s (%s) to "
-                    "existing database",
+                    "existing database (%s)",
                     table.name,
                     column.name,
                     ddl_type,
+                    engine.dialect.name,
                 )
 
                 connection.execute(
                     text(
-                        f'ALTER TABLE "{table.name}" '
-                        f'ADD COLUMN "{column.name}" {ddl_type}'
+                        f"ALTER TABLE {table_sql} "
+                        f"ADD COLUMN {column_sql} {ddl_type}"
                         f"{default_clause}"
                     )
                 )
@@ -112,17 +102,18 @@ def _migrate_positions_primary_key(connection, engine: Engine) -> None:
 
     logger.warning(
         "[DB MIGRATION] Rebuilding positions table for Sprint 18 "
-        "position_key primary key (was pk=%s)",
+        "position_key primary key (was pk=%s, dialect=%s)",
         pk_cols or "?",
+        engine.dialect.name,
     )
 
-    # Snapshot existing rows with whatever columns are present.
     rows = connection.execute(text("SELECT * FROM positions")).mappings().all()
+    preparer = engine.dialect.identifier_preparer
+    positions = preparer.quote("positions")
+    staging = preparer.quote("positions__sprint18")
 
-    connection.execute(text('DROP TABLE IF EXISTS "positions__sprint18"'))
-    connection.execute(text('ALTER TABLE "positions" RENAME TO "positions__sprint18"'))
+    _rename_table(connection, engine, "positions", "positions__sprint18")
 
-    # Recreate the mapped schema (empty) under the original name.
     Base.metadata.tables["positions"].create(bind=connection, checkfirst=False)
 
     now = datetime.now(UTC)
@@ -141,7 +132,7 @@ def _migrate_positions_primary_key(connection, engine: Engine) -> None:
 
         connection.execute(
             text(
-                'INSERT INTO "positions" ('
+                f"INSERT INTO {positions} ("
                 "position_key, symbol, exchange, entry_price, quantity, "
                 "stop_price, highest_price, opened_at, updated_at, "
                 "realized_pnl, partial_exits_taken, stop_stage"
@@ -167,12 +158,29 @@ def _migrate_positions_primary_key(connection, engine: Engine) -> None:
             },
         )
 
-    connection.execute(text('DROP TABLE "positions__sprint18"'))
+    connection.execute(text(f"DROP TABLE {staging}"))
+
+
+def _rename_table(connection, engine: Engine, old: str, new: str) -> None:
+    preparer = engine.dialect.identifier_preparer
+    old_sql = preparer.quote(old)
+    new_sql = preparer.quote(new)
+    dialect = engine.dialect.name
+
+    # Drop any leftover staging table from a previous interrupted migration.
+    connection.execute(text(f"DROP TABLE IF EXISTS {new_sql}"))
+
+    if dialect in {"mysql", "mariadb"}:
+        connection.execute(text(f"RENAME TABLE {old_sql} TO {new_sql}"))
+        return
+
+    # SQLite + PostgreSQL
+    connection.execute(text(f"ALTER TABLE {old_sql} RENAME TO {new_sql}"))
 
 
 def _default_clause(column) -> str:
     """
-    Best-effort DEFAULT clause so SQLite backfills existing rows with a
+    Best-effort DEFAULT clause so existing rows are backfilled with a
     sane value instead of NULL when the column is declared NOT NULL.
     """
     if column.default is not None and column.default.is_scalar:
@@ -189,10 +197,6 @@ def _default_clause(column) -> str:
             return f" DEFAULT {value}"
 
     if not column.nullable:
-        # NOT NULL without a usable scalar default -- fall back to 0 so
-        # the ALTER TABLE doesn't fail outright; this only matters for
-        # backfilling old rows and every such field added so far is
-        # numeric.
         return " DEFAULT 0"
 
     return ""

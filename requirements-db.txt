@@ -1,0 +1,12 @@
+# Sprint 13 -- optional database drivers.
+# Install only the backend(s) you use:
+#
+#   pip install -r requirements-db.txt
+#   # or individually:
+#   pip install "psycopg[binary]>=3.2"
+#   pip install "PyMySQL>=1.1"
+#
+# SQLite needs no extra package (stdlib + SQLAlchemy).
+
+psycopg[binary]>=3.2
+PyMySQL>=1.1

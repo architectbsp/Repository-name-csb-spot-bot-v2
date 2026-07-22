@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 3.0
+Version: 3.1
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -89,6 +89,11 @@ alerts for BUY / SELL / STOP / ERROR / API disconnect / internet
 disconnect plus daily and weekly PnL summaries. Secrets stay in env
 (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`); a Telegram outage must never
 block trading.
+
+Changelog (3.0 -> 3.1): database backend abstraction (§11) -- the same
+repository layer runs on SQLite (default), PostgreSQL or MariaDB/MySQL
+via `DATABASE_URL` or `DB_BACKEND` + `DB_*` env vars. Schema sync is
+dialect-aware; optional drivers live in `requirements-db.txt`.
 
 ---
 
@@ -853,12 +858,33 @@ Alert types:
   profit activation/sell %) may be hardcoded in source.
 - Every such parameter is defined once in `SETTINGS_SCHEMA`
   (`app/core/config/settings_store.py`), editable from the Settings
-  screen, and persisted to SQLite (`bot_settings` table) so it survives
-  restarts.
+  screen, and persisted to the configured database (`bot_settings`
+  table -- SQLite by default, optionally PostgreSQL or MariaDB) so it
+  survives restarts.
 - Saving a change from the Settings screen applies it to the running bot
   immediately -- Strategy, WatchList, RiskManager and MarketScanner all
   read the shared, mutable configuration object fresh on every use, so
   no restart is required for a new value to take effect.
+
+---
+
+## Database Backend
+
+Persistence is accessed only through repository protocols
+(`SettingsRepository`, `PositionRepository`, `TradeJournalRepository`).
+Callers must not open raw SQL connections or branch on dialect.
+
+Supported backends (Sprint 13):
+
+| Backend | How to select |
+|---|---|
+| **SQLite** (default) | unset / `DB_BACKEND=sqlite` / `DB_PATH=...` |
+| **PostgreSQL** | `DB_BACKEND=postgresql` + `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, or a full `DATABASE_URL` |
+| **MariaDB / MySQL** | `DB_BACKEND=mariadb` (or `mysql`) + the same `DB_*` fields, or `DATABASE_URL` |
+
+`DATABASE_URL` always wins when set. Optional drivers:
+`pip install -r requirements-db.txt` (`psycopg`, `PyMySQL`). Schema
+evolution uses the dialect-aware `sync_schema()` helper (no Alembic).
 
 ---
 
