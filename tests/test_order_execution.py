@@ -336,6 +336,23 @@ def test_pending_order_that_never_fills_is_cancelled():
     assert exchange.fetch_order_calls == 3
 
 
+def test_cancel_pending_status_is_polled_not_unknown():
+    """R4: CANCEL_PENDING must enter pending poll, not UNKNOWN_STATUS."""
+    exchange = ScriptedExchangeManager(
+        execute_trade_script=[make_order_result("CANCEL_PENDING", filled=0.0)],
+        fetch_order_script=[
+            make_order_result("CANCEL_PENDING", filled=0.0),
+            make_order_result("CANCELED", filled=0.0),
+        ],
+    )
+    service = make_service(exchange)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.REJECTED
+    assert exchange.fetch_order_calls == 2
+
+
 def test_cancel_race_fill_is_reported_filled():
     """R4: cancel ACK then fetch shows FILLED -- must not TIMED_OUT."""
     exchange = ScriptedExchangeManager(

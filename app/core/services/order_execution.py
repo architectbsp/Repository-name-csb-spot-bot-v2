@@ -69,7 +69,16 @@ class ExecutionOutcome(str, Enum):
 
 
 _KNOWN_FILLED_STATUSES = frozenset({"CLOSED", "FILLED"})
-_KNOWN_OPEN_STATUSES = frozenset({"OPEN", "NEW", "PARTIALLY_FILLED"})
+_KNOWN_OPEN_STATUSES = frozenset(
+    {
+        "OPEN",
+        "NEW",
+        "PARTIALLY_FILLED",
+        # Some venues surface an in-flight cancel as its own status.
+        "CANCEL_PENDING",
+        "PENDING_CANCEL",
+    }
+)
 _KNOWN_TERMINAL_NON_FILLED_STATUSES = frozenset(
     {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FAILED"}
 )

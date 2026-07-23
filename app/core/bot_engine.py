@@ -410,6 +410,10 @@ class BotEngine:
             self.dashboard_service.on_ticker_updated,
         )
         self.event_bus.subscribe(
+            "exchange.connected",
+            self._on_exchange_connected_reconcile,
+        )
+        self.event_bus.subscribe(
             "order.needs_manual_review",
             self.dashboard_service.on_order_needs_manual_review,
         )
@@ -529,7 +533,23 @@ class BotEngine:
         self.running = True
         self.runtime_health["worker_ok"] = True
         self.runtime_health["worker_alive"] = True
+        # R4: after restore + streams, immediately compare local vs exchange.
+        try:
+            self.position_reconciler.reconcile_once()
+        except Exception:
+            logger.exception(
+                "[BotEngine] startup reconciliation failed"
+            )
         logger.info("BotEngine started successfully")
+
+    def _on_exchange_connected_reconcile(self, event=None, **kwargs) -> None:
+        """R4: WS reconnect must not skip inventory reconciliation."""
+        try:
+            self.position_reconciler.reconcile_once()
+        except Exception:
+            logger.exception(
+                "[BotEngine] reconcile after exchange.connected failed"
+            )
 
     def _on_worker_error(self, exc: BaseException) -> None:
         """R2: surface scheduler-worker tick failures to runtime health + bus."""
