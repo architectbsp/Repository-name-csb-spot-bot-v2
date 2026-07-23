@@ -32,6 +32,15 @@ def to_entity(position: Position) -> PositionEntity:
     )
 
 
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    """SQLite often returns naive datetimes; normalize to aware UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def to_domain(entity: PositionEntity) -> Position:
     exchange = try_parse_exchange_type(
         getattr(entity, "exchange", None)
@@ -41,7 +50,7 @@ def to_domain(entity: PositionEntity) -> Position:
         symbol=entity.symbol,
         entry_price=entity.entry_price,
         quantity=entity.quantity,
-        opened_at=entity.opened_at,
+        opened_at=_ensure_utc(entity.opened_at) or datetime.now(UTC),
         stop_price=entity.stop_price,
         highest_price=entity.highest_price,
         realized_pnl=entity.realized_pnl,
@@ -94,11 +103,11 @@ def journal_to_domain(entity: TradeJournalEntity) -> TradeJournalEntry:
         id=entity.id,
         symbol=entity.symbol,
         exchange=entity.exchange,
-        entry_time=entity.entry_time,
+        entry_time=_ensure_utc(entity.entry_time) or datetime.now(UTC),
         entry_price=entity.entry_price,
         quantity=entity.quantity,
         entry_reason=entity.entry_reason,
-        watch_started_at=entity.watch_started_at,
+        watch_started_at=_ensure_utc(entity.watch_started_at),
         wait_minutes=entity.wait_minutes,
         rise_events=entity.rise_events,
         fall_events=entity.fall_events,
@@ -116,7 +125,7 @@ def journal_to_domain(entity: TradeJournalEntity) -> TradeJournalEntry:
             if entity.partial_exits_json
             else []
         ),
-        exit_time=entity.exit_time,
+        exit_time=_ensure_utc(entity.exit_time),
         exit_price=entity.exit_price,
         exit_reason=entity.exit_reason,
         duration_minutes=entity.duration_minutes,

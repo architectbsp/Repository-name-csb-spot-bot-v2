@@ -122,6 +122,16 @@ class PositionManager:
         self._positions[key] = position
         return True
 
+    def persist(self, position: Position) -> None:
+        """
+        Sprint 14 -- flush live stop / highest / quantity to the repository
+        so a graceful restart rehydrates trailing and partial-TP state.
+        No-op when no repository is wired.
+        """
+        if self._repository is None:
+            return
+        self._repository.save(to_entity(position))
+
     def get(self, symbol: str, exchange=None) -> Position | None:
         key = self._resolve_key(symbol, exchange)
         if key is None:

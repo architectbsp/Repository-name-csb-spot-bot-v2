@@ -1023,6 +1023,24 @@ class RiskManager:
         self.check_trailing(position, ticker)
         self.check_stop_loss(position, ticker)
 
+        # Sprint 14: persist open-position stop / highest / qty so a
+        # restart rehydrates trailing and scale-out state (close/scale_out
+        # already save; this covers pure trailing ticks).
+        if (
+            getattr(position, "state", None) is not None
+            and position.state.name == "OPEN"
+            and self._position_manager is not None
+        ):
+            persist = getattr(self._position_manager, "persist", None)
+            if callable(persist):
+                try:
+                    persist(position)
+                except Exception:
+                    logger.exception(
+                        "[RISK] position persist failed symbol=%s",
+                        position.symbol,
+                    )
+
     def check_partial_take_profit(self, position, ticker) -> None:
         """
         Sprint 3 -- Scale Out / Partial Take Profit: once unrealized

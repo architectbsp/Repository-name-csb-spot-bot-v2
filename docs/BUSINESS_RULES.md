@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 3.1
+Version: 3.2
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -96,6 +96,14 @@ Changelog (3.0 -> 3.1): database backend abstraction (§11) -- the same
 repository layer runs on SQLite (default), PostgreSQL or MariaDB/MySQL
 via `DATABASE_URL` or `DB_BACKEND` + `DB_*` env vars. Schema sync is
 dialect-aware; optional drivers live in `requirements-db.txt`.
+
+Changelog (3.1 -> 3.2): Sprint 14 production readiness -- full-pipeline
+E2E coverage (Scanner → Filter → Strategy → RiskManager / Spot Guard /
+MARKET → OrderExecution → Journal → Telemetry → Telegram) for
+BUY → trailing update → partial TP → full SELL; open-position stop /
+highest / quantity are persisted on every price tick so graceful
+restart rehydrates trailing and scale-out state; SQLite-naive datetimes
+are normalized to aware UTC on repository load.
 
 ---
 
@@ -893,6 +901,34 @@ Hard safety rails in `app/core/exchange/spot_guard.py`:
 Persistence stays behind repository protocols
 (`SettingsRepository`, `PositionRepository`, `TradeJournalRepository`) —
 business logic never opens raw SQL connections.
+
+---
+
+## Production Readiness (Sprint 14)
+
+Before live cutover, the full trading stack must pass the end-to-end
+integration suite (`tests/test_full_integration.py`):
+
+1. **E2E lifecycle (mocked venue)** — MarketScanner → SymbolFilter →
+   Strategy (Path B) → RiskManager → OrderExecutionService → Trade
+   Journal → TelemetryService → TelegramNotifier. Simulated cycle:
+   BUY → trailing-stop update → partial take-profit → full SELL
+   (`TRAILING_STOP`). Orders remain **spot + MARKET only** (Sprint 13
+   Spot Guard).
+2. **Graceful shutdown & rehydrate** — After `stop`/`shutdown`, a new
+   process loads open rows via `PersistenceService.load_positions()` +
+   `PositionManager.restore()` and `TradeJournal.load_open_entries()`.
+   Trailing / highest / quantity must survive because
+   `RiskManager.update_position` persists open positions on every tick
+   (`PositionManager.persist`). ConfigManager is a process singleton;
+   tests reset it between runs (`ConfigManager.reset_instance`).
+3. **Resource integrity** — Module shutdown must not leave orphaned
+   asyncio tasks; repository sessions are closed so the SQLAlchemy pool
+   reports zero checked-out connections. Datetimes loaded from SQLite
+   are normalized to timezone-aware UTC.
+
+Regression gate: `pytest` must be fully green (zero failures) before
+production enablement.
 
 ---
 
