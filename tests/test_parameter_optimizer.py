@@ -101,6 +101,8 @@ def test_profit_factor_fitness_handles_none_and_inf():
         win_rate_percent=0.0,
         average_profit=0.0,
         average_loss=0.0,
+        average_profit_percent=0.0,
+        average_loss_percent=0.0,
         total_pnl=0.0,
         expectancy=0.0,
         profit_factor=None,

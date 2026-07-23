@@ -22,9 +22,12 @@ class PerformanceReport:
     # in the same currency unit as the trade's `pnl`.
     average_profit: float
     average_loss: float
+    # Same split on per-trade pnl_percent (0 when no wins / no losses).
+    average_profit_percent: float
+    average_loss_percent: float
 
     total_pnl: float
-    # Expected PnL per trade -- (win_rate * avg_win) + (loss_rate * avg_loss).
+    # Expected PnL per trade -- total_pnl / N.
     expectancy: float
 
     # Gross profit / abs(gross loss). None with zero trades; +inf when
@@ -46,3 +49,8 @@ class PerformanceReport:
     # total_pnl / max_drawdown. None with zero trades or zero drawdown
     # and zero profit; +inf when there's profit but no drawdown at all.
     recovery_factor: float | None
+
+    # Filter context used to build this report (Sprint 7).
+    period: str = "all_time"
+    strategy: str | None = None
+    exchange: str | None = None

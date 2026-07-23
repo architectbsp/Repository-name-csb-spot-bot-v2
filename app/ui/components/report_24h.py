@@ -56,11 +56,24 @@ def _performance_rows(report: PerformanceReport | None) -> list:
         ),
         _row("Total PnL", money(report.total_pnl)),
         _row("Win Rate", _fmt_pct(report.win_rate_percent), "#38BDF8"),
-        _row("Avg Profit", money(report.average_profit), "#22C55E"),
-        _row("Avg Loss", money(report.average_loss), "#EF4444"),
+        _row(
+            "Avg Profit",
+            f"{money(report.average_profit)} / {_fmt_pct(report.average_profit_percent)}",
+            "#22C55E",
+        ),
+        _row(
+            "Avg Loss",
+            f"{money(report.average_loss)} / {_fmt_pct(report.average_loss_percent)}",
+            "#EF4444",
+        ),
         _row("Profit Factor", _fmt_ratio(report.profit_factor)),
         _row("Sharpe", _fmt_ratio(report.sharpe_ratio)),
-        _row("Max Drawdown", money(report.max_drawdown), "#F59E0B"),
+        _row(
+            "Max Drawdown",
+            f"{money(report.max_drawdown)} / {_fmt_pct(report.max_drawdown_percent)}",
+            "#F59E0B",
+        ),
+        _row("Recovery Factor", _fmt_ratio(report.recovery_factor)),
         _row("Expectancy", money(report.expectancy)),
     ]
 

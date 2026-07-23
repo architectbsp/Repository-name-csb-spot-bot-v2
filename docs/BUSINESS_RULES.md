@@ -683,26 +683,34 @@ MFE/MAE tracking continues after a restart.
 
 `AnalyticsService` (`app/core/services/analytics_service.py`, alias of
 `PerformanceAnalytics`) is a read-only module that measures the bot's
-own trading performance from every `CLOSED` Trade Journal entry. It
-never touches a position, order, or risk state -- only summarizes what
-already happened. The live dashboard surfaces these metrics next to the
-24h report.
+own trading performance from `CLOSED` Trade Journal entries. It never
+touches a position, order, or risk state -- only summarizes what already
+happened. The live dashboard surfaces these metrics next to the 24h
+report (all-time by default).
 
+Filters (optional kwargs on `generate_report`):
+- **period**: `today` | `last_7_days` | `last_30_days` | `all_time`
+  (UTC window on **exit_time**)
+- **strategy**: substring match against `entry_conditions["strategy"]`
+- **exchange**: venue name (e.g. `BINANCE`)
+
+Metrics:
 - **Win Rate**: percentage of closed trades with `pnl > 0`.
 - **Average Profit / Average Loss**: mean `pnl` of winning trades and of
-  losing trades, respectively.
+  losing trades, plus the same split on `pnl_percent`
+  (`average_profit_percent` / `average_loss_percent`).
 - **Profit Factor**: gross profit / gross loss. Undefined (`None`) with
   zero closed trades; `+infinity` when there have been wins and zero
   losses so far (a "perfect" record, not literally infinite money).
 - **Expectancy**: total realized PnL / number of closed trades -- the
-  expected PnL of the "average" trade.
+  expected USD PnL of the "average" trade.
 - **Sharpe ratio**: a simplified, non-annualized ratio (mean / stdev of
   each trade's `pnl_percent`, scaled by sqrt(N)) appropriate for a
   trade-by-trade sample rather than a time-series of periodic returns.
   `None` with fewer than 2 usable trades or zero-variance returns.
 - **Maximum Drawdown**: the largest peak-to-trough drop of the
   cumulative realized-PnL equity curve built by walking closed trades in
-  chronological order (by exit time).
+  chronological order (by exit time), reported in USD and as % of peak.
 - **Recovery Factor**: total realized PnL / maximum drawdown -- how many
   times over the worst drawdown has been recovered by total profit.
 

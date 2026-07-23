@@ -5,17 +5,44 @@ Sharpe, Maximum Drawdown, Recovery Factor) from the Trade Journal's
 permanent, closed-trade history (Sprint 5). Read-only: this module never
 touches a position, an order, or risk state -- it only summarizes what
 already happened.
+
+Filters (optional):
+  period: today | last_7_days | last_30_days | all_time  (by exit_time UTC)
+  strategy: substring match on entry_conditions strategy name
+  exchange: venue name
 """
+
+from __future__ import annotations
 
 import math
 import statistics
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.domain.performance import PerformanceReport
 from app.core.domain.trade_journal import STATUS_CLOSED
 
 
-def _empty_report() -> PerformanceReport:
+PERIOD_TODAY = "today"
+PERIOD_LAST_7_DAYS = "last_7_days"
+PERIOD_LAST_30_DAYS = "last_30_days"
+PERIOD_ALL_TIME = "all_time"
+
+SUPPORTED_PERIODS = frozenset(
+    {
+        PERIOD_TODAY,
+        PERIOD_LAST_7_DAYS,
+        PERIOD_LAST_30_DAYS,
+        PERIOD_ALL_TIME,
+    }
+)
+
+
+def _empty_report(
+    *,
+    period: str = PERIOD_ALL_TIME,
+    strategy: str | None = None,
+    exchange: str | None = None,
+) -> PerformanceReport:
     return PerformanceReport(
         generated_at=datetime.now(UTC),
         total_trades=0,
@@ -25,6 +52,8 @@ def _empty_report() -> PerformanceReport:
         win_rate_percent=0.0,
         average_profit=0.0,
         average_loss=0.0,
+        average_profit_percent=0.0,
+        average_loss_percent=0.0,
         total_pnl=0.0,
         expectancy=0.0,
         profit_factor=None,
@@ -32,7 +61,40 @@ def _empty_report() -> PerformanceReport:
         max_drawdown=0.0,
         max_drawdown_percent=0.0,
         recovery_factor=None,
+        period=period,
+        strategy=strategy,
+        exchange=exchange,
     )
+
+
+def period_bounds(
+    period: str,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime | None, datetime | None]:
+    """
+    Returns (date_from, date_to) inclusive window in UTC for ``period``.
+    ``all_time`` → (None, None).
+    """
+    key = (period or PERIOD_ALL_TIME).strip().lower()
+    if key not in SUPPORTED_PERIODS:
+        raise ValueError(
+            f"Unsupported analytics period {period!r}. "
+            f"Supported: {', '.join(sorted(SUPPORTED_PERIODS))}"
+        )
+    if key == PERIOD_ALL_TIME:
+        return None, None
+
+    clock = now or datetime.now(UTC)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=UTC)
+
+    if key == PERIOD_TODAY:
+        start = clock.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, None
+    if key == PERIOD_LAST_7_DAYS:
+        return clock - timedelta(days=7), None
+    return clock - timedelta(days=30), None
 
 
 class PerformanceAnalytics:
@@ -52,16 +114,120 @@ class PerformanceAnalytics:
             if entry.status == STATUS_CLOSED and entry.pnl is not None
         ]
 
-    def generate_report(self, trades: list | None = None) -> PerformanceReport:
-        """Computes a PerformanceReport from the given closed trades (in
-        any order -- they are sorted chronologically internally for the
-        drawdown/equity-curve calculation), or from every closed trade in
-        the wired TradeJournal if `trades` is omitted."""
+    def _fetch_closed_trades(
+        self,
+        *,
+        strategy: str | None = None,
+        exchange: str | None = None,
+    ) -> list:
+        if self._trade_journal is None:
+            return []
+
+        if hasattr(self._trade_journal, "query"):
+            rows = self._trade_journal.query(
+                strategy=strategy,
+                exchange=exchange,
+                status=STATUS_CLOSED,
+                limit=50_000,
+            )
+        else:
+            rows = self._closed_trades()
+            if strategy:
+                rows = [
+                    e
+                    for e in rows
+                    if strategy in str(getattr(e, "entry_conditions", {}))
+                ]
+            if exchange:
+                rows = [
+                    e
+                    for e in rows
+                    if (e.exchange or "").upper() == exchange.upper()
+                ]
+
+        return [e for e in rows if e.status == STATUS_CLOSED and e.pnl is not None]
+
+    @staticmethod
+    def _filter_by_exit_period(
+        trades: list,
+        *,
+        period: str,
+        now: datetime | None = None,
+    ) -> list:
+        date_from, date_to = period_bounds(period, now=now)
+        if date_from is None and date_to is None:
+            return trades
+
+        out = []
+        for entry in trades:
+            stamp = entry.exit_time or entry.entry_time
+            if stamp is None:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=UTC)
+            if date_from is not None and stamp < date_from:
+                continue
+            if date_to is not None and stamp > date_to:
+                continue
+            out.append(entry)
+        return out
+
+    def generate_report(
+        self,
+        trades: list | None = None,
+        *,
+        period: str = PERIOD_ALL_TIME,
+        strategy: str | None = None,
+        exchange: str | None = None,
+        now: datetime | None = None,
+    ) -> PerformanceReport:
+        """
+        Computes a PerformanceReport from closed trades.
+
+        If ``trades`` is omitted, loads from the wired TradeJournal and
+        applies ``period`` / ``strategy`` / ``exchange`` filters
+        (period uses exit_time UTC).
+        """
+        period_key = (period or PERIOD_ALL_TIME).strip().lower()
+        if period_key not in SUPPORTED_PERIODS:
+            raise ValueError(
+                f"Unsupported analytics period {period!r}. "
+                f"Supported: {', '.join(sorted(SUPPORTED_PERIODS))}"
+            )
+
         if trades is None:
-            trades = self._closed_trades()
+            trades = self._fetch_closed_trades(
+                strategy=strategy,
+                exchange=exchange,
+            )
+            trades = self._filter_by_exit_period(
+                trades, period=period_key, now=now
+            )
+        else:
+            # Explicit trade list: still allow optional period/strategy/
+            # exchange narrowing for callers that pass a superset.
+            if strategy:
+                trades = [
+                    e
+                    for e in trades
+                    if strategy in str(getattr(e, "entry_conditions", {}))
+                ]
+            if exchange:
+                trades = [
+                    e
+                    for e in trades
+                    if (getattr(e, "exchange", None) or "").upper()
+                    == exchange.upper()
+                ]
+            if period_key != PERIOD_ALL_TIME:
+                trades = self._filter_by_exit_period(
+                    trades, period=period_key, now=now
+                )
 
         if not trades:
-            return _empty_report()
+            return _empty_report(
+                period=period_key, strategy=strategy, exchange=exchange
+            )
 
         trades = sorted(
             trades,
@@ -74,6 +240,17 @@ class PerformanceAnalytics:
         losses = [pnl for pnl in pnls if pnl < 0]
         breakeven = [pnl for pnl in pnls if pnl == 0]
 
+        win_pcts = [
+            e.pnl_percent
+            for e in trades
+            if e.pnl is not None and e.pnl > 0 and e.pnl_percent is not None
+        ]
+        loss_pcts = [
+            e.pnl_percent
+            for e in trades
+            if e.pnl is not None and e.pnl < 0 and e.pnl_percent is not None
+        ]
+
         total_trades = len(trades)
         winning_trades = len(wins)
         losing_trades = len(losses)
@@ -83,6 +260,12 @@ class PerformanceAnalytics:
 
         average_profit = (sum(wins) / winning_trades) if wins else 0.0
         average_loss = (sum(losses) / losing_trades) if losses else 0.0
+        average_profit_percent = (
+            (sum(win_pcts) / len(win_pcts)) if win_pcts else 0.0
+        )
+        average_loss_percent = (
+            (sum(loss_pcts) / len(loss_pcts)) if loss_pcts else 0.0
+        )
 
         total_pnl = sum(pnls)
         expectancy = total_pnl / total_trades
@@ -105,6 +288,8 @@ class PerformanceAnalytics:
             win_rate_percent=win_rate_percent,
             average_profit=average_profit,
             average_loss=average_loss,
+            average_profit_percent=average_profit_percent,
+            average_loss_percent=average_loss_percent,
             total_pnl=total_pnl,
             expectancy=expectancy,
             profit_factor=profit_factor,
@@ -112,6 +297,9 @@ class PerformanceAnalytics:
             max_drawdown=max_drawdown,
             max_drawdown_percent=max_drawdown_percent,
             recovery_factor=recovery_factor,
+            period=period_key,
+            strategy=strategy,
+            exchange=exchange,
         )
 
 
