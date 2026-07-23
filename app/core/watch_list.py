@@ -995,6 +995,13 @@ class WatchList:
     def set_config(self, config):
         self._config = config
 
+    def on_config_updated(self, event) -> None:
+        """
+        EventBus ``config.updated`` -- cooldown / watch knobs are read
+        live from ``self._config`` on each decision; no local cache.
+        """
+        return None
+
     def get_config(self):
         return self._config
 

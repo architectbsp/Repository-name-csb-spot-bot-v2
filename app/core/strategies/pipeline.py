@@ -54,13 +54,25 @@ class StrategyPipeline:
         self.position_manager.handle_position_closed(event)
 
     def on_config_updated(self, event) -> None:
+        """
+        Apply Settings UI changes onto this pipeline's AppSettings copy
+        (presets stay for untouched knobs), then notify observers.
+        """
+        changed = getattr(event, "changed", None) or {}
+        if changed:
+            from app.core.config.settings_store import apply_schema_values
+
+            apply_schema_values(self.config, changed)
         self.strategy.on_config_updated(event)
+        self.watch_list.on_config_updated(event)
         self.risk_manager.on_config_updated(event)
+        self.position_manager.on_config_updated(event)
 
     def initialize(self) -> None:
         self.strategy.set_config(self.config)
         self.watch_list.set_config(self.config)
         self.risk_manager.set_config(self.config)
+        self.position_manager.set_config(self.config)
         for module in (
             self.watch_list,
             self.position_manager,
@@ -128,6 +140,7 @@ def build_strategy_pipeline(
     persistence = persistence or PersistenceService.from_url("sqlite:///:memory:")
     position_manager = PositionManager()
     position_manager.set_repository(persistence.position_repository())
+    position_manager.set_config(config)
 
     trade_journal = TradeJournal()
     trade_journal.set_repository(persistence.trade_journal_repository())

@@ -320,6 +320,7 @@ class BotEngine:
             self.watch_list,
             self.risk_manager,
             self.strategy,
+            self.position_manager,
         ):
             module.set_config(self.config)
 
@@ -367,7 +368,15 @@ class BotEngine:
             )
             self.event_bus.subscribe(
                 CONFIG_UPDATED_EVENT,
+                self.watch_list.on_config_updated,
+            )
+            self.event_bus.subscribe(
+                CONFIG_UPDATED_EVENT,
                 self.risk_manager.on_config_updated,
+            )
+            self.event_bus.subscribe(
+                CONFIG_UPDATED_EVENT,
+                self.position_manager.on_config_updated,
             )
 
         self.event_bus.subscribe(

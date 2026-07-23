@@ -1,11 +1,15 @@
 from datetime import UTC, datetime
 
+from app.core.config.settings import AppSettings
 from app.core.domain.position import Position, PositionState
 from app.core.exchange.market_key import market_key
 from app.core.persistence.mapper import to_entity
 
 
-MAX_OPEN_POSITIONS = 10  # docs/BUSINESS_RULES.md §3/§8: max 10 simultaneous positions.
+# Fallback only when PositionManager has no live AppSettings wired.
+# Prefer risk.max_open_positions via set_config / ConfigManager.
+DEFAULT_MAX_OPEN_POSITIONS = 10
+MAX_OPEN_POSITIONS = DEFAULT_MAX_OPEN_POSITIONS  # backward-compat for tests
 
 
 class PositionManager:
@@ -14,11 +18,27 @@ class PositionManager:
         # coin can be open on two venues without colliding.
         self._positions: dict[str, Position] = {}
         self._repository = None
+        self._config: AppSettings | None = None
         self._initialized = False
         self._running = False
 
     def set_repository(self, repository) -> None:
         self._repository = repository
+
+    def set_config(self, config: AppSettings | None) -> None:
+        self._config = config
+
+    def on_config_updated(self, event) -> None:
+        """
+        EventBus ``config.updated`` -- max_open_positions is read live
+        from ``self._config.risk`` on every add/restore.
+        """
+        return None
+
+    def _max_open_positions(self) -> int:
+        if self._config is not None:
+            return int(self._config.risk.max_open_positions)
+        return DEFAULT_MAX_OPEN_POSITIONS
 
     def initialize(self) -> None:
         self._initialized = True
@@ -61,7 +81,7 @@ class PositionManager:
         if key in self._positions:
             return False
 
-        if len(self._positions) >= MAX_OPEN_POSITIONS:
+        if self.open_count() >= self._max_open_positions():
             return False
 
         self._positions[key] = position
@@ -77,7 +97,7 @@ class PositionManager:
         if key in self._positions:
             return False
 
-        if len(self._positions) >= MAX_OPEN_POSITIONS:
+        if self.open_count() >= self._max_open_positions():
             return False
 
         self._positions[key] = position

@@ -111,3 +111,94 @@ def test_singleton_reset_for_tests():
     ConfigManager.reset_instance()
     c = ConfigManager.instance()
     assert c is not a
+
+
+def test_settings_service_alias_is_config_manager():
+    from app.core.config import SettingsService
+
+    assert SettingsService is ConfigManager
+
+
+def test_risk_and_position_manager_pick_up_live_config_without_restart():
+    from app.core.position_manager import PositionManager
+    from app.core.risk_manager import RiskManager
+    from app.core.domain.position import Position
+    from datetime import UTC, datetime
+
+    manager, settings, bus = setup_manager()
+    pm = PositionManager()
+    pm.set_config(settings)
+    rm = RiskManager()
+    rm.set_config(settings)
+    rm.set_position_manager(pm)
+
+    bus.subscribe(CONFIG_UPDATED_EVENT, pm.on_config_updated)
+    bus.subscribe(CONFIG_UPDATED_EVENT, rm.on_config_updated)
+
+    manager.save({"max_position": 1, "stop_loss": 7.5})
+    assert settings.risk.max_open_positions == 1
+    assert settings.risk.stop_loss_percent == 7.5
+    assert rm._risk.stop_loss_percent == 7.5
+
+    assert pm.add(
+        Position(
+            symbol="AAA/USDT",
+            entry_price=1.0,
+            quantity=1.0,
+            opened_at=datetime.now(UTC),
+            stop_price=0.9,
+        )
+    )
+    assert (
+        pm.add(
+            Position(
+                symbol="BBB/USDT",
+                entry_price=1.0,
+                quantity=1.0,
+                opened_at=datetime.now(UTC),
+                stop_price=0.9,
+            )
+        )
+        is False
+    )
+
+
+def test_multi_strategy_pipeline_applies_config_updated_to_deepcopy():
+    from app.core.strategies.orchestrator import MultiStrategyOrchestrator
+    from app.core.exchange.adapter import PaperExchangeAdapter
+    from app.core.exchange.manager import ExchangeManager
+    from app.core.exchange.models import ExchangeType
+    from app.core.exchange.registry import ExchangeRegistry
+
+    manager, settings, bus = setup_manager()
+    paper = PaperExchangeAdapter(
+        live=None,
+        exchange_type=ExchangeType.BINANCE,
+        initial_quote=100_000.0,
+        fee_rate=0.0,
+    )
+    paper.connect()
+    registry = ExchangeRegistry()
+    registry.register(ExchangeType.BINANCE, paper)
+    exchange = ExchangeManager(registry)
+
+    orch = MultiStrategyOrchestrator()
+    pipelines = orch.build(
+        exchange,
+        base_config=settings,
+        strategy_names=["dip_hunter", "momentum"],
+    )
+    bus.subscribe(CONFIG_UPDATED_EVENT, orch.on_config_updated)
+
+    # Momentum starts with preset watch=3.0; Settings save must update it.
+    assert pipelines[1].config.strategy.watch_percent == 3.0
+    assert pipelines[1].config is not settings
+
+    manager.save({"watch_pct": 4.25, "stop_loss": 12.0})
+
+    assert pipelines[0].config.strategy.watch_percent == 4.25
+    assert pipelines[1].config.strategy.watch_percent == 4.25
+    assert pipelines[0].config.risk.stop_loss_percent == 12.0
+    assert pipelines[1].config.risk.stop_loss_percent == 12.0
+    # Momentum preset max_open_positions=5 stays until Settings changes it.
+    assert pipelines[1].config.risk.max_open_positions == 5

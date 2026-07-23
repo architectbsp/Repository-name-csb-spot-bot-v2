@@ -162,6 +162,23 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
 _SCHEMA_BY_NAME: dict[str, SettingField] = {field.name: field for field in SETTINGS_SCHEMA}
 
 
+def apply_schema_values(app_settings: AppSettings, values: dict[str, object]) -> None:
+    """
+    Mutates ``app_settings`` in place with schema-named values (no persist).
+
+    Used by multi-strategy pipelines that hold a deep-copied AppSettings:
+    when ConfigManager publishes ``config.updated``, each pipeline applies
+    ``event.changed`` here so Settings UI edits become live without restart.
+    Unknown keys are ignored.
+    """
+    for name, raw_value in values.items():
+        field = _SCHEMA_BY_NAME.get(name)
+        if field is None:
+            continue
+        section = getattr(app_settings, field.section)
+        setattr(section, name, field.value_type(raw_value))
+
+
 class SettingsStore:
     def __init__(self, repository: SettingsRepository) -> None:
         self._repository = repository

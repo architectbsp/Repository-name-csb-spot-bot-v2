@@ -73,6 +73,22 @@ def test_max_open_positions_limit():
     assert manager.add(make_position("OVERFLOW")) is False
 
 
+def test_max_open_positions_follows_live_config():
+    from app.core.config.settings import AppSettings
+
+    manager = PositionManager()
+    config = AppSettings()
+    config.risk.max_open_positions = 2
+    manager.set_config(config)
+
+    assert manager.add(make_position("COIN0"))
+    assert manager.add(make_position("COIN1"))
+    assert manager.add(make_position("OVERFLOW")) is False
+
+    config.risk.max_open_positions = 3
+    assert manager.add(make_position("COIN2"))
+
+
 def test_clear_positions():
     manager = PositionManager()
 

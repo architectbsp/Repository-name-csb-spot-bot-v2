@@ -169,7 +169,10 @@ def build_settings_view(
     def _on_save(_):
         changes = {name: field.value for name, field in fields.items()}
         manager = ConfigManager.instance()
-        if manager.is_configured:
+        # Prefer ConfigManager only when it owns *this* AppSettings
+        # instance (BotEngine wiring). Otherwise mutate the panel's
+        # config via SettingsStore so tests / alternate hosts stay correct.
+        if manager.is_configured and manager.settings is config:
             errors = manager.save(changes, source="settings_ui")
         else:
             errors = settings_store.update(config, changes)
