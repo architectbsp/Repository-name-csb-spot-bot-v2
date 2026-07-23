@@ -178,6 +178,10 @@ class PaperExchangeAdapter(BaseExchange):
         initial_quote: float = 10_000.0,
         quote: str = "USDT",
         fee_rate: float = 0.001,
+        # Adverse market impact in basis points applied to paper fills
+        # (buys pay up, sells receive less). Models flash-crash slippage
+        # in backtests / stress sims; 0 disables.
+        slippage_bps: float = 0.0,
     ) -> None:
         state = (
             live.state
@@ -189,6 +193,7 @@ class PaperExchangeAdapter(BaseExchange):
         self.client = live.client if live is not None else None
         self._quote = quote
         self._fee_rate = max(0.0, float(fee_rate))
+        self._slippage_bps = max(0.0, float(slippage_bps))
         self._balances: dict[str, dict[str, float]] = {
             quote: _wallet_row(float(initial_quote)),
         }
@@ -346,7 +351,7 @@ class PaperExchangeAdapter(BaseExchange):
         if amount <= 0:
             raise ValueError(f"Invalid buy amount for {symbol}: {amount}")
 
-        price = self._resolve_price(symbol)
+        price = self._apply_slippage(self._resolve_price(symbol), side="BUY")
         base, quote = self._base_quote(symbol)
         cost = amount * price
         fee = cost * self._fee_rate
@@ -376,7 +381,7 @@ class PaperExchangeAdapter(BaseExchange):
         if amount <= 0:
             raise ValueError(f"Invalid sell amount for {symbol}: {amount}")
 
-        price = self._resolve_price(symbol)
+        price = self._apply_slippage(self._resolve_price(symbol), side="SELL")
         base, quote = self._base_quote(symbol)
         base_free = self._free(base)
         if base_free < amount:
@@ -471,6 +476,14 @@ class PaperExchangeAdapter(BaseExchange):
                 return price
 
         raise RuntimeError(f"No mark price available for {symbol}")
+
+    def _apply_slippage(self, price: float, *, side: str) -> float:
+        if self._slippage_bps <= 0 or price <= 0:
+            return price
+        frac = self._slippage_bps / 10_000.0
+        if side.upper() == "BUY":
+            return price * (1.0 + frac)
+        return price * (1.0 - frac)
 
     def _free(self, asset: str) -> float:
         row = self._balances.get(asset)

@@ -526,6 +526,12 @@ position_size = min(safety_size, risk_cap?, atr_cap?, vol_cap?)
 - **Callback rate (trailing distance)**: once active, the stop trails
   2.5% behind the highest price reached, like a shadow; when price
   reverses from the peak by 2.5%, the stop triggers and realizes profit.
+- **Flash crash / slippage**: stops trigger on the tick `last_price`.
+  The exit is always a **market sell**, so the fill can slip *through*
+  the stop (worse than the trigger). Realized PnL uses the fill price,
+  not the stop level. Paper/backtest can model this via
+  `PaperExchangeAdapter(slippage_bps=...)`. Covered by
+  `tests/test_flash_crash_stress.py`.
 
 ---
 
