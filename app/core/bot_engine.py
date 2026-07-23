@@ -1,4 +1,5 @@
 import logging
+import threading
 from datetime import timedelta
 
 from app.core.market_scanner import MarketScanner
@@ -68,7 +69,18 @@ class BotEngine:
             self.event_bus,
         )
         self.scheduler = Scheduler()
-        self.worker = Worker(self.scheduler)
+        self.runtime_health: dict = {
+            "worker_ok": True,
+            "worker_alive": True,
+            "worker_error_count": 0,
+            "worker_last_error": None,
+            "worker_last_error_at": None,
+        }
+        self.worker = Worker(
+            self.scheduler,
+            on_error=self._on_worker_error,
+            on_fatal=self._on_worker_fatal,
+        )
         self.retry_policy = RetryPolicy(
             self.config.retry_policy.max_attempts,
             self.config.retry_policy.delay,
@@ -489,7 +501,72 @@ class BotEngine:
         self.start_price_stream()
 
         self.running = True
+        self.runtime_health["worker_ok"] = True
+        self.runtime_health["worker_alive"] = True
         logger.info("BotEngine started successfully")
+
+    def _on_worker_error(self, exc: BaseException) -> None:
+        """R2: surface scheduler-worker tick failures to runtime health + bus."""
+        health = self.worker.health()
+        self.runtime_health["worker_ok"] = False
+        self.runtime_health["worker_alive"] = health.thread_alive
+        self.runtime_health["worker_error_count"] = health.error_count
+        self.runtime_health["worker_last_error"] = health.last_error
+        self.runtime_health["worker_last_error_at"] = health.last_error_at
+
+        payload = {
+            "source": "worker",
+            "error": type(exc).__name__,
+            "message": str(exc),
+            "error_count": health.error_count,
+            "consecutive_errors": health.consecutive_errors,
+        }
+        try:
+            self.event_bus.publish("worker.error", payload)
+        except Exception:
+            logger.exception("[BotEngine] failed to publish worker.error")
+
+    def _on_worker_fatal(self, exc: BaseException | None) -> None:
+        """R2: daemon died while expected to run — notify and shut down."""
+        self.runtime_health["worker_ok"] = False
+        self.runtime_health["worker_alive"] = False
+        if exc is not None:
+            self.runtime_health["worker_last_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        payload = {
+            "source": "worker",
+            "fatal": True,
+            "error": type(exc).__name__ if exc is not None else "Unknown",
+            "message": str(exc) if exc is not None else "worker terminated",
+        }
+        try:
+            self.event_bus.publish("worker.fatal", payload)
+        except Exception:
+            logger.exception("[BotEngine] failed to publish worker.fatal")
+
+        if not self.running:
+            return
+
+        # Avoid joining the worker thread from inside itself — stop() on a
+        # helper thread so shutdown stays clean.
+        def _shutdown() -> None:
+            try:
+                logger.critical(
+                    "[BotEngine] Graceful shutdown after worker fatal failure"
+                )
+                self.stop()
+            except Exception:
+                logger.exception(
+                    "[BotEngine] shutdown after worker.fatal failed"
+                )
+
+        threading.Thread(
+            target=_shutdown,
+            name="BotEngineWorkerFatalShutdown",
+            daemon=True,
+        ).start()
 
     def stop(self):
         if not self.running:

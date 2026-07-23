@@ -161,7 +161,11 @@ class WebsocketPriceStreamBase(PriceStream, ABC):
             try:
                 ws.close()
             except Exception:
-                pass
+                logger.debug(
+                    "[%s] websocket close during stop raised",
+                    type(self).__name__,
+                    exc_info=True,
+                )
 
         if self._thread is not None:
             self._thread.join(timeout=5)

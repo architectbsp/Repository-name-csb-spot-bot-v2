@@ -15,3 +15,5 @@ class Job:
     running: bool = False
     last_run: datetime | None = None
     next_run: datetime | None = None
+    # R2: last failure message for operator / health visibility.
+    last_error: str | None = None

@@ -280,10 +280,15 @@ class TelegramNotifier:
     def tick(self) -> None:
         if not self.is_enabled():
             return
-        self._poll_commands()
-        self._probe_internet()
-        self._probe_exchange_status()
-        self._maybe_send_summaries()
+        try:
+            self._poll_commands()
+            self._probe_internet()
+            self._probe_exchange_status()
+            self._maybe_send_summaries()
+        except Exception:
+            # Surface to Scheduler/Worker — do not swallow.
+            logger.exception("[TELEGRAM] notifier tick failed")
+            raise
 
     def _poll_commands(self) -> None:
         if self._client is None:
@@ -328,6 +333,9 @@ class TelegramNotifier:
         try:
             exchanges = self._exchange_manager.enabled()
         except Exception:
+            logger.exception(
+                "[TELEGRAM] exchange status probe failed"
+            )
             return
 
         for exchange in exchanges:

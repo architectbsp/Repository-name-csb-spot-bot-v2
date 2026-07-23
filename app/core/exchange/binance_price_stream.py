@@ -74,7 +74,10 @@ class BinancePriceStream(PriceStream):
             try:
                 ws.close()
             except Exception:
-                pass
+                logger.debug(
+                    "Binance websocket close during stop raised",
+                    exc_info=True,
+                )
 
         if self._thread is not None:
             self._thread.join(timeout=5)

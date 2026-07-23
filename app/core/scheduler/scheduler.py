@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime, timedelta
 
 from .job import Job
+
+
+logger = logging.getLogger(__name__)
 
 
 class Scheduler:
@@ -66,7 +70,18 @@ class Scheduler:
         job.running = True
 
         try:
-            job.callback()
+            try:
+                job.callback()
+            except Exception as exc:
+                job.last_error = f"{type(exc).__name__}: {exc}"
+                logger.exception(
+                    "[Scheduler] Job '%s' failed",
+                    job.name,
+                )
+                # Re-raise so the Worker records health / notifies Engine.
+                # next_run is intentionally unchanged (retry on next ticks).
+                raise
+            job.last_error = None
             job.last_run = datetime.now()
             self.schedule(job)
         finally:
