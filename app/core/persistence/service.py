@@ -2,7 +2,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.domain.position import Position
-from app.core.persistence.database import create_db_engine, get_engine, get_session_factory
+from app.core.persistence.database import (
+    checkpoint_sqlite_wal,
+    create_db_engine,
+    get_engine,
+    get_session_factory,
+    verify_sqlite_integrity,
+)
 from app.core.persistence.mapper import to_domain
 from app.core.persistence.migrations import sync_schema
 from app.core.persistence.protocols import (
@@ -42,11 +48,14 @@ class PersistenceService:
                 autoflush=False,
                 autocommit=False,
                 future=True,
+                expire_on_commit=True,
             )
 
         # Creates missing tables AND adds missing columns to tables from
         # an older schema version -- see migrations.py docstring.
         sync_schema(self._engine)
+        # R3: refuse to run against a corrupted SQLite file.
+        verify_sqlite_integrity(self._engine)
 
     @classmethod
     def from_url(cls, url: str) -> "PersistenceService":
@@ -76,4 +85,15 @@ class PersistenceService:
 
     def load_positions(self) -> list[Position]:
         repository = self.position_repository()
-        return [to_domain(entity) for entity in repository.list()]
+        try:
+            return [to_domain(entity) for entity in repository.list()]
+        finally:
+            repository.close()
+
+    def dispose(self) -> None:
+        """
+        R3 shutdown consistency: checkpoint WAL (file SQLite) then dispose
+        connections. Safe to call more than once.
+        """
+        checkpoint_sqlite_wal(self._engine)
+        self._engine.dispose()

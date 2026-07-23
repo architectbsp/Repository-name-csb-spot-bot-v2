@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -11,7 +12,24 @@ from app.core.persistence.models import (
 )
 
 
+logger = logging.getLogger(__name__)
+
 _SETTINGS_ROW_ID = 1
+
+
+def _commit(session: Session) -> None:
+    """
+    R3: commit with rollback on failure so a locked/failed transaction
+    cannot poison the long-lived repository session.
+    """
+    try:
+        session.commit()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            logger.exception("[DB] rollback after failed commit also failed")
+        raise
 
 
 class SettingsRepository:
@@ -21,13 +39,16 @@ class SettingsRepository:
     ) -> None:
         self._session = session
 
+    def close(self) -> None:
+        self._session.close()
+
     def load(self) -> SettingsEntity | None:
         return self._session.get(SettingsEntity, _SETTINGS_ROW_ID)
 
     def save(self, entity: SettingsEntity) -> None:
         entity.id = _SETTINGS_ROW_ID
         self._session.merge(entity)
-        self._session.commit()
+        _commit(self._session)
 
 
 class PositionRepository:
@@ -37,12 +58,15 @@ class PositionRepository:
     ) -> None:
         self._session = session
 
+    def close(self) -> None:
+        self._session.close()
+
     def save(
         self,
         position: PositionEntity,
     ) -> None:
         self._session.merge(position)
-        self._session.commit()
+        _commit(self._session)
 
     def get(
         self,
@@ -63,7 +87,7 @@ class PositionRepository:
             return False
 
         self._session.delete(position)
-        self._session.commit()
+        _commit(self._session)
         return True
 
     def list(
@@ -79,6 +103,9 @@ class SymbolBlacklistRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def close(self) -> None:
+        self._session.close()
+
     def list_all(self) -> list[SymbolBlacklistEntity]:
         return (
             self._session.query(SymbolBlacklistEntity)
@@ -93,14 +120,14 @@ class SymbolBlacklistRepository:
             created_at=datetime.now(UTC),
         )
         self._session.merge(entity)
-        self._session.commit()
+        _commit(self._session)
 
     def remove(self, symbol: str) -> bool:
         entity = self._session.get(SymbolBlacklistEntity, symbol)
         if entity is None:
             return False
         self._session.delete(entity)
-        self._session.commit()
+        _commit(self._session)
         return True
 
 
@@ -117,6 +144,9 @@ class TradeJournalRepository:
     ) -> None:
         self._session = session
 
+    def close(self) -> None:
+        self._session.close()
+
     def insert(self, entity: TradeJournalEntity) -> int:
         """Adds a brand-new journal row (the entry side of a trade) and
         returns the autoincrement id the caller must remember to update
@@ -124,13 +154,13 @@ class TradeJournalRepository:
         be unset (None) so SQLAlchemy assigns a fresh autoincrement id
         instead of colliding with an existing row."""
         self._session.add(entity)
-        self._session.commit()
+        _commit(self._session)
         self._session.refresh(entity)
         return entity.id
 
     def update(self, entity: TradeJournalEntity) -> None:
         self._session.merge(entity)
-        self._session.commit()
+        _commit(self._session)
 
     def get(self, entry_id: int) -> TradeJournalEntity | None:
         return self._session.get(TradeJournalEntity, entry_id)
@@ -224,7 +254,7 @@ class TradeJournalRepository:
 
     def insert_log(self, entity: TradeLogEntity) -> int:
         self._session.add(entity)
-        self._session.commit()
+        _commit(self._session)
         self._session.refresh(entity)
         return entity.id
 

@@ -602,8 +602,12 @@ def test_no_asyncio_task_or_db_pool_leak_after_shutdown(tmp_path):
         loop.close()
         asyncio.set_event_loop(None)
 
-    assert persistence.engine.pool.checkedout() == 0
-    persistence.engine.dispose()
+    # R3: file SQLite uses NullPool (no checkedout()). Dispose releases
+    # connections; QueuePool backends still expose checkedout() == 0.
+    persistence.dispose()
+    pool = persistence.engine.pool
+    if hasattr(pool, "checkedout"):
+        assert pool.checkedout() == 0
 
 
 def test_modules_stop_cleanly_without_open_positions():

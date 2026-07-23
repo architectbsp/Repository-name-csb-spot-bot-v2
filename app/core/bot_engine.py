@@ -595,4 +595,9 @@ class BotEngine:
 
         self.shutdown()
 
+        try:
+            self.persistence.dispose()
+        except Exception:
+            logger.exception("[BotEngine] persistence.dispose failed")
+
         logger.info("BotEngine stopped successfully")
