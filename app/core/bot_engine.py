@@ -447,6 +447,9 @@ class BotEngine:
         order_execution.set_on_ambiguous(
             lambda _market, _result: self.position_reconciler.reconcile_once()
         )
+        self.position_manager.set_on_local_persisted(
+            order_execution.confirm_local_position
+        )
         self.position_reconciler.set_order_execution(order_execution)
 
         self.market_scanner.initialize()
@@ -555,6 +558,13 @@ class BotEngine:
             logger.exception(
                 "[BotEngine] startup reconciliation failed"
             )
+        # R5 restart: recover active ClientOrderIds without waiting for a signal.
+        try:
+            self.risk_manager.order_execution.recover_inflight_orders()
+        except Exception:
+            logger.exception(
+                "[BotEngine] startup client-order recovery failed"
+            )
         logger.info("BotEngine started successfully")
 
     def _on_exchange_connected_reconcile(self, event=None, **kwargs) -> None:
@@ -564,6 +574,12 @@ class BotEngine:
         except Exception:
             logger.exception(
                 "[BotEngine] reconcile after exchange.connected failed"
+            )
+        try:
+            self.risk_manager.order_execution.recover_inflight_orders()
+        except Exception:
+            logger.exception(
+                "[BotEngine] client-order recovery after exchange.connected failed"
             )
 
     def _on_worker_error(self, exc: BaseException) -> None:

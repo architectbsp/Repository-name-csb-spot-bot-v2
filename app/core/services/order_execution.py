@@ -203,6 +203,11 @@ class OrderExecutionService:
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
+        # R5 restart: clear AWAITING_LOCAL when local position is persisted,
+        # without requiring RiskManager changes.
+        binder = getattr(position_manager, "set_on_local_persisted", None)
+        if callable(binder):
+            binder(self.confirm_local_position)
 
     def set_telemetry(self, telemetry) -> None:
         """Optional TelemetryService -- records order round-trip ms."""
@@ -222,6 +227,225 @@ class OrderExecutionService:
     def set_client_order_store_path(self, path: str | Path | None) -> None:
         """R5: persist ClientOrderId registry across restarts (JSON sidecar)."""
         self._client_orders.set_store_path(path)
+
+    def confirm_local_position(self, market: str) -> None:
+        """
+        R5 restart hardening: local position add/close/scale persisted.
+        Releases AWAITING_LOCAL ClientOrderId for ``market``.
+        """
+        record = self._client_orders.get_active_for_market(market)
+        if record is None:
+            return
+        if record.status != "AWAITING_LOCAL":
+            return
+        self._client_orders.mark_completed(
+            record.client_order_id,
+            market_key=market,
+            exchange_order_id=record.exchange_order_id,
+        )
+        logger.info(
+            "[EXEC] Local persistence confirmed -- ClientOrderId completed "
+            "market=%s cid=%s",
+            market,
+            record.client_order_id,
+        )
+
+    def recover_inflight_orders(self) -> list[dict]:
+        """
+        R5 restart hardening: scan active ClientOrderIds without waiting
+        for a new execute(). Quarantines unmanaged fills / open orders
+        and surfaces them via on_ambiguous. Safe to call at startup and
+        on exchange.connected.
+        """
+        from app.core.exchange.market_key import market_key, try_parse_exchange_type
+
+        findings: list[dict] = []
+        for record in self._client_orders.list_active():
+            exchange = try_parse_exchange_type(record.exchange)
+            if exchange is None:
+                logger.error(
+                    "[EXEC] recover_inflight: unknown exchange=%r cid=%s",
+                    record.exchange,
+                    record.client_order_id,
+                )
+                continue
+            flight_key = market_key(exchange, record.symbol)
+            finding = self._recover_one_inflight(exchange, flight_key, record)
+            if finding is not None:
+                findings.append(finding)
+        return findings
+
+    def _recover_one_inflight(self, exchange_type, flight_key: str, record) -> dict | None:
+        from app.core.trading.models import TradeRequest, TradeSide
+        from decimal import Decimal
+
+        side = TradeSide.BUY if str(record.side).upper() == "BUY" else TradeSide.SELL
+        try:
+            qty = Decimal(str(record.quantity)) if record.quantity else Decimal("1")
+        except Exception:
+            qty = Decimal("1")
+        if qty <= 0:
+            qty = Decimal("1")
+        trade = TradeRequest(
+            symbol=record.symbol,
+            side=side,
+            quantity=qty,
+            client_order_id=record.client_order_id,
+        )
+
+        has_local = self._has_open_position(exchange_type, record.symbol)
+        order = None
+        fetcher = getattr(self._exchange_manager, "fetch_order_by_client_id", None)
+        if callable(fetcher):
+            try:
+                order = fetcher(exchange_type, record.client_order_id, record.symbol)
+            except Exception:
+                logger.exception(
+                    "[EXEC] recover_inflight fetch failed market=%s cid=%s",
+                    flight_key,
+                    record.client_order_id,
+                )
+
+        if record.status == "AWAITING_LOCAL":
+            if side == TradeSide.BUY and has_local:
+                self._client_orders.mark_completed(
+                    record.client_order_id,
+                    market_key=flight_key,
+                    exchange_order_id=record.exchange_order_id,
+                )
+                return {
+                    "market": flight_key,
+                    "action": "completed_local_confirmed",
+                    "cid": record.client_order_id,
+                }
+            if side == TradeSide.SELL and not has_local:
+                self._client_orders.mark_completed(
+                    record.client_order_id,
+                    market_key=flight_key,
+                    exchange_order_id=record.exchange_order_id,
+                )
+                return {
+                    "market": flight_key,
+                    "action": "completed_local_confirmed",
+                    "cid": record.client_order_id,
+                }
+            # Fill known locally missing / close missing → quarantine.
+            self._client_orders.mark_ambiguous(record.client_order_id)
+            self._quarantine(flight_key)
+            result = ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                order_result=order,
+                error="awaiting_local_unmanaged_after_restart",
+            )
+            self._notify_ambiguous(flight_key, result)
+            logger.critical(
+                "[EXEC] Unmanaged fill/close after restart market=%s cid=%s "
+                "side=%s has_local=%s -- QUARANTINED",
+                flight_key,
+                record.client_order_id,
+                record.side,
+                has_local,
+            )
+            return {
+                "market": flight_key,
+                "action": "quarantined_unmanaged",
+                "cid": record.client_order_id,
+            }
+
+        if order is not None:
+            classified = self._classify_result(exchange_type, trade, order)
+            if classified.outcome == ExecutionOutcome.FILLED:
+                if side == TradeSide.BUY and has_local:
+                    self._client_orders.mark_completed(
+                        record.client_order_id,
+                        market_key=flight_key,
+                        exchange_order_id=getattr(order, "order_id", None),
+                    )
+                    return {
+                        "market": flight_key,
+                        "action": "completed_local_confirmed",
+                        "cid": record.client_order_id,
+                    }
+                if side == TradeSide.SELL and not has_local:
+                    self._client_orders.mark_completed(
+                        record.client_order_id,
+                        market_key=flight_key,
+                        exchange_order_id=getattr(order, "order_id", None),
+                    )
+                    return {
+                        "market": flight_key,
+                        "action": "completed_local_confirmed",
+                        "cid": record.client_order_id,
+                    }
+                self._client_orders.mark_awaiting_local(
+                    record.client_order_id,
+                    exchange_order_id=getattr(order, "order_id", None),
+                )
+                self._quarantine(flight_key)
+                self._notify_ambiguous(flight_key, classified)
+                logger.critical(
+                    "[EXEC] Recovered fill with no matching local state "
+                    "market=%s cid=%s -- QUARANTINED",
+                    flight_key,
+                    record.client_order_id,
+                )
+                return {
+                    "market": flight_key,
+                    "action": "quarantined_recovered_fill",
+                    "cid": record.client_order_id,
+                }
+            if classified.is_ambiguous or classified.outcome in {
+                ExecutionOutcome.UNRECONCILED,
+                ExecutionOutcome.UNKNOWN_STATUS,
+                ExecutionOutcome.TIMED_OUT,
+            }:
+                self._client_orders.mark_ambiguous(record.client_order_id)
+                self._quarantine(flight_key)
+                self._notify_ambiguous(flight_key, classified)
+                return {
+                    "market": flight_key,
+                    "action": "quarantined_open_or_ambiguous",
+                    "cid": record.client_order_id,
+                }
+            if classified.outcome == ExecutionOutcome.REJECTED:
+                self._client_orders.mark_failed(
+                    record.client_order_id, market_key=flight_key
+                )
+                return {
+                    "market": flight_key,
+                    "action": "failed_terminal",
+                    "cid": record.client_order_id,
+                }
+
+        # No order found -- still ambiguous in-flight.
+        self._client_orders.mark_ambiguous(record.client_order_id)
+        self._quarantine(flight_key)
+        result = ExecutionResult(
+            outcome=ExecutionOutcome.UNRECONCILED,
+            error="inflight_not_found_after_restart",
+        )
+        self._notify_ambiguous(flight_key, result)
+        logger.critical(
+            "[EXEC] Active ClientOrderId unresolved after restart "
+            "market=%s cid=%s -- QUARANTINED",
+            flight_key,
+            record.client_order_id,
+        )
+        return {
+            "market": flight_key,
+            "action": "quarantined_unresolved",
+            "cid": record.client_order_id,
+        }
+
+    def _notify_ambiguous(self, flight_key: str, result: ExecutionResult) -> None:
+        if self._on_ambiguous is None:
+            return
+        try:
+            self._on_ambiguous(flight_key, result)
+        except Exception:
+            logger.exception(
+                "[EXEC] on_ambiguous callback failed for %s", flight_key
+            )
 
     def is_in_flight(self, symbol: str) -> bool:
         with self._lock:
@@ -464,6 +688,14 @@ class OrderExecutionService:
         side = getattr(trade, "side", None)
         side_value = side.value if hasattr(side, "value") else str(side or "")
 
+        # R5: settle AWAITING_LOCAL before allocating / reusing a cid so a
+        # later SELL never reuses a BUY fill id (and vice versa).
+        if self._settle_awaiting_local(flight_key, exchange_type):
+            return ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                error="awaiting_local_mismatch",
+            )
+
         # R5: allocate or reuse durable ClientOrderId *before* submit.
         client_order_id = self._client_orders.begin_logical_trade(
             market_key=flight_key,
@@ -610,6 +842,43 @@ class OrderExecutionService:
         self._finalize_client_order(flight_key, client_order_id, classified)
         return classified
 
+    def _settle_awaiting_local(self, flight_key: str, exchange_type) -> bool:
+        """
+        Resolve or quarantine AWAITING_LOCAL before a new submit.
+        Returns True when the caller must abort (unmanaged mismatch).
+        """
+        record = self._client_orders.get_active_for_market(flight_key)
+        if record is None or record.status != "AWAITING_LOCAL":
+            return False
+        symbol = record.symbol
+        side = str(record.side).upper()
+        has_local = self._has_open_position(exchange_type, symbol)
+        if side == "BUY" and has_local:
+            self._client_orders.mark_completed(
+                record.client_order_id,
+                market_key=flight_key,
+                exchange_order_id=record.exchange_order_id,
+            )
+            return False
+        if side == "SELL" and not has_local:
+            self._client_orders.mark_completed(
+                record.client_order_id,
+                market_key=flight_key,
+                exchange_order_id=record.exchange_order_id,
+            )
+            return False
+        # Local state does not match the awaiting fill -- quarantine.
+        self._client_orders.mark_ambiguous(record.client_order_id)
+        self._quarantine(flight_key)
+        logger.critical(
+            "[EXEC] AWAITING_LOCAL mismatch before new submit market=%s "
+            "side=%s has_local=%s -- QUARANTINED",
+            flight_key,
+            side,
+            has_local,
+        )
+        return True
+
     def _recover_by_client_order_id(
         self, exchange_type, trade
     ) -> ExecutionResult | None:
@@ -658,11 +927,14 @@ class OrderExecutionService:
                 self._client_orders.mark_failed(
                     client_order_id, market_key=market_key
                 )
+            elif result.outcome == ExecutionOutcome.DUPLICATE:
+                self._client_orders.mark_failed(
+                    client_order_id, market_key=market_key
+                )
             else:
-                self._client_orders.mark_completed(
-                    client_order_id,
-                    market_key=market_key,
-                    exchange_order_id=order_id,
+                # Keep active until PositionManager confirms local persist.
+                self._client_orders.mark_awaiting_local(
+                    client_order_id, exchange_order_id=order_id
                 )
             return
         if result.is_ambiguous:

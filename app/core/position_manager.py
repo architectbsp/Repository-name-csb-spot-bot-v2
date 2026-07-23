@@ -33,9 +33,15 @@ class PositionManager:
         # R1: protects _positions / freeze / lifecycle flags against
         # concurrent WS, Worker, and UI readers/writers.
         self._lock = threading.RLock()
+        # R5 restart: notify OES after local SQLite persist (add/close/scale).
+        self._on_local_persisted = None
 
     def set_repository(self, repository) -> None:
         self._repository = repository
+
+    def set_on_local_persisted(self, callback) -> None:
+        """Optional ``callback(market_key: str)`` after durable local save."""
+        self._on_local_persisted = callback
 
     def set_config(self, config: AppSettings | None) -> None:
         self._config = config
@@ -120,7 +126,8 @@ class PositionManager:
             if self._repository is not None:
                 self._repository.save(to_entity(position))
 
-            return True
+        self._emit_local_persisted(key)
+        return True
 
     def restore(self, position: Position) -> bool:
         with self._lock:
@@ -227,7 +234,8 @@ class PositionManager:
             if self._repository is not None:
                 self._repository.save(to_entity(position))
 
-            return True
+        self._emit_local_persisted(key)
+        return True
 
     def scale_out(
         self,
@@ -285,7 +293,10 @@ class PositionManager:
             if self._repository is not None:
                 self._repository.save(to_entity(position))
 
-            return realized
+            realized_out = realized
+
+        self._emit_local_persisted(key)
+        return realized_out
 
     @staticmethod
     def _protect_remaining_after_partial(position: Position) -> None:
@@ -298,6 +309,19 @@ class PositionManager:
             return
         position.stop_price = float(position.entry_price)
         position.stop_stage = "BREAK_EVEN"
+
+    def _emit_local_persisted(self, market: str) -> None:
+        callback = self._on_local_persisted
+        if callback is None or not market:
+            return
+        try:
+            callback(market)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "[PositionManager] on_local_persisted failed market=%s", market
+            )
 
     def is_open(self, symbol: str, exchange=None) -> bool:
         position = self.get(symbol, exchange=exchange)

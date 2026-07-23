@@ -23,7 +23,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_ACTIVE_STATUSES = frozenset({"PENDING", "SUBMITTED", "AMBIGUOUS"})
+# AWAITING_LOCAL: venue fill classified, local position/close not yet
+# confirmed -- kept active so restart can detect unmanaged inventory.
+_ACTIVE_STATUSES = frozenset(
+    {"PENDING", "SUBMITTED", "AMBIGUOUS", "AWAITING_LOCAL"}
+)
 
 
 @dataclass(slots=True)
@@ -116,8 +120,8 @@ class ClientOrderRegistry:
             record = self._by_id.get(client_order_id)
             if record is None:
                 return
-            # Preserve AMBIGUOUS; only attach venue order id.
-            if record.status != "AMBIGUOUS":
+            # Preserve AMBIGUOUS / AWAITING_LOCAL; only attach venue order id.
+            if record.status not in {"AMBIGUOUS", "AWAITING_LOCAL"}:
                 record.status = "SUBMITTED"
             if exchange_order_id:
                 record.exchange_order_id = str(exchange_order_id)
@@ -163,6 +167,34 @@ class ClientOrderRegistry:
             record.status = "AMBIGUOUS"
             record.updated_at = time.time()
             self._persist_unlocked()
+
+    def mark_awaiting_local(
+        self,
+        client_order_id: str,
+        exchange_order_id: str | None = None,
+    ) -> None:
+        """
+        Venue fill is known; keep the market slot active until local
+        position create/close is confirmed (restart-safe).
+        """
+        with self._lock:
+            record = self._by_id.get(client_order_id)
+            if record is None:
+                return
+            record.status = "AWAITING_LOCAL"
+            if exchange_order_id:
+                record.exchange_order_id = str(exchange_order_id)
+            record.updated_at = time.time()
+            self._persist_unlocked()
+
+    def list_active(self) -> list[ClientOrderRecord]:
+        with self._lock:
+            out: list[ClientOrderRecord] = []
+            for cid in self._active_by_market.values():
+                record = self._by_id.get(cid)
+                if record is not None and record.is_active():
+                    out.append(record)
+            return out
 
     def clear_market(self, market_key: str) -> None:
         """Drop active binding (e.g. after operator clear_quarantine)."""
