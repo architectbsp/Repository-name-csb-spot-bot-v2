@@ -559,12 +559,15 @@ Every BUY and SELL submitted by RiskManager goes through
 `OrderExecutionService` (`app/core/services/order_execution.py`), which
 guarantees:
 
-- **Duplicate order protection**: a symbol can never have two orders in
-  flight at the same time. A second attempt while one is already
-  submitting is rejected before it ever reaches the exchange.
-- **Retry policy**: only transient network errors and insufficient-balance
-  rejections are retried (see "Insufficient Balance" above for the exact
-  numbers); any other exchange rejection (invalid order, generic exchange
+- **Duplicate order protection**: a market key `(exchange, symbol)` can
+  never have two orders in flight at the same time. A second attempt
+  while one is already submitting is rejected before it ever reaches
+  the exchange. A BUY is also blocked when a local OPEN position already
+  exists for that market (atomic check before submit).
+- **Retry policy**: only transient network errors (including ccxt
+  `RateLimitExceeded` / 429 and `ExchangeNotAvailable` / 503, both
+  subclasses of `NetworkError`) and insufficient-balance rejections are
+  retried; any other exchange rejection (invalid order, generic exchange
   error) is never retried. Waits use exponential backoff
   (`delay * 2^(attempt-1)`, capped) for submit and cancel retries.
 - **Timeout**: the blocking exchange call is bounded; a call that never
@@ -573,17 +576,21 @@ guarantees:
   (configurable via `pending_timeout_seconds`), then cancellation is
   attempted (with its own retries) before giving up / quarantining.
 - **Balance reconciliation** (`PositionReconciler`): on a scheduler
-  interval, each OPEN local position's quantity is compared to the
-  exchange free base-asset balance. A clear shortfall publishes
+  interval (and immediately after an ambiguous submit outcome), each
+  OPEN local position's quantity is compared to the exchange free
+  base-asset balance. A clear shortfall publishes
   `position.reconcile_mismatch` + `order.needs_manual_review` and
   quarantines that market (Unknown Order / DB drift).
 - **Unknown order status handling**: a status this module does not
   recognize as filled/open/terminal is never guessed at (never silently
   treated as filled or as safe to ignore).
-- **Quarantine**: a symbol left in an unreconciled or unknown-status state
-  is quarantined -- no further order for that symbol is submitted until
-  an operator manually verifies the real exchange state and clears it.
-  This is surfaced as an `order.needs_manual_review` event.
+- **Quarantine**: a market left in an unreconciled, unknown-status,
+  network-failed, or ambiguous submit-timeout state is quarantined --
+  no further order for that market is submitted until an operator
+  manually verifies the real exchange state and clears it. Successful
+  pending auto-cancel (`TIMED_OUT` without error) does **not** quarantine.
+  Ambiguous outcomes are surfaced as `order.needs_manual_review`
+  (Telegram + dashboard alert buffer).
 
 ---
 

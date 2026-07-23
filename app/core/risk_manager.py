@@ -195,7 +195,11 @@ class RiskManager:
                 retry_policy=self._retry_policy,
                 timeout=self._timeout,
                 pending_timeout_seconds=30.0,
+                position_manager=self._position_manager,
             )
+        else:
+            # Keep position_manager in sync if OES was built early / in tests.
+            self._order_execution.set_position_manager(self._position_manager)
         return self._order_execution
 
     @property
@@ -650,6 +654,7 @@ class RiskManager:
             ExecutionOutcome.UNRECONCILED,
             ExecutionOutcome.UNKNOWN_STATUS,
             ExecutionOutcome.QUARANTINED,
+            ExecutionOutcome.NETWORK_FAILED,
         }
     )
 
@@ -662,12 +667,15 @@ class RiskManager:
     ) -> None:
         """
         Sprint 4: surfaces execution outcomes that cannot be resolved
-        automatically (unreconciled/unknown-status/quarantined orders) as
-        an event, so a future UI banner or Telegram alert (Sprint 11/12)
-        can notify an operator instead of this only ever showing up in a
-        log file.
+        automatically (unreconciled / unknown-status / quarantined /
+        network-failed / ambiguous submit timeout) as an event so
+        Telegram / dashboard subscribers can notify an operator.
         """
-        if execution.outcome not in self._NEEDS_MANUAL_REVIEW:
+        needs_review = execution.outcome in self._NEEDS_MANUAL_REVIEW or (
+            execution.outcome == ExecutionOutcome.TIMED_OUT
+            and getattr(execution, "is_ambiguous", False)
+        )
+        if not needs_review:
             return
 
         logger.critical(
@@ -750,6 +758,13 @@ class RiskManager:
             daily_loss_percent=self.current_daily_loss_percent(),
             open_positions=self._position_manager.open_count(),
         ):
+            return None
+
+        if self._position_manager.is_open(symbol, exchange=exchange_type):
+            logger.warning(
+                "[RISK] Duplicate BUY blocked for %s -- open position already exists",
+                symbol,
+            )
             return None
 
         position_value = self.calculate_position_size(

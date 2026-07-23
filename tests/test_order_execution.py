@@ -181,6 +181,107 @@ def test_network_error_exhausting_retries_is_reported_as_network_failed():
 
     assert result.outcome == ExecutionOutcome.NETWORK_FAILED
     assert exchange.execute_trade_calls == 3
+    assert service.is_quarantined("BINANCE:BTCUSDT")
+    assert result.is_ambiguous
+
+
+def test_rate_limit_429_is_retried_like_network_error():
+    exchange = ScriptedExchangeManager(
+        [ccxt.RateLimitExceeded("429"), make_order_result("CLOSED")]
+    )
+    retry_policy = RetryPolicy(max_attempts=3, delay=0)
+    service = make_service(exchange, retry_policy=retry_policy)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.FILLED
+    assert exchange.execute_trade_calls == 2
+
+
+def test_service_unavailable_503_is_retried_like_network_error():
+    exchange = ScriptedExchangeManager(
+        [ccxt.ExchangeNotAvailable("503"), make_order_result("CLOSED")]
+    )
+    retry_policy = RetryPolicy(max_attempts=3, delay=0)
+    service = make_service(exchange, retry_policy=retry_policy)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.FILLED
+    assert exchange.execute_trade_calls == 2
+
+
+def test_buy_blocked_when_open_position_already_exists():
+    from datetime import UTC, datetime
+
+    from app.core.domain.position import Position
+    from app.core.position_manager import PositionManager
+
+    exchange = ScriptedExchangeManager([make_order_result("CLOSED")])
+    service = make_service(exchange)
+    pm = PositionManager()
+    pm.add(
+        Position(
+            symbol="BTCUSDT",
+            entry_price=100.0,
+            quantity=1.0,
+            opened_at=datetime.now(UTC),
+            stop_price=90.0,
+            exchange="BINANCE",
+        )
+    )
+    service.set_position_manager(pm)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.DUPLICATE
+    assert exchange.execute_trade_calls == 0
+
+
+def test_pending_cancel_retries_network_error_then_succeeds():
+    exchange = ScriptedExchangeManager(
+        execute_trade_script=[make_order_result("OPEN")],
+        fetch_order_script=[make_order_result("OPEN"), make_order_result("OPEN")],
+        cancel_order_script=[ccxt.NetworkError("cancel blip"), make_order_result("CANCELED")],
+    )
+    retry_policy = RetryPolicy(max_attempts=3, delay=0)
+    service = make_service(exchange, retry_policy=retry_policy)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.TIMED_OUT
+    assert exchange.cancel_order_calls == 2
+    # Successful pending auto-cancel is not ambiguous -- no quarantine.
+    assert not service.is_quarantined("BINANCE:BTCUSDT")
+    assert not result.is_ambiguous
+
+
+def test_submit_timeout_quarantines_and_invokes_ambiguous_hook():
+    class TimingOutExchange:
+        execute_trade_calls = 0
+
+        def execute_trade(self, exchange_type, trade):
+            self.execute_trade_calls += 1
+            raise TimeoutError("submit hung")
+
+    exchange = TimingOutExchange()
+    seen: list[tuple] = []
+    service = OrderExecutionService(
+        exchange,
+        retry_policy=RetryPolicy(max_attempts=1, delay=0),
+        timeout=None,
+        pending_poll_interval=0,
+        pending_poll_attempts=1,
+        cancel_retry_attempts=1,
+        on_ambiguous=lambda market, result: seen.append((market, result.outcome)),
+    )
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.TIMED_OUT
+    assert result.is_ambiguous
+    assert service.is_quarantined("BINANCE:BTCUSDT")
+    assert seen == [("BINANCE:BTCUSDT", ExecutionOutcome.TIMED_OUT)]
 
 
 def test_unexpected_exception_does_not_propagate():

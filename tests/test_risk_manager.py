@@ -94,6 +94,9 @@ class DummyPositionManager:
     def open_count(self):
         return len(self.positions)
 
+    def is_open(self, symbol, exchange=None):
+        return symbol in self.positions
+
     def add(self, position):
         self.positions[position.symbol] = position
         self.added.append(position)

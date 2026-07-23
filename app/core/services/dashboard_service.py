@@ -75,6 +75,10 @@ class DashboardService:
         self._system_metrics = SystemMetricsSampler()
         self._last_api_latency_ms: float | None = None
         self._last_api_ping_at: float | None = None
+        # Sprint 4: recent order.needs_manual_review payloads for UI.
+        self._exec_alerts: list[dict] = []
+        self._exec_alerts_lock = threading.Lock()
+        self._exec_alerts_capacity = 20
 
     # ---- wiring ---------------------------------------------------------
 
@@ -112,6 +116,25 @@ class DashboardService:
             return
         with self._ticker_lock:
             self._tickers[_ticker_cache_key(ticker)] = ticker
+
+    def on_order_needs_manual_review(self, payload: dict) -> None:
+        """EventBus handler for Sprint 4 ``order.needs_manual_review``."""
+        if not isinstance(payload, dict):
+            return
+        with self._exec_alerts_lock:
+            self._exec_alerts.append(
+                {
+                    **payload,
+                    "at": datetime.now(UTC).isoformat(),
+                }
+            )
+            overflow = len(self._exec_alerts) - self._exec_alerts_capacity
+            if overflow > 0:
+                del self._exec_alerts[:overflow]
+
+    def recent_execution_alerts(self) -> list[dict]:
+        with self._exec_alerts_lock:
+            return list(self._exec_alerts)
 
     def seed_tickers_from_scan(self) -> None:
         """Pull MarketScanner's last scan result into the ticker cache

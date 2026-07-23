@@ -31,7 +31,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 import ccxt
 
@@ -46,11 +46,12 @@ class ExecutionOutcome(str, Enum):
     REJECTED = "REJECTED"
     # Transient network/connectivity failure, retries exhausted.
     NETWORK_FAILED = "NETWORK_FAILED"
-    # The bounded timeout around the exchange call was exceeded.
+    # The bounded timeout around the exchange call was exceeded, OR a
+    # pending order was auto-cancelled after the poll window.
     TIMED_OUT = "TIMED_OUT"
     # Another order for this symbol was already in flight through this
-    # service; this attempt was rejected before ever reaching the
-    # exchange.
+    # service, OR a BUY was blocked because an OPEN local position
+    # already exists for the market -- rejected before the exchange.
     DUPLICATE = "DUPLICATE"
     # The exchange returned an order status this module does not
     # recognize as filled/open/terminal -- never guessed at, always
@@ -60,8 +61,8 @@ class ExecutionOutcome(str, Enum):
     # cancel attempt also failed -- the exchange may or may not still
     # execute it. Requires manual reconciliation.
     UNRECONCILED = "UNRECONCILED"
-    # The symbol is quarantined after a prior UNRECONCILED/UNKNOWN_STATUS
-    # outcome; rejected before ever reaching the exchange.
+    # The symbol is quarantined after a prior ambiguous outcome;
+    # rejected before ever reaching the exchange.
     QUARANTINED = "QUARANTINED"
 
 
@@ -69,6 +70,16 @@ _KNOWN_FILLED_STATUSES = frozenset({"CLOSED", "FILLED"})
 _KNOWN_OPEN_STATUSES = frozenset({"OPEN", "NEW", "PARTIALLY_FILLED"})
 _KNOWN_TERMINAL_NON_FILLED_STATUSES = frozenset(
     {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED"}
+)
+
+# Ambiguous outcomes that may mean the exchange accepted an order we
+# cannot prove local state for -- quarantine until operator clears.
+_QUARANTINE_OUTCOMES = frozenset(
+    {
+        ExecutionOutcome.UNRECONCILED,
+        ExecutionOutcome.UNKNOWN_STATUS,
+        ExecutionOutcome.NETWORK_FAILED,
+    }
 )
 
 
@@ -81,6 +92,15 @@ class ExecutionResult:
     @property
     def is_filled(self) -> bool:
         return self.outcome == ExecutionOutcome.FILLED
+
+    @property
+    def is_ambiguous(self) -> bool:
+        """True when local/exchange state may have diverged."""
+        if self.outcome in _QUARANTINE_OUTCOMES:
+            return True
+        # Submit TimeoutError is ambiguous; pending auto-cancel success
+        # returns TIMED_OUT without an error string.
+        return self.outcome == ExecutionOutcome.TIMED_OUT and bool(self.error)
 
 
 class OrderExecutionService:
@@ -95,10 +115,14 @@ class OrderExecutionService:
         pending_poll_attempts: int = 30,
         cancel_retry_attempts: int = 3,
         pending_timeout_seconds: float | None = None,
+        position_manager=None,
+        on_ambiguous: Callable[[str, ExecutionResult], None] | None = None,
     ) -> None:
         self._exchange_manager = exchange_manager
         self._retry_policy = retry_policy
         self._timeout = timeout
+        self._position_manager = position_manager
+        self._on_ambiguous = on_ambiguous
         self._pending_poll_interval = pending_poll_interval
         if pending_timeout_seconds is not None and pending_poll_interval > 0:
             self._pending_poll_attempts = max(
@@ -117,6 +141,15 @@ class OrderExecutionService:
         # allowed until an operator explicitly clears the quarantine
         # (clear_quarantine) after checking the exchange by hand.
         self._quarantined: set[str] = set()
+
+    def set_position_manager(self, position_manager) -> None:
+        self._position_manager = position_manager
+
+    def set_on_ambiguous(
+        self, callback: Callable[[str, ExecutionResult], None] | None
+    ) -> None:
+        """Optional hook (e.g. PositionReconciler.reconcile_once)."""
+        self._on_ambiguous = callback
 
     def is_in_flight(self, symbol: str) -> bool:
         with self._lock:
@@ -156,6 +189,19 @@ class OrderExecutionService:
         with self._lock:
             self._quarantined.add(symbol)
 
+    def _has_open_position(self, exchange_type, symbol: str) -> bool:
+        if self._position_manager is None:
+            return False
+        try:
+            return bool(
+                self._position_manager.is_open(symbol, exchange=exchange_type)
+            )
+        except Exception:
+            logger.exception(
+                "[EXEC] position_manager.is_open failed symbol=%s", symbol
+            )
+            return False
+
     def execute(self, exchange_type, trade) -> ExecutionResult:
         """
         Submits `trade` for `exchange_type`, applying every protection
@@ -167,9 +213,21 @@ class OrderExecutionService:
         # Sprint 18: quarantine / in-flight keys are per (exchange, symbol)
         # so a Binance BTC order never blocks the same symbol on Bybit.
         from app.core.exchange.market_key import market_key
+        from app.core.trading.models import TradeSide
 
         symbol = trade.symbol
         flight_key = market_key(exchange_type, symbol)
+
+        # Duplicate BUY guard: open local position for this market.
+        side = getattr(trade, "side", None)
+        if side == TradeSide.BUY and self._has_open_position(exchange_type, symbol):
+            logger.warning(
+                "[EXEC] Duplicate BUY blocked -- open position exists "
+                "symbol=%s exchange=%s",
+                symbol,
+                flight_key.split(":", 1)[0],
+            )
+            return ExecutionResult(outcome=ExecutionOutcome.DUPLICATE)
 
         blocked = self._begin(flight_key)
 
@@ -186,10 +244,7 @@ class OrderExecutionService:
         try:
             result = self._execute_with_protection(exchange_type, trade)
 
-            if result.outcome in (
-                ExecutionOutcome.UNRECONCILED,
-                ExecutionOutcome.UNKNOWN_STATUS,
-            ):
+            if result.is_ambiguous:
                 self._quarantine(flight_key)
                 logger.critical(
                     "[EXEC] %s is now QUARANTINED (outcome=%s) -- no "
@@ -199,6 +254,14 @@ class OrderExecutionService:
                     flight_key,
                     result.outcome,
                 )
+                if self._on_ambiguous is not None:
+                    try:
+                        self._on_ambiguous(flight_key, result)
+                    except Exception:
+                        logger.exception(
+                            "[EXEC] on_ambiguous callback failed for %s",
+                            flight_key,
+                        )
 
             return result
         finally:
@@ -247,7 +310,7 @@ class OrderExecutionService:
                     attempt,
                     max_attempts,
                     delay,
-                    exc,
+                    type(exc).__name__ + f": {exc}",
                 )
                 if delay > 0:
                     time.sleep(delay)

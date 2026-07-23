@@ -383,6 +383,10 @@ class BotEngine:
             "ticker.updated",
             self.dashboard_service.on_ticker_updated,
         )
+        self.event_bus.subscribe(
+            "order.needs_manual_review",
+            self.dashboard_service.on_order_needs_manual_review,
+        )
 
         # ConfigUpdatedEvent: modules already share live AppSettings;
         # handlers refresh anything that was snapshotted at initialize
@@ -393,9 +397,12 @@ class BotEngine:
         )
 
         # OrderExecution is built lazily; attach it before reconciler init.
-        self.position_reconciler.set_order_execution(
-            self.risk_manager.order_execution,
+        order_execution = self.risk_manager.order_execution
+        order_execution.set_position_manager(self.position_manager)
+        order_execution.set_on_ambiguous(
+            lambda _market, _result: self.position_reconciler.reconcile_once()
         )
+        self.position_reconciler.set_order_execution(order_execution)
 
         self.market_scanner.initialize()
         if self.strategy_orchestrator is not None:
