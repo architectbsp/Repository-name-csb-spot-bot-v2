@@ -23,6 +23,7 @@ def test_reconcile_ok_when_balance_covers_position():
     em = MagicMock()
     em.get_base_balance.return_value = 1.0
     oe = MagicMock()
+    oe.list_quarantined.return_value = []
     bus = MagicMock()
 
     reconciler = PositionReconciler()
@@ -42,6 +43,7 @@ def test_reconcile_mismatch_quarantines_and_publishes():
     em = MagicMock()
     em.get_base_balance.return_value = 0.1  # far below tolerance
     oe = MagicMock()
+    oe.list_quarantined.return_value = []
     bus = MagicMock()
 
     reconciler = PositionReconciler()
@@ -54,7 +56,34 @@ def test_reconcile_mismatch_quarantines_and_publishes():
     assert len(mismatches) == 1
     assert mismatches[0]["local_quantity"] == 1.0
     assert mismatches[0]["exchange_free"] == 0.1
+    assert mismatches[0]["kind"] == "LOCAL_GT_EXCHANGE"
     oe.quarantine.assert_called_once()
+    topics = [c.args[0] for c in bus.publish.call_args_list]
+    assert "position.reconcile_mismatch" in topics
+    assert "order.needs_manual_review" in topics
+
+
+def test_reconcile_orphan_inventory_on_quarantined_market():
+    pm = MagicMock()
+    pm.get_open_positions.return_value = []
+    pm.is_open.return_value = False
+    em = MagicMock()
+    em.get_base_balance.return_value = 0.5
+    oe = MagicMock()
+    oe.list_quarantined.return_value = ["BINANCE:BTCUSDT"]
+    bus = MagicMock()
+
+    reconciler = PositionReconciler()
+    reconciler.set_position_manager(pm)
+    reconciler.set_exchange_manager(em)
+    reconciler.set_order_execution(oe)
+    reconciler.set_event_bus(bus)
+
+    mismatches = reconciler.reconcile_once()
+    assert len(mismatches) == 1
+    assert mismatches[0]["kind"] == "ORPHAN_INVENTORY"
+    assert mismatches[0]["exchange_free"] == 0.5
+    oe.quarantine.assert_not_called()  # already quarantined
     topics = [c.args[0] for c in bus.publish.call_args_list]
     assert "position.reconcile_mismatch" in topics
     assert "order.needs_manual_review" in topics

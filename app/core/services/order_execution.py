@@ -26,11 +26,13 @@ with:
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable
 
 import ccxt
@@ -69,8 +71,43 @@ class ExecutionOutcome(str, Enum):
 _KNOWN_FILLED_STATUSES = frozenset({"CLOSED", "FILLED"})
 _KNOWN_OPEN_STATUSES = frozenset({"OPEN", "NEW", "PARTIALLY_FILLED"})
 _KNOWN_TERMINAL_NON_FILLED_STATUSES = frozenset(
-    {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED"}
+    {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FAILED"}
 )
+
+_FILL_EPS = 1e-12
+
+
+def _filled_quantity(order) -> float:
+    try:
+        return float(getattr(order, "filled_quantity", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _requested_quantity(order, trade=None) -> float:
+    try:
+        qty = float(getattr(order, "requested_quantity", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        qty = 0.0
+    if qty > 0:
+        return qty
+    if trade is not None:
+        try:
+            return float(getattr(trade, "quantity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def _is_fully_filled(order, trade=None) -> bool:
+    filled = _filled_quantity(order)
+    if filled <= _FILL_EPS:
+        return False
+    status = str(getattr(order, "status", "") or "").upper()
+    if status in _KNOWN_FILLED_STATUSES:
+        return True
+    requested = _requested_quantity(order, trade)
+    return requested > 0 and filled + _FILL_EPS >= requested
 
 # Ambiguous outcomes that may mean the exchange accepted an order we
 # cannot prove local state for -- quarantine until operator clears.
@@ -117,6 +154,7 @@ class OrderExecutionService:
         pending_timeout_seconds: float | None = None,
         position_manager=None,
         on_ambiguous: Callable[[str, ExecutionResult], None] | None = None,
+        quarantine_store_path: str | Path | None = None,
     ) -> None:
         self._exchange_manager = exchange_manager
         self._retry_policy = retry_policy
@@ -142,6 +180,12 @@ class OrderExecutionService:
         # allowed until an operator explicitly clears the quarantine
         # (clear_quarantine) after checking the exchange by hand.
         self._quarantined: set[str] = set()
+        # R4: optional sidecar JSON so quarantine survives process restart
+        # (does not touch the SQLite schema).
+        self._quarantine_store_path: Path | None = (
+            Path(quarantine_store_path) if quarantine_store_path else None
+        )
+        self._load_quarantine_store()
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
@@ -156,6 +200,11 @@ class OrderExecutionService:
         """Optional hook (e.g. PositionReconciler.reconcile_once)."""
         self._on_ambiguous = callback
 
+    def set_quarantine_store_path(self, path: str | Path | None) -> None:
+        """R4: persist quarantine set across restarts (JSON sidecar)."""
+        self._quarantine_store_path = Path(path) if path else None
+        self._load_quarantine_store()
+
     def is_in_flight(self, symbol: str) -> bool:
         with self._lock:
             return symbol in self._in_flight
@@ -164,12 +213,17 @@ class OrderExecutionService:
         with self._lock:
             return symbol in self._quarantined
 
+    def list_quarantined(self) -> list[str]:
+        with self._lock:
+            return sorted(self._quarantined)
+
     def clear_quarantine(self, symbol: str) -> bool:
         """For manual/operator use once the exchange state has been
         checked by hand. Returns True if the symbol was quarantined."""
         with self._lock:
             if symbol in self._quarantined:
                 self._quarantined.discard(symbol)
+                self._persist_quarantine_store_unlocked()
                 return True
             return False
 
@@ -193,6 +247,37 @@ class OrderExecutionService:
     def _quarantine(self, symbol: str) -> None:
         with self._lock:
             self._quarantined.add(symbol)
+            self._persist_quarantine_store_unlocked()
+
+    def _load_quarantine_store(self) -> None:
+        path = self._quarantine_store_path
+        if path is None or not path.is_file():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            markets = raw.get("markets", []) if isinstance(raw, dict) else []
+            with self._lock:
+                self._quarantined.update(str(m) for m in markets if m)
+        except Exception:
+            logger.exception(
+                "[EXEC] Failed loading quarantine store path=%s", path
+            )
+
+    def _persist_quarantine_store_unlocked(self) -> None:
+        path = self._quarantine_store_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"markets": sorted(self._quarantined)}
+            path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.exception(
+                "[EXEC] Failed persisting quarantine store path=%s", path
+            )
 
     def _has_open_position(self, exchange_type, symbol: str) -> bool:
         if self._position_manager is None:
@@ -435,6 +520,19 @@ class OrderExecutionService:
             return ExecutionResult(outcome=ExecutionOutcome.FILLED, order_result=result)
 
         if status in _KNOWN_TERMINAL_NON_FILLED_STATUSES:
+            # Terminal cancel/reject that still shows a fill = inventory risk.
+            if _filled_quantity(result) > _FILL_EPS:
+                logger.critical(
+                    "[EXEC] Terminal status %s with filled_qty>0 symbol=%s "
+                    "-- treating as UNRECONCILED",
+                    status,
+                    trade.symbol,
+                )
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.UNRECONCILED,
+                    order_result=result,
+                    error=f"terminal_{status.lower()}_with_fill",
+                )
             logger.warning(
                 "[EXEC] Order finished without a fill symbol=%s status=%s",
                 trade.symbol,
@@ -443,6 +541,10 @@ class OrderExecutionService:
             return ExecutionResult(outcome=ExecutionOutcome.REJECTED, order_result=result)
 
         if status in _KNOWN_OPEN_STATUSES:
+            if _is_fully_filled(result, trade):
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.FILLED, order_result=result
+                )
             return self._reconcile_pending_order(exchange_type, trade, result)
 
         logger.error(
@@ -464,6 +566,7 @@ class OrderExecutionService:
         """
         order_id = getattr(result, "order_id", None)
         symbol = trade.symbol
+        latest = result
 
         for attempt in range(1, self._pending_poll_attempts + 1):
             time.sleep(self._pending_poll_interval)
@@ -485,25 +588,40 @@ class OrderExecutionService:
                 )
                 continue
 
+            latest = refreshed
             status = str(getattr(refreshed, "status", "") or "").upper()
 
-            if status in _KNOWN_FILLED_STATUSES:
+            if status in _KNOWN_FILLED_STATUSES or _is_fully_filled(refreshed, trade):
                 return ExecutionResult(
                     outcome=ExecutionOutcome.FILLED, order_result=refreshed
                 )
 
             if status in _KNOWN_TERMINAL_NON_FILLED_STATUSES:
+                if _filled_quantity(refreshed) > _FILL_EPS:
+                    logger.critical(
+                        "[EXEC] Pending order reached terminal %s with "
+                        "partial/full fill symbol=%s order_id=%s",
+                        status,
+                        symbol,
+                        order_id,
+                    )
+                    return ExecutionResult(
+                        outcome=ExecutionOutcome.UNRECONCILED,
+                        order_result=refreshed,
+                        error=f"pending_terminal_{status.lower()}_with_fill",
+                    )
                 return ExecutionResult(
                     outcome=ExecutionOutcome.REJECTED, order_result=refreshed
                 )
 
         logger.warning(
-            "[EXEC] Pending order timeout symbol=%s order_id=%s -- "
-            "attempting to cancel",
+            "[EXEC] Pending order timeout symbol=%s order_id=%s "
+            "filled_qty=%.8f -- attempting to cancel",
             symbol,
             order_id,
+            _filled_quantity(latest),
         )
-        return self._cancel_with_retry(exchange_type, trade, result)
+        return self._cancel_with_retry(exchange_type, trade, latest)
 
     def _cancel_with_retry(self, exchange_type, trade, result) -> ExecutionResult:
         order_id = getattr(result, "order_id", None)
@@ -513,13 +631,11 @@ class OrderExecutionService:
             try:
                 self._exchange_manager.cancel_order(exchange_type, order_id, symbol)
                 logger.info(
-                    "[EXEC] Pending order cancelled symbol=%s order_id=%s",
+                    "[EXEC] Pending order cancel accepted symbol=%s order_id=%s",
                     symbol,
                     order_id,
                 )
-                return ExecutionResult(
-                    outcome=ExecutionOutcome.TIMED_OUT, order_result=result
-                )
+                return self._verify_after_cancel(exchange_type, trade, result)
             except Exception as exc:
                 delay = (
                     self._retry_policy.delay_for_attempt(attempt)
@@ -550,4 +666,90 @@ class OrderExecutionService:
         )
         return ExecutionResult(
             outcome=ExecutionOutcome.UNRECONCILED, order_result=result
+        )
+
+    def _verify_after_cancel(
+        self,
+        exchange_type,
+        trade,
+        prior_result,
+    ) -> ExecutionResult:
+        """
+        R4: never trust cancel alone -- re-fetch so a cancel/fill race or
+        prior partial fill cannot silently leave orphan inventory.
+        """
+        order_id = getattr(prior_result, "order_id", None)
+        symbol = trade.symbol
+
+        try:
+            refreshed = self._exchange_manager.fetch_order(
+                exchange_type,
+                order_id,
+                symbol,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[EXEC] Post-cancel fetch_order failed symbol=%s order_id=%s",
+                symbol,
+                order_id,
+            )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                order_result=prior_result,
+                error=f"post_cancel_fetch_failed: {exc}",
+            )
+
+        status = str(getattr(refreshed, "status", "") or "").upper()
+        filled = _filled_quantity(refreshed)
+
+        if status in _KNOWN_FILLED_STATUSES or _is_fully_filled(refreshed, trade):
+            logger.critical(
+                "[EXEC] Cancel race: order FILLED after cancel symbol=%s "
+                "order_id=%s -- returning FILLED",
+                symbol,
+                order_id,
+            )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.FILLED, order_result=refreshed
+            )
+
+        if filled > _FILL_EPS:
+            logger.critical(
+                "[EXEC] Partial fill remains after cancel symbol=%s "
+                "order_id=%s filled_qty=%.8f status=%s -- UNRECONCILED",
+                symbol,
+                order_id,
+                filled,
+                status,
+            )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                order_result=refreshed,
+                error="partial_fill_after_cancel",
+            )
+
+        if status in _KNOWN_OPEN_STATUSES:
+            logger.critical(
+                "[EXEC] Order still open after cancel symbol=%s order_id=%s",
+                symbol,
+                order_id,
+            )
+            return ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                order_result=refreshed,
+                error="still_open_after_cancel",
+            )
+
+        if status in _KNOWN_TERMINAL_NON_FILLED_STATUSES:
+            return ExecutionResult(
+                outcome=ExecutionOutcome.TIMED_OUT, order_result=refreshed
+            )
+
+        logger.error(
+            "[EXEC] Unknown status after cancel symbol=%s status=%r",
+            symbol,
+            status,
+        )
+        return ExecutionResult(
+            outcome=ExecutionOutcome.UNKNOWN_STATUS, order_result=refreshed
         )

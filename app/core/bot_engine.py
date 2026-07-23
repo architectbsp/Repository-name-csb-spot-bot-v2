@@ -434,6 +434,9 @@ class BotEngine:
         order_execution = self.risk_manager.order_execution
         order_execution.set_position_manager(self.position_manager)
         order_execution.set_telemetry(self.telemetry)
+        order_execution.set_quarantine_store_path(
+            self._order_quarantine_store_path()
+        )
         order_execution.set_on_ambiguous(
             lambda _market, _result: self.position_reconciler.reconcile_once()
         )
@@ -459,6 +462,29 @@ class BotEngine:
 
         # Sprint 5: continue MFE/MAE + exit journaling for restored opens.
         self.trade_journal.load_open_entries()
+
+    def _order_quarantine_store_path(self) -> str | None:
+        """
+        R4: JSON sidecar next to the SQLite file (or CWD fallback).
+        Does not modify the SQLite schema.
+        """
+        try:
+            from app.core.persistence.config import load_database_config
+
+            url = load_database_config().url
+        except Exception:
+            logger.exception("[BotEngine] quarantine store path resolve failed")
+            return "csb_spot_bot.quarantine.json"
+
+        if not url.startswith("sqlite"):
+            return "csb_spot_bot.quarantine.json"
+        if ":memory:" in url:
+            return None
+
+        raw = url.removeprefix("sqlite:///")
+        if not raw:
+            return "csb_spot_bot.quarantine.json"
+        return f"{raw}.quarantine.json"
 
     def shutdown(self):
         self.position_reconciler.shutdown()

@@ -16,7 +16,13 @@ from app.core.services.order_execution import ExecutionOutcome, OrderExecutionSe
 from app.core.trading.models import TradeRequest, TradeSide
 
 
-def make_order_result(status: str, *, order_id: str = "order-1", filled=1.0, avg=100.0):
+def make_order_result(status: str, *, order_id: str = "order-1", filled=None, avg=100.0):
+    if filled is None:
+        filled = (
+            1.0
+            if str(status).upper() in {"CLOSED", "FILLED"}
+            else 0.0
+        )
     return OrderResult(
         order_id=order_id,
         symbol="BTCUSDT",
@@ -241,7 +247,11 @@ def test_buy_blocked_when_open_position_already_exists():
 def test_pending_cancel_retries_network_error_then_succeeds():
     exchange = ScriptedExchangeManager(
         execute_trade_script=[make_order_result("OPEN")],
-        fetch_order_script=[make_order_result("OPEN"), make_order_result("OPEN")],
+        fetch_order_script=[
+            make_order_result("OPEN"),
+            make_order_result("OPEN"),
+            make_order_result("CANCELED", filled=0.0),
+        ],
         cancel_order_script=[ccxt.NetworkError("cancel blip"), make_order_result("CANCELED")],
     )
     retry_policy = RetryPolicy(max_attempts=3, delay=0)
@@ -310,7 +320,11 @@ def test_pending_order_that_fills_on_poll_is_reported_filled():
 def test_pending_order_that_never_fills_is_cancelled():
     exchange = ScriptedExchangeManager(
         execute_trade_script=[make_order_result("OPEN")],
-        fetch_order_script=[make_order_result("OPEN"), make_order_result("OPEN")],
+        fetch_order_script=[
+            make_order_result("OPEN"),
+            make_order_result("OPEN"),
+            make_order_result("CANCELED", filled=0.0),
+        ],
         cancel_order_script=[make_order_result("CANCELED")],
     )
     service = make_service(exchange)
@@ -319,6 +333,68 @@ def test_pending_order_that_never_fills_is_cancelled():
 
     assert result.outcome == ExecutionOutcome.TIMED_OUT
     assert exchange.cancel_order_calls == 1
+    assert exchange.fetch_order_calls == 3
+
+
+def test_cancel_race_fill_is_reported_filled():
+    """R4: cancel ACK then fetch shows FILLED -- must not TIMED_OUT."""
+    exchange = ScriptedExchangeManager(
+        execute_trade_script=[make_order_result("OPEN", filled=0.0)],
+        fetch_order_script=[
+            make_order_result("OPEN", filled=0.0),
+            make_order_result("OPEN", filled=0.0),
+            make_order_result("FILLED", filled=1.0),
+        ],
+        cancel_order_script=[make_order_result("CANCELED")],
+    )
+    service = make_service(exchange)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.FILLED
+    assert result.is_filled
+
+
+def test_partial_fill_after_cancel_is_unreconciled_and_quarantined():
+    exchange = ScriptedExchangeManager(
+        execute_trade_script=[make_order_result("PARTIALLY_FILLED", filled=0.4)],
+        fetch_order_script=[
+            make_order_result("PARTIALLY_FILLED", filled=0.4),
+            make_order_result("PARTIALLY_FILLED", filled=0.4),
+            make_order_result("CANCELED", filled=0.4),
+        ],
+        cancel_order_script=[make_order_result("CANCELED")],
+    )
+    service = make_service(exchange)
+
+    result = service.execute("BINANCE", make_trade())
+
+    assert result.outcome == ExecutionOutcome.UNRECONCILED
+    assert result.is_ambiguous
+    assert service.is_quarantined("BINANCE:BTCUSDT")
+
+
+def test_quarantine_store_survives_reload(tmp_path):
+    store = tmp_path / "q.json"
+    exchange = ScriptedExchangeManager([make_order_result("SOME_WEIRD_STATUS")])
+    first = OrderExecutionService(
+        exchange,
+        pending_poll_interval=0,
+        pending_poll_attempts=1,
+        cancel_retry_attempts=1,
+        quarantine_store_path=store,
+    )
+    first.execute("BINANCE", make_trade())
+    assert first.is_quarantined("BINANCE:BTCUSDT")
+    assert store.is_file()
+
+    second = OrderExecutionService(
+        ScriptedExchangeManager([make_order_result("CLOSED")]),
+        quarantine_store_path=store,
+    )
+    assert second.is_quarantined("BINANCE:BTCUSDT")
+    blocked = second.execute("BINANCE", make_trade())
+    assert blocked.outcome == ExecutionOutcome.QUARANTINED
 
 
 def test_pending_order_whose_cancel_also_fails_is_unreconciled():

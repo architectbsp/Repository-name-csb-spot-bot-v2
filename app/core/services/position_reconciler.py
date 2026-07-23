@@ -8,6 +8,9 @@ holds enough of a coin for a recorded OPEN position (filled elsewhere,
 manual sell, failed cancel that actually filled, ...), we surface
 `position.reconcile_mismatch` and quarantine that market so the bot
 does not pile on more orders blindly.
+
+R4: also probes quarantined markets with no local OPEN position for
+orphan inventory (exchange free base above dust).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from app.core.domain.position import PositionState
-from app.core.exchange.market_key import market_key
+from app.core.exchange.market_key import market_key, parse_market_key, try_parse_exchange_type
 from app.core.scheduler.job import Job
 
 
@@ -26,6 +29,8 @@ _DEFAULT_INTERVAL_SECONDS = 120
 # Tolerate dust / fee residuals: flag only when free base is clearly
 # below the recorded position size.
 _QTY_TOLERANCE = 0.95
+# Absolute dust floor for orphan-inventory detection (no local OPEN).
+_ORPHAN_DUST = 1e-8
 
 
 class PositionReconciler:
@@ -80,12 +85,18 @@ class PositionReconciler:
     def reconcile_once(self) -> list[dict]:
         """
         Compares every OPEN local position to the free base balance on
-        its exchange. Returns the list of mismatch payloads (also
-        published on the event bus).
+        its exchange, then probes quarantined markets for orphan inventory.
+        Returns the list of mismatch payloads (also published on the bus).
         """
         if self._exchange_manager is None or self._position_manager is None:
             return []
 
+        mismatches: list[dict] = []
+        mismatches.extend(self._reconcile_open_positions())
+        mismatches.extend(self._reconcile_quarantined_orphans())
+        return mismatches
+
+    def _reconcile_open_positions(self) -> list[dict]:
         mismatches: list[dict] = []
 
         for position in self._position_manager.get_open_positions():
@@ -117,42 +128,108 @@ class PositionReconciler:
                 continue
 
             payload = {
+                "kind": "LOCAL_GT_EXCHANGE",
                 "symbol": position.symbol,
                 "exchange": getattr(position.exchange, "name", position.exchange),
                 "local_quantity": position.quantity,
                 "exchange_free": free,
             }
             mismatches.append(payload)
-
-            logger.critical(
-                "[RECONCILE] Mismatch symbol=%s exchange=%s local_qty=%.8f "
-                "exchange_free=%.8f -- quarantining market",
-                position.symbol,
-                payload["exchange"],
-                position.quantity,
-                free,
-            )
-
-            if self._order_execution is not None:
-                key = market_key(position.exchange, position.symbol)
-                self._order_execution.quarantine(key)
-
-            if self._event_bus is not None:
-                self._event_bus.publish("position.reconcile_mismatch", payload)
-                self._event_bus.publish(
-                    "order.needs_manual_review",
-                    {
-                        "symbol": position.symbol,
-                        "side": "RECONCILE",
-                        "outcome": "BALANCE_MISMATCH",
-                        "error": (
-                            f"local_qty={position.quantity} "
-                            f"exchange_free={free}"
-                        ),
-                    },
-                )
+            self._surface_mismatch(payload, position.exchange, position.symbol)
 
         return mismatches
+
+    def _reconcile_quarantined_orphans(self) -> list[dict]:
+        """
+        R4: quarantined market + no local OPEN + free base above dust
+        ⇒ exchange likely holds inventory the bot does not track.
+        """
+        if self._order_execution is None:
+            return []
+
+        list_fn = getattr(self._order_execution, "list_quarantined", None)
+        if not callable(list_fn):
+            return []
+
+        mismatches: list[dict] = []
+        for key in list_fn():
+            try:
+                ex_name, symbol = parse_market_key(key)
+            except ValueError:
+                continue
+            exchange = try_parse_exchange_type(ex_name)
+            if exchange is None:
+                continue
+
+            if self._position_manager.is_open(symbol, exchange=exchange):
+                continue
+
+            base = _base_asset(symbol)
+            if not base:
+                continue
+
+            try:
+                free = float(
+                    self._exchange_manager.get_base_balance(exchange, base)
+                )
+            except Exception:
+                logger.exception(
+                    "[RECONCILE] orphan balance fetch failed key=%s", key
+                )
+                continue
+
+            if free <= _ORPHAN_DUST:
+                continue
+
+            payload = {
+                "kind": "ORPHAN_INVENTORY",
+                "symbol": symbol,
+                "exchange": getattr(exchange, "name", exchange),
+                "local_quantity": 0.0,
+                "exchange_free": free,
+                "market_key": key,
+            }
+            mismatches.append(payload)
+            self._surface_mismatch(payload, exchange, symbol, already_quarantined=True)
+
+        return mismatches
+
+    def _surface_mismatch(
+        self,
+        payload: dict,
+        exchange,
+        symbol: str,
+        *,
+        already_quarantined: bool = False,
+    ) -> None:
+        logger.critical(
+            "[RECONCILE] Mismatch kind=%s symbol=%s exchange=%s "
+            "local_qty=%s exchange_free=%s -- quarantining market",
+            payload.get("kind"),
+            symbol,
+            payload.get("exchange"),
+            payload.get("local_quantity"),
+            payload.get("exchange_free"),
+        )
+
+        if self._order_execution is not None and not already_quarantined:
+            key = market_key(exchange, symbol)
+            self._order_execution.quarantine(key)
+
+        if self._event_bus is not None:
+            self._event_bus.publish("position.reconcile_mismatch", payload)
+            self._event_bus.publish(
+                "order.needs_manual_review",
+                {
+                    "symbol": symbol,
+                    "side": "RECONCILE",
+                    "outcome": payload.get("kind", "BALANCE_MISMATCH"),
+                    "error": (
+                        f"local_qty={payload.get('local_quantity')} "
+                        f"exchange_free={payload.get('exchange_free')}"
+                    ),
+                },
+            )
 
 
 def _base_asset(symbol: str) -> str | None:
