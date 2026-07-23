@@ -717,6 +717,9 @@ def test_check_partial_take_profit_sells_configured_percent_and_keeps_remainder_
     assert position.partial_exits_taken == 1
     assert position.realized_pnl == (110.0 - 100.0) * 5.0
     assert position.state == PositionState.OPEN
+    assert position.stop_stage == "BREAK_EVEN"
+    assert position.stop_price == 100.0
+    assert len(position.partial_exits) == 1
     assert len(exchange_manager.executed_trades) == 1
     assert exchange_manager.executed_trades[0][1].side == TradeSide.SELL
 
@@ -774,7 +777,7 @@ def test_close_position_manually_force_closes_via_market_sell():
 
     assert rm.close_position_manually("BTCUSDT") is True
     assert not position_manager.is_open("BTCUSDT")
-    assert position_manager.get("BTCUSDT").close_reason == "MANUAL"
+    assert position_manager.get("BTCUSDT").close_reason == "MANUAL_CLOSE"
     assert len(exchange_manager.executed_trades) == 1
 
 
@@ -805,8 +808,16 @@ def test_emergency_exit_all_force_closes_every_open_position():
     assert closed_count == 2
     assert not position_manager.is_open("BTCUSDT")
     assert not position_manager.is_open("ETHUSDT")
-    assert position_manager.get("BTCUSDT").close_reason == "EMERGENCY"
-    assert position_manager.get("ETHUSDT").close_reason == "EMERGENCY"
+    assert position_manager.get("BTCUSDT").close_reason == "EMERGENCY_EXIT"
+    assert position_manager.get("ETHUSDT").close_reason == "EMERGENCY_EXIT"
+    assert position_manager.entries_frozen is True
+    assert rm.can_open_trade(
+        balance=10_000.0, daily_loss_percent=0.0, open_positions=0
+    ) is False
+    rm.unfreeze_entries()
+    assert rm.can_open_trade(
+        balance=10_000.0, daily_loss_percent=0.0, open_positions=0
+    ) is True
 
 
 def test_emergency_exit_all_returns_zero_when_no_open_positions():
@@ -848,7 +859,7 @@ def test_close_position_manually_records_a_trade_journal_exit():
     assert len(journal.exits) == 1
     symbol, kwargs = journal.exits[0]
     assert symbol == "BTCUSDT"
-    assert kwargs["reason"] == "MANUAL"
+    assert kwargs["reason"] == "MANUAL_CLOSE"
 
 
 def test_emergency_exit_all_records_a_trade_journal_exit_per_position():
@@ -871,7 +882,7 @@ def test_emergency_exit_all_records_a_trade_journal_exit_per_position():
     rm.emergency_exit_all()
 
     reasons = {symbol: kwargs["reason"] for symbol, kwargs in journal.exits}
-    assert reasons == {"BTCUSDT": "EMERGENCY", "ETHUSDT": "EMERGENCY"}
+    assert reasons == {"BTCUSDT": "EMERGENCY_EXIT", "ETHUSDT": "EMERGENCY_EXIT"}
 
 
 def test_check_partial_take_profit_records_a_trade_journal_partial_exit():

@@ -95,6 +95,8 @@ class RiskManager:
         self._realized_pnl_today: float = 0.0
         # Sprint 11: fire risk.daily_loss_limit at most once per UTC day.
         self._daily_loss_alerted: bool = False
+        # Sprint 3: set by emergency_exit_all until operator unfreezes.
+        self._entries_frozen: bool = False
 
         # Sprint 4: built lazily on first real order submission (see
         # _get_order_execution) so every setter above has already run by
@@ -574,6 +576,13 @@ class RiskManager:
         daily_loss_percent: float,
         open_positions: int,
     ) -> bool:
+        if self._entries_frozen or (
+            self._position_manager is not None
+            and getattr(self._position_manager, "entries_frozen", False)
+        ):
+            logger.warning("[RISK] Trade rejected: entries frozen after emergency exit")
+            return False
+
         if self.is_daily_loss_limit_reached(daily_loss_percent):
             logger.warning("[RISK] Trade rejected: daily_loss_limit reached")
             return False
@@ -1085,6 +1094,10 @@ class RiskManager:
             reason=reason,
         )
 
+    def manual_close(self, symbol: str) -> bool:
+        """Sprint 3 alias for ``close_position_manually``."""
+        return self.close_position_manually(symbol)
+
     def close_position_manually(self, symbol: str) -> bool:
         """
         Sprint 3 -- Manual Close: an operator-initiated exit, independent
@@ -1123,13 +1136,21 @@ class RiskManager:
             position,
             exchange_type=exchange_type,
             fallback_price=position.entry_price,
-            reason=CloseReason.MANUAL,
+            reason=CloseReason.MANUAL_CLOSE,
         )
 
         return not self._position_manager.is_open(
             symbol,
             exchange=exchange_type,
         )
+
+    def unfreeze_entries(self) -> None:
+        """Clears the emergency-exit new-entry freeze."""
+        self._entries_frozen = False
+        if self._position_manager is not None and hasattr(
+            self._position_manager, "unfreeze_new_entries"
+        ):
+            self._position_manager.unfreeze_new_entries()
 
     def emergency_exit_all(self) -> int:
         """
@@ -1139,7 +1160,8 @@ class RiskManager:
         maintenance, a black-swan event, or a manual risk decision this
         bot's own logic wouldn't otherwise make). Unlike the daily-loss
         circuit breaker (which only stops *new* trades from being
-        opened), this actively exits every existing one.
+        opened), this actively exits every existing one and freezes
+        new entries until ``unfreeze_entries()``.
 
         Returns how many positions were actually confirmed closed.
         """
@@ -1171,7 +1193,7 @@ class RiskManager:
                 position,
                 exchange_type=exchange_type,
                 fallback_price=position.entry_price,
-                reason=CloseReason.EMERGENCY,
+                reason=CloseReason.EMERGENCY_EXIT,
             )
 
             if not self._position_manager.is_open(
@@ -1180,8 +1202,12 @@ class RiskManager:
             ):
                 closed += 1
 
+        self._entries_frozen = True
+        if hasattr(self._position_manager, "freeze_new_entries"):
+            self._position_manager.freeze_new_entries()
+
         logger.critical(
-            "[EMERGENCY EXIT] Closed %d/%d open position(s)",
+            "[EMERGENCY EXIT] Closed %d/%d open position(s); new entries frozen",
             closed,
             len(open_positions),
         )

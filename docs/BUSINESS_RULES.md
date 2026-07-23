@@ -32,8 +32,8 @@ Changelog (2.2 -> 2.3): added Position Lifecycle management (§8) --
 Partial Take Profit / Scale Out (configurable, disabled by default),
 Manual Close and Emergency Exit, all routed through the same
 OrderExecutionService pipeline as every other exit; close_reason is now
-stage-aware (STOP_LOSS/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL/
-EMERGENCY/MAX_DURATION) via the `CloseReason` enum
+stage-aware (STOP_LOSS/BREAK_EVEN_STOP/TRAILING_STOP/MANUAL_CLOSE/
+EMERGENCY_EXIT/MAX_DURATION/TAKE_PROFIT) via the `CloseReason` enum
 label; `position.pnl` on a fully-closed position now reflects the total
 realized PnL across all partial exits plus the final exit, not just the
 last chunk; added a lightweight additive SQLite schema-sync so a
@@ -601,26 +601,32 @@ reconciliation, quarantine) described above -- there is no separate
   once unrealized profit reaches the configurable
   `partial_tp_activation_percent` (0 = disabled, the default), sells
   `partial_tp_sell_percent`% of the position and leaves the remainder
-  open under the exact same stop/break-even/trailing management as
-  before. Fires at most once per position (`partial_exits_taken`
+  open. Fires at most once per position (`partial_exits_taken`
   guards this). The realized PnL from the partial sell is banked on the
-  position (`realized_pnl`) and immediately counted against the daily
-  loss/profit tracked for the circuit breaker.
-- **Manual Close** (`close_position_manually(symbol)`): an
-  operator-initiated full close, independent of any price trigger.
-  Recorded with `close_reason="MANUAL"`.
+  position (`realized_pnl`), appended to in-memory `partial_exits`
+  history, and immediately counted against the daily loss/profit
+  tracked for the circuit breaker. After a successful scale-out, a
+  HARD stop is lifted to break-even (`stop_price = entry`,
+  `stop_stage = BREAK_EVEN`) so the remaining size is protected;
+  positions already on break-even or trailing keep their active stop.
+- **Manual Close** (`manual_close(symbol)` /
+  `close_position_manually(symbol)`): an operator-initiated full close,
+  independent of any price trigger. Recorded with
+  `close_reason="MANUAL_CLOSE"`.
 - **Emergency Exit** (`emergency_exit_all()`): force-closes every open
   position immediately regardless of price or state -- an operator
-  "panic button" distinct from the daily loss breaker (which only
-  blocks *new* entries; this actively exits existing ones). Recorded
-  with `close_reason="EMERGENCY"`. UI: Open Positions → Emergency Exit.
+  "panic button" distinct from the daily loss breaker. Recorded with
+  `close_reason="EMERGENCY_EXIT"`. Also freezes new entries until
+  `unfreeze_entries()` (UI: Open Positions → Emergency Exit).
 - **Close reason (`CloseReason` enum)**: every exit records one of
-  `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` / `PARTIAL_TP` /
-  `MANUAL` / `EMERGENCY` / `MAX_DURATION` / `MAX_DAILY_LOSS`. Hard stop
-  uses `STOP_LOSS` (stage-aware extras distinguish break-even / trailing).
-  `MAX_DAILY_LOSS` is reserved for a future force-close path; today the
-  daily-loss breaker only blocks *new* entries. Maximum Position Duration
-  force-close is recorded as `MAX_DURATION`.
+  `STOP_LOSS` / `TAKE_PROFIT` / `PARTIAL_TP` / `TRAILING_STOP` /
+  `MANUAL_CLOSE` / `EMERGENCY_EXIT` / `MAX_DAILY_LOSS` plus stage-aware
+  extras `BREAK_EVEN_STOP` / `MAX_DURATION`. Aliases `MANUAL` /
+  `EMERGENCY` resolve to `MANUAL_CLOSE` / `EMERGENCY_EXIT`.
+  `MAX_DAILY_LOSS` remains reserved for a future force-close path;
+  today the daily-loss breaker only blocks *new* entries. Maximum
+  Position Duration force-close is recorded as `MAX_DURATION`.
+  `PositionManager.close(..., reason=...)` requires a non-empty reason.
 
 ---
 

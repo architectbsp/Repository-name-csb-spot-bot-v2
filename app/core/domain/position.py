@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -14,20 +16,41 @@ class CloseReason(StrEnum):
     """
     Every full (or documented partial) exit must record one of these.
 
-    Prompt / production set:
-      STOP_LOSS, TRAILING_STOP, PARTIAL_TP, MANUAL, EMERGENCY, MAX_DAILY_LOSS
-    Plus stage-aware extras used by this bot:
+    Sprint 3 / prompt set:
+      STOP_LOSS, TAKE_PROFIT, PARTIAL_TP, TRAILING_STOP,
+      MANUAL_CLOSE, EMERGENCY_EXIT, MAX_DAILY_LOSS
+    Stage-aware / duration extras used by this bot:
       BREAK_EVEN_STOP, MAX_DURATION
+    Backward-compatible aliases: MANUAL → MANUAL_CLOSE,
+    EMERGENCY → EMERGENCY_EXIT.
     """
 
     STOP_LOSS = "STOP_LOSS"
-    BREAK_EVEN_STOP = "BREAK_EVEN_STOP"
-    TRAILING_STOP = "TRAILING_STOP"
+    TAKE_PROFIT = "TAKE_PROFIT"
     PARTIAL_TP = "PARTIAL_TP"
-    MANUAL = "MANUAL"
-    EMERGENCY = "EMERGENCY"
-    MAX_DURATION = "MAX_DURATION"
+    TRAILING_STOP = "TRAILING_STOP"
+    MANUAL_CLOSE = "MANUAL_CLOSE"
+    EMERGENCY_EXIT = "EMERGENCY_EXIT"
     MAX_DAILY_LOSS = "MAX_DAILY_LOSS"
+    BREAK_EVEN_STOP = "BREAK_EVEN_STOP"
+    MAX_DURATION = "MAX_DURATION"
+    # Aliases (same value → Enum member alias)
+    MANUAL = "MANUAL_CLOSE"
+    EMERGENCY = "EMERGENCY_EXIT"
+
+
+@dataclass(slots=True)
+class PartialExitRecord:
+    """One scale-out / partial take-profit leg while the position stays OPEN."""
+
+    quantity: float
+    exit_price: float
+    realized_pnl: float
+    reason: str
+    remaining_quantity: float
+    stop_price_after: float | None
+    stop_stage_after: str
+    at: datetime
 
 
 @dataclass(slots=True)
@@ -56,8 +79,16 @@ class Position:
     # this position. Used to make sure automatic partial take-profit
     # only fires once per position.
     partial_exits_taken: int = 0
+    # Append-only in-memory history of partial exits (durable SoT for
+    # completed trades remains TradeJournal.partial_exits).
+    partial_exits: list[PartialExitRecord] = field(default_factory=list)
     # Which stop is currently active: "HARD" (the original fixed stop),
     # "BREAK_EVEN" (moved to entry price) or "TRAILING" (following the
     # highest price). Drives the CloseReason recorded when the stop
     # actually triggers.
     stop_stage: str = "HARD"
+
+    @property
+    def remaining_quantity(self) -> float:
+        """Alias for open size after any scale-outs."""
+        return self.quantity
