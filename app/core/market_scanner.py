@@ -289,6 +289,12 @@ class MarketScanner:
             for ticker in usdt_filtered:
                 if self._symbol_filter.is_blocked(ticker.symbol):
                     blocked += 1
+                    reason = self._symbol_filter.block_reason(ticker.symbol)
+                    logger.info(
+                        "[Scanner] skipped %s reason=%s",
+                        ticker.symbol,
+                        reason or "filtered",
+                    )
                     continue
                 filtered.append(ticker)
 

@@ -152,17 +152,24 @@ def build_settings_view(
     for field in SETTINGS_SCHEMA:
         section = getattr(config, field.section)
         current_value = getattr(section, field.name)
+        unit_suffix = f" ({field.unit})" if field.unit else ""
+        if field.value_type is str:
+            helper = "virgülle ayrılmış liste"
+            width = 480
+        else:
+            helper = f"{field.minimum} - {field.maximum} arası"
+            width = 320
 
         fields[field.name] = ft.TextField(
-            label=f"{field.label} ({field.unit})",
+            label=f"{field.label}{unit_suffix}",
             value=str(current_value),
-            width=320,
+            width=width,
             dense=True,
             border_color="#273449",
             focused_border_color="#3B82F6",
             color="#F8FAFC",
             label_style=ft.TextStyle(color="#94A3B8", size=12),
-            helper=f"{field.minimum} - {field.maximum} arası",
+            helper=helper,
             helper_style=ft.TextStyle(color="#64748B", size=10),
         )
 

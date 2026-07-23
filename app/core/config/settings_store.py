@@ -36,6 +36,7 @@ class SettingField:
     minimum: float
     maximum: float
     unit: str = "%"
+    # For str fields, ``maximum`` is max length (0 = unlimited).
 
 
 # NOTE on two parameters from the original wishlist that intentionally do
@@ -92,6 +93,24 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
         0,
         23,
         unit="saat",
+    ),
+    SettingField(
+        "strategy",
+        "blacklist_symbols",
+        "Kara Liste Sembolleri (virgülle)",
+        str,
+        0,
+        4000,
+        unit="",
+    ),
+    SettingField(
+        "strategy",
+        "filtered_patterns",
+        "Sembol Regex Filtreleri (virgülle)",
+        str,
+        0,
+        4000,
+        unit="",
     ),
     SettingField("risk", "stop_loss_percent", "Sabit Stop (Hard Stop)", float, 0.1, 90.0),
     SettingField("risk", "trailing_activation_percent", "Trailing / Break-Even Aktivasyonu", float, 0.1, 90.0),
@@ -185,7 +204,10 @@ def apply_schema_values(app_settings: AppSettings, values: dict[str, object]) ->
         if field is None:
             continue
         section = getattr(app_settings, field.section)
-        setattr(section, name, field.value_type(raw_value))
+        if field.value_type is str:
+            setattr(section, name, str(raw_value if raw_value is not None else ""))
+        else:
+            setattr(section, name, field.value_type(raw_value))
 
 
 class SettingsStore:
@@ -207,9 +229,13 @@ class SettingsStore:
 
         for field in SETTINGS_SCHEMA:
             section = getattr(app_settings, field.section)
-            setattr(section, field.name, field.value_type(getattr(entity, field.name)))
+            raw = getattr(entity, field.name)
+            if field.value_type is str:
+                setattr(section, field.name, str(raw if raw is not None else ""))
+            else:
+                setattr(section, field.name, field.value_type(raw))
 
-    def current_values(self, app_settings: AppSettings) -> dict[str, float]:
+    def current_values(self, app_settings: AppSettings) -> dict[str, object]:
         return {
             field.name: getattr(getattr(app_settings, field.section), field.name)
             for field in SETTINGS_SCHEMA
@@ -226,7 +252,7 @@ class SettingsStore:
         a whole form's worth of fields without special-casing extras.
         """
         errors: list[str] = []
-        validated: dict[str, float] = {}
+        validated: dict[str, object] = {}
 
         for name, raw_value in changes.items():
             field = _SCHEMA_BY_NAME.get(name)
@@ -244,6 +270,17 @@ class SettingsStore:
                         f"{field.label}: geçersiz değer ('{raw_value}')"
                     )
                     continue
+
+            if field.value_type is str:
+                value = str(raw_value if raw_value is not None else "")
+                max_len = int(field.maximum)
+                if max_len > 0 and len(value) > max_len:
+                    errors.append(
+                        f"{field.label}: en fazla {max_len} karakter olmalı"
+                    )
+                    continue
+                validated[name] = value
+                continue
 
             try:
                 value = field.value_type(raw_value)

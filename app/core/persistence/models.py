@@ -34,6 +34,13 @@ class SettingsEntity(Base):
     weekend_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     quiet_start_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     quiet_end_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    # Sprint 9 -- Symbol Filter / Blacklist (CSV text; upgradeable defaults).
+    blacklist_symbols: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    filtered_patterns: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default=".*UPUSDT$,.*DOWNUSDT$,.*3LUSDT$,.*3SUSDT$,BEAR.*,BULL.*",
+    )
 
     # RiskSettings
     stop_loss_percent: Mapped[float] = mapped_column(Float, nullable=False)

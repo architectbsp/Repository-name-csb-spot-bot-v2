@@ -39,14 +39,24 @@ def test_every_schema_field_round_trips_through_persistence():
     app_settings = AppSettings()
     store.load_into(app_settings)
 
-    changes = {field.name: field.minimum for field in SETTINGS_SCHEMA}
+    changes = {}
+    for field in SETTINGS_SCHEMA:
+        if field.value_type is str:
+            changes[field.name] = "TEST_VALUE"
+        else:
+            changes[field.name] = field.minimum
     errors = store.update(app_settings, changes)
 
     assert errors == []
 
     for field in SETTINGS_SCHEMA:
         section = getattr(app_settings, field.section)
-        assert getattr(section, field.name) == field.value_type(field.minimum)
+        expected = (
+            "TEST_VALUE"
+            if field.value_type is str
+            else field.value_type(field.minimum)
+        )
+        assert getattr(section, field.name) == expected
 
     # A brand new AppSettings loaded from the same store must see the
     # persisted values, proving the round trip through SQLite.
@@ -55,7 +65,12 @@ def test_every_schema_field_round_trips_through_persistence():
 
     for field in SETTINGS_SCHEMA:
         section = getattr(reloaded, field.section)
-        assert getattr(section, field.name) == field.value_type(field.minimum)
+        expected = (
+            "TEST_VALUE"
+            if field.value_type is str
+            else field.value_type(field.minimum)
+        )
+        assert getattr(section, field.name) == expected
 
 
 def test_update_mutates_the_same_instance_in_place_for_live_reload():
@@ -137,6 +152,8 @@ def test_schema_covers_every_field_the_user_requested():
         "weekend_closed",
         "quiet_start_hour_utc",
         "quiet_end_hour_utc",
+        "blacklist_symbols",
+        "filtered_patterns",
         "max_balance_utilization_percent",
         "max_volume_share_percent",
         "position_sizing_mode",

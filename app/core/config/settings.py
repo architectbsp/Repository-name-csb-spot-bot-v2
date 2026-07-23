@@ -95,6 +95,15 @@ class StrategySettings:
     quiet_start_hour_utc: int = 2
     quiet_end_hour_utc: int = 5
 
+    # Sprint 9 -- Symbol Filter / Blacklist (CSV strings; Settings UI).
+    # Exact-match symbols (e.g. "DOGE/USDT,PEPE/USDT") merged with the
+    # symbol_blacklist table. Regex patterns (e.g. ".*UPUSDT$,BEAR.*")
+    # supplement the built-in leveraged-token suffix check.
+    blacklist_symbols: str = ""
+    filtered_patterns: str = (
+        ".*UPUSDT$,.*DOWNUSDT$,.*3LUSDT$,.*3SUSDT$,BEAR.*,BULL.*"
+    )
+
 
 @dataclass(slots=True)
 class ConnectivitySettings:

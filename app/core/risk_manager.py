@@ -128,6 +128,7 @@ class RiskManager:
         self._order_validator = None
         self._trade_journal = None
         self._config = None
+        self._symbol_filter = None
 
         # Daily loss circuit-breaker state (docs/BUSINESS_RULES.md §8).
         self._trading_day: date | None = None
@@ -221,6 +222,10 @@ class RiskManager:
 
     def set_trade_journal(self, trade_journal) -> None:
         self._trade_journal = trade_journal
+
+    def set_symbol_filter(self, symbol_filter) -> None:
+        """Optional SymbolFilter / BlacklistManager -- blocks BUY on match."""
+        self._symbol_filter = symbol_filter
 
     def set_order_execution(self, order_execution: OrderExecutionService) -> None:
         """Mainly for tests -- production wiring builds this lazily in
@@ -796,6 +801,15 @@ class RiskManager:
                 self._exchange_manager is not None,
                 self._position_manager is not None,
                 self._order_validator is not None,
+            )
+            return None
+
+        if self._symbol_filter is not None and self._symbol_filter.is_blocked(symbol):
+            reason = self._symbol_filter.block_reason(symbol) or "filtered"
+            logger.warning(
+                "[RISK] Trade rejected: symbol_filter (%s) symbol=%s",
+                reason,
+                symbol,
             )
             return None
 

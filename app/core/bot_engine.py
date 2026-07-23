@@ -140,11 +140,12 @@ class BotEngine:
         self.analytics_service.set_trade_journal(self.trade_journal)
         self.performance_analytics = self.analytics_service
 
-        # Leveraged-token regex + operator blacklist (Settings UI).
+        # Leveraged-token regex + operator blacklist (Settings UI / CSV).
         self.symbol_filter = SymbolFilter()
         self.symbol_filter.set_repository(
             self.persistence.symbol_blacklist_repository(),
         )
+        self.symbol_filter.set_config(self.config)
         self.market_scanner.set_symbol_filter(self.symbol_filter)
 
         # Sprint 6 -- Coin charts: assembles OHLCV candles (own exchange
@@ -175,6 +176,7 @@ class BotEngine:
             self.order_validator,
         )
         self.risk_manager.set_trade_journal(self.trade_journal)
+        self.risk_manager.set_symbol_filter(self.symbol_filter)
 
         self.strategy = Strategy()
         self.strategy.set_risk_manager(self.risk_manager)
@@ -394,6 +396,10 @@ class BotEngine:
         self.event_bus.subscribe(
             CONFIG_UPDATED_EVENT,
             self.market_scanner.on_config_updated,
+        )
+        self.event_bus.subscribe(
+            CONFIG_UPDATED_EVENT,
+            self.symbol_filter.on_config_updated,
         )
 
         # OrderExecution is built lazily; attach it before reconciler init.

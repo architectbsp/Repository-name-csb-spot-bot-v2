@@ -839,14 +839,23 @@ of the schedule. Dashboard shows TRADING HOURS AKTİF/PASİF.
 
 ## Symbol Filter & Blacklist
 
-`MarketScanner.filter_symbols` also drops:
+`MarketScanner.filter_symbols` also drops (and logs `reason=`):
 
-1. **Leveraged / inverse tokens** via regex on the base asset suffix:
-   `UP`, `DOWN`, `BULL`, `BEAR`, `2L`–`5L`, `2S`–`5S` (e.g. `BTCUP/USDT`,
-   `ETH3L/USDT`).
-2. **Operator blacklist** stored in `symbol_blacklist` and managed from
-   Settings → Coin Kara Listesi (`SymbolFilter`). Matching is by full
-   symbol or base asset.
+1. **Built-in leveraged / inverse tokens** via regex on the base asset
+   suffix: `UP`, `DOWN`, `BULL`, `BEAR`, `2L`–`5L`, `2S`–`5S`
+   (e.g. `BTCUP/USDT`, `ETH3L/USDT`).
+2. **Settings `filtered_patterns`** — comma-separated regexes matched
+   against slash, compact (`BTCUPUSDT`), and base forms. Default:
+   `.*UPUSDT$,.*DOWNUSDT$,.*3LUSDT$,.*3SUSDT$,BEAR.*,BULL.*`.
+3. **Exact-match blacklist** from either:
+   - Settings `blacklist_symbols` (CSV, e.g. `DOGE/USDT,PEPE/USDT`), or
+   - the `symbol_blacklist` table managed from Settings → Coin Kara Listesi
+     (`SymbolFilter` / `BlacklistManager`).
+
+`RiskManager.open_position` also refuses BUY when `is_blocked(symbol)`
+even if a strategy signal somehow reaches it. Changes to
+`blacklist_symbols` / `filtered_patterns` via ConfigManager take effect
+immediately on `config.updated` (no restart).
 
 ---
 
