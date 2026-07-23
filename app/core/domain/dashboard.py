@@ -102,11 +102,17 @@ class DashboardSnapshot:
 
     open_position_count: int = 0
     active_signal_count: int = 0
+    # Sprint 12 split: BUY_PENDING vs watch-path counts.
+    pending_order_count: int = 0
+    watchlist_count: int = 0
 
     # All-time realized PnL from AnalyticsService (USD).
     total_pnl: float | None = None
-    # System / ops metrics for the live dashboard cards.
+    # System / execution telemetry (TelemetryService).
     scan_elapsed_ms: float | None = None
+    order_latency_ms: float | None = None
+    data_age_seconds: float | None = None
+    pipeline_ms: float | None = None
     api_latency_ms: float | None = None
     ram_mb: float | None = None
     cpu_percent: float | None = None

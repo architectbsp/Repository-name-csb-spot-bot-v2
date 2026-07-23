@@ -129,6 +129,7 @@ class RiskManager:
         self._trade_journal = None
         self._config = None
         self._symbol_filter = None
+        self._telemetry = None
 
         # Daily loss circuit-breaker state (docs/BUSINESS_RULES.md §8).
         self._trading_day: date | None = None
@@ -227,11 +228,19 @@ class RiskManager:
         """Optional SymbolFilter / BlacklistManager -- blocks BUY on match."""
         self._symbol_filter = symbol_filter
 
+    def set_telemetry(self, telemetry) -> None:
+        """Optional TelemetryService shared with OrderExecutionService."""
+        self._telemetry = telemetry
+        if self._order_execution is not None:
+            self._order_execution.set_telemetry(telemetry)
+
     def set_order_execution(self, order_execution: OrderExecutionService) -> None:
         """Mainly for tests -- production wiring builds this lazily in
         _get_order_execution() from the already-wired exchange_manager /
         retry_policy / timeout dependencies."""
         self._order_execution = order_execution
+        if self._telemetry is not None and order_execution is not None:
+            order_execution.set_telemetry(self._telemetry)
 
     def _get_order_execution(self) -> OrderExecutionService:
         if self._order_execution is None:
@@ -242,9 +251,13 @@ class RiskManager:
                 pending_timeout_seconds=30.0,
                 position_manager=self._position_manager,
             )
+            if self._telemetry is not None:
+                self._order_execution.set_telemetry(self._telemetry)
         else:
             # Keep position_manager in sync if OES was built early / in tests.
             self._order_execution.set_position_manager(self._position_manager)
+            if self._telemetry is not None:
+                self._order_execution.set_telemetry(self._telemetry)
         return self._order_execution
 
     @property

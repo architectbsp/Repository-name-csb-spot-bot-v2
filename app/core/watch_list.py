@@ -76,6 +76,11 @@ class WatchList:
         self._stopwatch = None
         self._config = None
         self._strategy = None
+        self._telemetry = None
+
+    def set_telemetry(self, telemetry) -> None:
+        """Optional TelemetryService -- records scan→strategy pipeline ms."""
+        self._telemetry = telemetry
 
     def initialize(self) -> None:
         self._initialized = True
@@ -821,6 +826,9 @@ class WatchList:
             )
 
     def handle_scan_result(self, symbols) -> int:
+        import time
+
+        started = time.perf_counter()
         added = 0
 
         now = datetime.now(UTC)
@@ -850,6 +858,17 @@ class WatchList:
 
             if created:
                 added += 1
+
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        telemetry = getattr(self, "_telemetry", None)
+        if telemetry is not None:
+            try:
+                telemetry.record_pipeline_ms(elapsed_ms)
+            except Exception:
+                logger.debug(
+                    "[WatchList] telemetry.record_pipeline_ms failed",
+                    exc_info=True,
+                )
 
         logger.info(
             "[WatchList] added=%d total=%d",

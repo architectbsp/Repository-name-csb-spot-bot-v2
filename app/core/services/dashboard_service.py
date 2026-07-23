@@ -30,18 +30,21 @@ from app.core.exchange.market_key import exchange_name, market_key
 from app.core.exchange.models import ConnectionStatus, ExchangeType
 from app.core.market_data.models import NormalizedTicker
 from app.core.services.memory_log import get_memory_log_handler
-from app.core.services.system_metrics import SystemMetricsSampler
+from app.core.services.telemetry_service import TelemetryService
 from app.core.watch_list import WatchState
 
 
 logger = logging.getLogger(__name__)
 
-_API_PING_MIN_INTERVAL_SECONDS = 15.0
-
 _ACTIVE_WATCH_STATES = {
     WatchState.WATCH_FALLING,
     WatchState.WATCH_RISING,
     WatchState.BUY_PENDING,
+}
+
+_WATCH_PATH_STATES = {
+    WatchState.WATCH_FALLING,
+    WatchState.WATCH_RISING,
 }
 
 _POSITION_STATES = {
@@ -71,9 +74,7 @@ class DashboardService:
         self._tickers: dict[str, NormalizedTicker] = {}
         self._ticker_lock = threading.Lock()
         self._memory_log = get_memory_log_handler()
-        self._system_metrics = SystemMetricsSampler()
-        self._last_api_latency_ms: float | None = None
-        self._last_api_ping_at: float | None = None
+        self._telemetry = TelemetryService()
         # Sprint 4: recent order.needs_manual_review payloads for UI.
         self._exec_alerts: list[dict] = []
         self._exec_alerts_lock = threading.Lock()
@@ -83,6 +84,7 @@ class DashboardService:
 
     def set_exchange_manager(self, exchange_manager) -> None:
         self._exchange_manager = exchange_manager
+        self._telemetry.set_exchange_manager(exchange_manager)
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
@@ -98,9 +100,22 @@ class DashboardService:
 
     def set_market_scanner(self, market_scanner) -> None:
         self._market_scanner = market_scanner
+        self._telemetry.set_market_scanner(market_scanner)
 
     def set_analytics_service(self, analytics_service) -> None:
         self._analytics_service = analytics_service
+
+    def set_telemetry(self, telemetry: TelemetryService) -> None:
+        """Share a process-wide TelemetryService (BotEngine wiring)."""
+        self._telemetry = telemetry
+        if self._exchange_manager is not None:
+            self._telemetry.set_exchange_manager(self._exchange_manager)
+        if self._market_scanner is not None:
+            self._telemetry.set_market_scanner(self._market_scanner)
+
+    @property
+    def telemetry(self) -> TelemetryService:
+        return self._telemetry
 
     def set_config(self, config: AppSettings) -> None:
         self._config = config
@@ -167,17 +182,14 @@ class DashboardService:
             if self._analytics_service is not None
             else None
         )
-        system = self._system_metrics.sample()
-        scan_ms = None
-        if self._market_scanner is not None:
-            getter = getattr(
-                self._market_scanner, "last_scan_elapsed_ms", None
-            )
-            if callable(getter):
-                scan_ms = getter()
 
-        api_ms = self._sample_api_latency()
+        with self._ticker_lock:
+            ticker_copy = dict(self._tickers)
+        telemetry = self._telemetry.collect(tickers=ticker_copy)
         hours_active = self._trading_hours_active(now)
+
+        pending_count = self._count_watch_states({WatchState.BUY_PENDING})
+        watch_path_count = self._count_watch_states(_WATCH_PATH_STATES)
 
         return DashboardSnapshot(
             generated_at=now,
@@ -193,13 +205,18 @@ class DashboardService:
             day_start_balance=day_start,
             open_position_count=len(open_positions),
             active_signal_count=len(watch_rows),
+            pending_order_count=pending_count,
+            watchlist_count=watch_path_count,
             total_pnl=(
                 performance.total_pnl if performance is not None else None
             ),
-            scan_elapsed_ms=scan_ms,
-            api_latency_ms=api_ms,
-            ram_mb=system.ram_mb,
-            cpu_percent=system.cpu_percent,
+            scan_elapsed_ms=telemetry.loop_time_ms,
+            order_latency_ms=telemetry.order_latency_ms,
+            data_age_seconds=telemetry.data_age_seconds,
+            pipeline_ms=telemetry.pipeline_ms,
+            api_latency_ms=telemetry.api_latency_ms,
+            ram_mb=telemetry.ram_mb,
+            cpu_percent=telemetry.cpu_percent,
             trading_hours_active=hours_active,
             coins=coin_rows,
             open_positions=open_positions,
@@ -213,27 +230,13 @@ class DashboardService:
 
     # ---- private helpers ------------------------------------------------
 
-    def _sample_api_latency(self) -> float | None:
-        import time
-
-        if self._exchange_manager is None:
-            return self._last_api_latency_ms
-
-        now = time.perf_counter()
-        if (
-            self._last_api_ping_at is not None
-            and (now - self._last_api_ping_at) < _API_PING_MIN_INTERVAL_SECONDS
-        ):
-            return self._last_api_latency_ms
-
+    def _count_watch_states(self, states: set) -> int:
+        if self._watch_list is None:
+            return 0
         try:
-            self._last_api_latency_ms = float(self._exchange_manager.ping_ms())
-            self._last_api_ping_at = now
+            return len(list(self._watch_list.list_by_states(states)))
         except Exception:
-            logger.debug("[DASHBOARD] API ping failed", exc_info=True)
-            self._last_api_ping_at = now
-
-        return self._last_api_latency_ms
+            return 0
 
     def _trading_hours_active(self, now: datetime) -> bool:
         if self._config is None:

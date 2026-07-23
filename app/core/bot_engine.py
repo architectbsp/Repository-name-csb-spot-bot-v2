@@ -30,6 +30,7 @@ from app.core.services.position_reconciler import PositionReconciler
 from app.core.services.symbol_filter import SymbolFilter
 from app.core.services.telegram_client import TelegramClient
 from app.core.services.telegram_notifier import TelegramNotifier
+from app.core.services.telemetry_service import TelemetryService
 from app.core.services.trade_journal import TradeJournal
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
@@ -193,11 +194,13 @@ class BotEngine:
         if len(self._strategy_names) > 1:
             self._activate_multi_strategy_pipelines()
 
-        # Sprint 12 -- Live Dashboard: read-only snapshot aggregator the
-        # Flet UI polls every couple of seconds. Also caches ticker.updated
-        # so panels never REST-fetch prices on each refresh. Wired after
-        # risk_manager/strategy so every dependency is already constructed.
+        # Sprint 12 -- Live Dashboard + shared TelemetryService.
+        self.telemetry = TelemetryService()
+        self.telemetry.set_exchange_manager(self.exchange)
+        self.telemetry.set_market_scanner(self.market_scanner)
+
         self.dashboard_service = DashboardService()
+        self.dashboard_service.set_telemetry(self.telemetry)
         self.dashboard_service.set_exchange_manager(self.exchange)
         self.dashboard_service.set_position_manager(self.position_manager)
         self.dashboard_service.set_watch_list(self.watch_list)
@@ -207,6 +210,9 @@ class BotEngine:
         self.dashboard_service.set_analytics_service(self.analytics_service)
         self.dashboard_service.set_config(self.config)
         self.dashboard_service.set_bot_running_fn(lambda: self.running)
+
+        self.risk_manager.set_telemetry(self.telemetry)
+        self.watch_list.set_telemetry(self.telemetry)
 
         # Sprint 11 -- Telegram: opt-in via TELEGRAM_BOT_TOKEN +
         # TELEGRAM_CHAT_ID. Notifier only sends; trading paths never
@@ -389,6 +395,10 @@ class BotEngine:
             "order.needs_manual_review",
             self.dashboard_service.on_order_needs_manual_review,
         )
+        self.event_bus.subscribe(
+            "market_scanner.scan_completed",
+            self.telemetry.on_scan_completed,
+        )
 
         # ConfigUpdatedEvent: modules already share live AppSettings;
         # handlers refresh anything that was snapshotted at initialize
@@ -405,6 +415,7 @@ class BotEngine:
         # OrderExecution is built lazily; attach it before reconciler init.
         order_execution = self.risk_manager.order_execution
         order_execution.set_position_manager(self.position_manager)
+        order_execution.set_telemetry(self.telemetry)
         order_execution.set_on_ambiguous(
             lambda _market, _result: self.position_reconciler.reconcile_once()
         )

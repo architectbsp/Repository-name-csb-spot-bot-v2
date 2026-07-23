@@ -757,10 +757,20 @@ Snapshot contents:
   summed quote balance across venues, bot running flag, API connection
   status (`ConnectionStatus.CONNECTED` on any enabled exchange).
 - **Cards (row 1)**: Total PnL (all-time realized), Daily PnL (USD + %),
-  open position count, watched/pending signal count.
-- **Cards (row 2)**: volume-scan duration (ms), exchange API latency
-  (REST ping, throttled ~15s), process RAM (MB), process CPU (%),
-  trading-hours AKTİF/PASİF.
+  open position count, pending (`BUY_PENDING`) count, watchlist
+  (rise/dip) count.
+- **Cards (row 2 — execution telemetry)**: order execution latency
+  (signal→fill ms, rolling avg), data freshness/age (stalest ticker
+  seconds), scanner loop time (ms), pipeline loop time (scan→strategy
+  ms).
+- **Cards (row 3)**: exchange API ping (REST, throttled ~15s), process
+  RAM (MB), process CPU (%), trading-hours AKTİF/PASİF.
+
+`TelemetryService` (`app/core/services/telemetry_service.py`) owns these
+timing metrics; `OrderExecutionService` records order latency,
+`market_scanner.scan_completed` feeds loop time, and WatchList records
+pipeline duration. DashboardService maps the telemetry snapshot into
+`DashboardSnapshot` for the UI.
 - **Coin table / open positions**: watch-list coins + open positions,
   enriched with last-known ticker (raw price string preferred, §9).
   Unrealized PnL % = `(last - entry) / entry * 100`. Spot side is

@@ -135,6 +135,7 @@ class OrderExecutionService:
 
         self._lock = threading.Lock()
         self._in_flight: set[str] = set()
+        self._telemetry = None
         # Symbols left in an unknown/unreconciled state by a previous
         # order: we genuinely do not know whether the exchange actually
         # holds a filled position for them, so no further order is
@@ -144,6 +145,10 @@ class OrderExecutionService:
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
+
+    def set_telemetry(self, telemetry) -> None:
+        """Optional TelemetryService -- records order round-trip ms."""
+        self._telemetry = telemetry
 
     def set_on_ambiguous(
         self, callback: Callable[[str, ExecutionResult], None] | None
@@ -217,6 +222,7 @@ class OrderExecutionService:
 
         symbol = trade.symbol
         flight_key = market_key(exchange_type, symbol)
+        started = time.perf_counter()
 
         # Duplicate BUY guard: open local position for this market.
         side = getattr(trade, "side", None)
@@ -265,6 +271,15 @@ class OrderExecutionService:
 
             return result
         finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            if self._telemetry is not None:
+                try:
+                    self._telemetry.record_order_latency(elapsed_ms)
+                except Exception:
+                    logger.debug(
+                        "[EXEC] telemetry.record_order_latency failed",
+                        exc_info=True,
+                    )
             self._end(flight_key)
 
     # docs/BUSINESS_RULES.md §8 "Insufficient Balance": retry after 1

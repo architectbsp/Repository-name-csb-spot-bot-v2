@@ -46,6 +46,12 @@ def _fmt_ms(value: float | None) -> str:
     return f"{value:.0f} ms"
 
 
+def _fmt_sec(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.1f} s"
+
+
 def _fmt_mb(value: float | None) -> str:
     if value is None:
         return "-"
@@ -65,8 +71,12 @@ def build_dashboard_cards(snapshot: DashboardSnapshot | None = None):
         daily = "-"
         daily_color = "#94A3B8"
         positions = "0"
-        signals = "0"
-        scan = "-"
+        pending = "0"
+        watchlist = "0"
+        order_lat = "-"
+        data_age = "-"
+        loop = "-"
+        pipeline = "-"
         latency = "-"
         ram = "-"
         cpu = "-"
@@ -88,8 +98,12 @@ def build_dashboard_cards(snapshot: DashboardSnapshot | None = None):
             else "#EF4444"
         )
         positions = f"{snapshot.open_position_count:02d}"
-        signals = str(snapshot.active_signal_count)
-        scan = _fmt_ms(snapshot.scan_elapsed_ms)
+        pending = str(snapshot.pending_order_count)
+        watchlist = str(snapshot.watchlist_count)
+        order_lat = _fmt_ms(snapshot.order_latency_ms)
+        data_age = _fmt_sec(snapshot.data_age_seconds)
+        loop = _fmt_ms(snapshot.scan_elapsed_ms)
+        pipeline = _fmt_ms(snapshot.pipeline_ms)
         latency = _fmt_ms(snapshot.api_latency_ms)
         ram = _fmt_mb(snapshot.ram_mb)
         cpu = _fmt_cpu(snapshot.cpu_percent)
@@ -106,17 +120,26 @@ def build_dashboard_cards(snapshot: DashboardSnapshot | None = None):
             _card("TOTAL PNL", total_pnl, "All-time realized", total_color),
             _card("DAILY PNL", daily, "Today (UTC)", daily_color),
             _card("POSITIONS", positions, "Open Trades", "#3B82F6"),
-            _card("WATCH / PENDING", signals, "Active Signals", "#F59E0B"),
+            _card("PENDING", pending, "BUY_PENDING", "#F59E0B"),
+            _card("WATCHLIST", watchlist, "Watch rise/dip", "#38BDF8"),
         ],
     )
     row2 = ft.Row(
         spacing=15,
         controls=[
-            _card("SCAN", scan, "Volume scan duration", "#38BDF8"),
-            _card("API LATENCY", latency, "Exchange REST ping", "#A855F7"),
+            _card("ORDER LATENCY", order_lat, "Signal → fill", "#A855F7"),
+            _card("DATA AGE", data_age, "Stalest ticker", "#F472B6"),
+            _card("SCAN LOOP", loop, "Volume scan", "#38BDF8"),
+            _card("PIPELINE", pipeline, "Scan → strategy", "#22D3EE"),
+        ],
+    )
+    row3 = ft.Row(
+        spacing=15,
+        controls=[
+            _card("API PING", latency, "Exchange REST", "#A855F7"),
             _card("RAM", ram, "Bot process RSS", "#94A3B8"),
             _card("CPU", cpu, "Bot process", "#94A3B8"),
             _card("TRADING HOURS", hours, "New entries", hours_color),
         ],
     )
-    return ft.Column(spacing=12, controls=[row1, row2])
+    return ft.Column(spacing=12, controls=[row1, row2, row3])

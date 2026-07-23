@@ -39,8 +39,13 @@ def test_dashboard_cards_render_live_snapshot_values():
         daily_pnl_percent=2.5,
         open_position_count=3,
         active_signal_count=7,
+        pending_order_count=2,
+        watchlist_count=5,
         total_pnl=250.0,
         scan_elapsed_ms=420.0,
+        order_latency_ms=95.0,
+        data_age_seconds=1.5,
+        pipeline_ms=50.0,
         api_latency_ms=85.0,
         ram_mb=128.0,
         cpu_percent=4.0,
@@ -53,7 +58,14 @@ def test_dashboard_cards_render_live_snapshot_values():
     assert "+250.00 USDT" in texts
     assert "+12.50 USDT (+2.50%)" in texts
     assert "03" in texts
-    assert "7" in texts
+    assert "PENDING" in texts
+    assert "2" in texts
+    assert "WATCHLIST" in texts
+    assert "5" in texts
+    assert "ORDER LATENCY" in texts
+    assert "95 ms" in texts
+    assert "DATA AGE" in texts
+    assert "1.5 s" in texts
     assert "420 ms" in texts
     assert "85 ms" in texts
     assert "AKTİF" in texts
