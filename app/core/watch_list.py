@@ -1,9 +1,10 @@
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+import functools
 import logging
 import threading
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from app.core.exchange.market_key import (
     exchange_name,
@@ -15,6 +16,19 @@ from app.core.scheduler.job import Job
 
 
 logger = logging.getLogger(__name__)
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _coins_locked(fn: _F) -> _F:
+    """R1: serialize ``_coins`` access. Nested calls re-enter via RLock."""
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
 
 
 class WatchState(StrEnum):
@@ -83,7 +97,8 @@ class WatchList:
         self._telemetry = telemetry
 
     def initialize(self) -> None:
-        self._initialized = True
+        with self._lock:
+            self._initialized = True
 
         if self.has_scheduler() and not self._scheduler.has_job(
             self._COOLDOWN_JOB_NAME,
@@ -97,18 +112,22 @@ class WatchList:
             self._scheduler.schedule(job)
 
     def shutdown(self) -> None:
-        self._running = False
-        self._initialized = False
-        self._coins.clear()
+        with self._lock:
+            self._running = False
+            self._initialized = False
+            self._coins.clear()
 
     def start(self) -> None:
-        if not self._initialized:
-            raise RuntimeError("WatchList is not initialized.")
-        self._running = True
+        with self._lock:
+            if not self._initialized:
+                raise RuntimeError("WatchList is not initialized.")
+            self._running = True
 
     def stop(self) -> None:
-        self._running = False
+        with self._lock:
+            self._running = False
 
+    @_coins_locked
     def _normalize_key(self, symbol: str, exchange=None) -> str:
         """Sprint 18: resolve the dict key for a coin. Prefer an explicit
         exchange; otherwise accept an already-composed market_key, or
@@ -152,50 +171,52 @@ class WatchList:
 
 
     def add(self, symbol: str, exchange=None) -> bool:
-        key = self._normalize_key(symbol, exchange)
-
-        if key in self._coins:
-            return False
-
+        # Membership check + insert under one critical section (TOCTOU).
+        # Exchange stream I/O stays outside the lock.
         now = datetime.now(UTC)
 
-        if exchange is not None:
-            raw_symbol = symbol
-            exchange_value = exchange
-        elif ":" in key:
-            try:
-                ex_name, raw_symbol = parse_market_key(key)
-                exchange_value = try_parse_exchange_type(ex_name)
-            except ValueError:
+        with self._lock:
+            key = self._normalize_key(symbol, exchange)
+
+            if key in self._coins:
+                return False
+
+            if exchange is not None:
+                raw_symbol = symbol
+                exchange_value = exchange
+            elif ":" in key:
+                try:
+                    ex_name, raw_symbol = parse_market_key(key)
+                    exchange_value = try_parse_exchange_type(ex_name)
+                except ValueError:
+                    raw_symbol = symbol
+                    exchange_value = None
+            else:
                 raw_symbol = symbol
                 exchange_value = None
-        else:
-            raw_symbol = symbol
-            exchange_value = None
 
-        with self._lock:
             self._coins[key] = {
-            "state": WatchState.IDLE,
-            "symbol": raw_symbol,
-            "exchange": exchange_value,
-            "lowest_price": None,
-            "highest_price": None,
-            "entry_price": None,
-            "stop_price": None,
-            "trailing_price": None,
-            "cooldown_until": None,
-            "created_at": now,
-            "updated_at": now,
-            # Sprint 5 -- Trade Journal: which entry path this watch cycle
-            # is on, when it started, and how many new highs/lows were
-            # recorded while watching. Reset every time a coin starts a
-            # fresh watch cycle (begin_falling_watch / Path A's
-            # begin_rising_watch / finish_cooldown).
-            "watch_started_at": None,
-            "entry_path": None,
-            "rise_count": 0,
-            "fall_count": 0,
-        }
+                "state": WatchState.IDLE,
+                "symbol": raw_symbol,
+                "exchange": exchange_value,
+                "lowest_price": None,
+                "highest_price": None,
+                "entry_price": None,
+                "stop_price": None,
+                "trailing_price": None,
+                "cooldown_until": None,
+                "created_at": now,
+                "updated_at": now,
+                # Sprint 5 -- Trade Journal: which entry path this watch cycle
+                # is on, when it started, and how many new highs/lows were
+                # recorded while watching. Reset every time a coin starts a
+                # fresh watch cycle (begin_falling_watch / Path A's
+                # begin_rising_watch / finish_cooldown).
+                "watch_started_at": None,
+                "entry_path": None,
+                "rise_count": 0,
+                "fall_count": 0,
+            }
 
         self.sync_price_stream()
         return True
@@ -276,17 +297,20 @@ class WatchList:
 
         self._exchange.update_price_stream(active_exchange_type, symbols)
 
+    @_coins_locked
     def get(self, symbol: str, exchange=None):
         key = self._normalize_key(symbol, exchange)
         coin = self._coins.get(key)
         return deepcopy(coin) if coin else None
 
+    @_coins_locked
     def get_state(self, symbol: str, exchange=None):
         key = self._normalize_key(symbol, exchange)
         if key not in self._coins:
             return None
         return self._coins[key]["state"]
 
+    @_coins_locked
     def can_transition(self, symbol: str, target: WatchState) -> bool:
         key = self._normalize_key(symbol)
         if key not in self._coins:
@@ -295,6 +319,7 @@ class WatchList:
         current = self._coins[key]["state"]
         return target in _ALLOWED_TRANSITIONS[current]
 
+    @_coins_locked
     def transition(self, symbol: str, target: WatchState) -> bool:
         key = self._normalize_key(symbol)
         if not self.can_transition(key, target):
@@ -305,6 +330,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def begin_falling_watch(
         self,
         symbol: str,
@@ -329,6 +355,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def begin_rising_watch(
         self,
         symbol: str,
@@ -368,6 +395,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def record_falling_price(
         self,
         symbol: str,
@@ -389,6 +417,7 @@ class WatchList:
         coin["updated_at"] = datetime.now(UTC)
         return True
 
+    @_coins_locked
     def record_rising_price(
         self,
         symbol: str,
@@ -411,6 +440,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def promote_to_buy_pending(
         self,
         symbol: str,
@@ -427,6 +457,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def promote_to_position_open(
         self,
         symbol: str,
@@ -444,6 +475,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def cancel_buy_pending(self, symbol: str) -> bool:
         symbol = self._normalize_key(symbol)
         if not self.transition(symbol, WatchState.WATCH_RISING):
@@ -455,6 +487,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def activate_break_even(
         self,
         symbol: str,
@@ -470,6 +503,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def activate_trailing(
         self,
         symbol: str,
@@ -494,6 +528,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def close_position(
         self,
         symbol: str,
@@ -506,6 +541,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def enter_cooldown(
         self,
         symbol: str,
@@ -521,6 +557,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def finish_cooldown(
         self,
         symbol: str,
@@ -544,6 +581,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def update_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -560,6 +598,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def update_lowest_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -572,6 +611,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def update_highest_price(self, symbol: str, price: float) -> bool:
         symbol = self._normalize_key(symbol)
         if symbol not in self._coins:
@@ -586,6 +626,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def set_entry_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -594,6 +635,7 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
+    @_coins_locked
     def set_stop_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -602,6 +644,7 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
+    @_coins_locked
     def set_trailing_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -611,6 +654,7 @@ class WatchList:
         return True
 
 
+    @_coins_locked
     def start_cooldown(
         self,
         symbol: str,
@@ -625,6 +669,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def clear_cooldown(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
@@ -635,6 +680,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def is_in_cooldown(
         self,
         symbol: str,
@@ -651,6 +697,7 @@ class WatchList:
         return now < cooldown_until
 
 
+    @_coins_locked
     def cooldown_expired(
         self,
         symbol: str,
@@ -667,6 +714,7 @@ class WatchList:
 
         return now >= cooldown_until
 
+    @_coins_locked
     def remaining_cooldown(
         self,
         symbol: str,
@@ -689,6 +737,7 @@ class WatchList:
         return remaining
 
 
+    @_coins_locked
     def set_lowest_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -697,6 +746,7 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
+    @_coins_locked
     def set_highest_price(self, symbol: str, price: float) -> bool:
         if symbol not in self._coins:
             return False
@@ -705,6 +755,7 @@ class WatchList:
         self._coins[symbol]["updated_at"] = datetime.now(UTC)
         return True
 
+    @_coins_locked
     def clear_price_tracking(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
@@ -716,6 +767,7 @@ class WatchList:
 
         return True
 
+    @_coins_locked
     def reset(self, symbol: str) -> bool:
         if symbol not in self._coins:
             return False
@@ -724,8 +776,7 @@ class WatchList:
         created_at = previous["created_at"]
         now = datetime.now(UTC)
 
-        with self._lock:
-            self._coins[symbol] = {
+        self._coins[symbol] = {
             "state": WatchState.IDLE,
             "symbol": previous.get("symbol"),
             "exchange": previous.get("exchange"),
@@ -747,6 +798,7 @@ class WatchList:
 
 
 
+    @_coins_locked
     def handle_position_closed(
         self,
         event: dict,
@@ -878,26 +930,33 @@ class WatchList:
 
         return added
 
+    @_coins_locked
     def remove(self, symbol: str, exchange=None) -> bool:
         key = self._normalize_key(symbol, exchange)
         return self._coins.pop(key, None) is not None
 
+    @_coins_locked
     def contains(self, symbol: str, exchange=None) -> bool:
         key = self._normalize_key(symbol, exchange)
         return key in self._coins
 
+    @_coins_locked
     def clear(self) -> None:
         self._coins.clear()
 
+    @_coins_locked
     def size(self) -> int:
         return len(self._coins)
 
+    @_coins_locked
     def is_initialized(self) -> bool:
         return self._initialized
 
+    @_coins_locked
     def is_running(self) -> bool:
         return self._running
 
+    @_coins_locked
     def is_empty(self) -> bool:
         return len(self._coins) == 0
 

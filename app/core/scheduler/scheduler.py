@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta
 
 from .job import Job
@@ -9,32 +10,42 @@ class Scheduler:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
         self._running = False
+        # R1: Worker tick vs register/unregister from engine / WatchList.
+        self._lock = threading.RLock()
 
     def register(self, job: Job) -> None:
-        self._jobs[job.name] = job
+        with self._lock:
+            self._jobs[job.name] = job
 
     def unregister(self, name: str) -> None:
-        self._jobs.pop(name, None)
+        with self._lock:
+            self._jobs.pop(name, None)
 
     def get(self, name: str) -> Job | None:
-        return self._jobs.get(name)
+        with self._lock:
+            return self._jobs.get(name)
 
     def has_job(self, name: str) -> bool:
-        return name in self._jobs
+        with self._lock:
+            return name in self._jobs
 
     @property
     def running(self) -> bool:
-        return self._running
+        with self._lock:
+            return self._running
 
     @property
     def jobs(self) -> dict[str, Job]:
-        return self._jobs.copy()
+        with self._lock:
+            return self._jobs.copy()
 
     def start(self) -> None:
-        self._running = True
+        with self._lock:
+            self._running = True
 
     def stop(self) -> None:
-        self._running = False
+        with self._lock:
+            self._running = False
 
     def schedule(self, job: Job) -> None:
         job.next_run = datetime.now() + timedelta(seconds=job.interval)
@@ -62,12 +73,20 @@ class Scheduler:
             job.running = False
 
     def run_pending(self) -> None:
-        for job in self._jobs.values():
+        # Snapshot job list under lock; run callbacks outside so a job
+        # may register/unregister without self-deadlock on RLock... wait,
+        # RLock would allow same-thread reentry. Other threads need the
+        # lock free during long callbacks (e.g. WatchList process_cooldowns).
+        with self._lock:
+            jobs = list(self._jobs.values())
+
+        for job in jobs:
             if self.is_due(job):
                 self.run_job(job)
 
     def tick(self) -> None:
-        if not self._running:
-            return
+        with self._lock:
+            if not self._running:
+                return
 
         self.run_pending()
