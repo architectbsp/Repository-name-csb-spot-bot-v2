@@ -75,8 +75,29 @@ def enable_sandbox_mode(client: Any, *, testnet: bool, exchange_name: str) -> No
             "for this exchange (%s). Requests will target the LIVE "
             "endpoint -- do not trade real funds unless that is intended.",
             exchange_name,
-            exc,
+            type(exc).__name__,
         )
+
+
+def harden_ccxt_client(client: Any) -> None:
+    """R6: disable ccxt verbose dumps that can print request headers/keys."""
+    if client is None:
+        return
+    try:
+        client.verbose = False
+    except Exception:
+        pass
+    try:
+        logging.getLogger("ccxt").setLevel(logging.WARNING)
+    except Exception:
+        pass
+
+
+def safe_last_error(exc: BaseException) -> str:
+    """R6: store connection errors without credential leakage."""
+    from app.core.security.redact import safe_exc_message
+
+    return safe_exc_message(exc)
 
 
 class BaseExchange(ABC):

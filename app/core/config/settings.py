@@ -153,6 +153,17 @@ class ExchangeSettings:
     passphrase: str = os.getenv("EXCHANGE_PASSPHRASE", "")
     testnet: bool = os.getenv("EXCHANGE_TESTNET", "true").lower() == "true"
 
+    def __repr__(self) -> str:
+        # R6: never dump live credentials via repr/logging.
+        return (
+            "ExchangeSettings("
+            f"exchange={self.exchange!r}, "
+            f"api_key={('***' if self.api_key else '')!r}, "
+            f"api_secret={('***' if self.api_secret else '')!r}, "
+            f"passphrase={('***' if self.passphrase else '')!r}, "
+            f"testnet={self.testnet!r})"
+        )
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -182,6 +193,19 @@ class TelegramSettings:
     # Monday=0 … Sunday=6 -- weekly summary weekday at the same hour.
     weekly_summary_weekday: int = 0
     connectivity_probe_seconds: int = 60
+
+    def __repr__(self) -> str:
+        # R6: never dump bot token via repr/logging.
+        return (
+            "TelegramSettings("
+            f"bot_token={('***' if self.bot_token else '')!r}, "
+            f"chat_id={self.chat_id!r}, "
+            f"admin_chat_id={self.admin_chat_id!r}, "
+            f"enabled={self.enabled!r}, "
+            f"daily_summary_hour_utc={self.daily_summary_hour_utc!r}, "
+            f"weekly_summary_weekday={self.weekly_summary_weekday!r}, "
+            f"connectivity_probe_seconds={self.connectivity_probe_seconds!r})"
+        )
 
 
 def load_telegram_settings() -> TelegramSettings:

@@ -4,6 +4,8 @@ from app.core.config.settings import ExchangeSettings
 from app.core.exchange.base import (
     BaseExchange,
     enable_sandbox_mode,
+    harden_ccxt_client,
+    safe_last_error,
     truncate_to_precision,
 )
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
@@ -39,6 +41,8 @@ class OKXExchange(BaseExchange):
             exchange_name="OKX",
         )
 
+        harden_ccxt_client(self.client)
+
         self._price_stream = OKXPriceStream(testnet=settings.testnet)
 
     def connect(self) -> None:
@@ -50,7 +54,7 @@ class OKXExchange(BaseExchange):
             self.state.status = ConnectionStatus.CONNECTED
         except Exception as exc:
             self.state.status = ConnectionStatus.ERROR
-            self.state.last_error = str(exc)
+            self.state.last_error = safe_last_error(exc)
             raise
 
     def disconnect(self) -> None:

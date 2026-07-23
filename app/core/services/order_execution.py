@@ -38,6 +38,7 @@ from typing import Any, Callable
 import ccxt
 
 from app.core.services.client_order_registry import ClientOrderRegistry
+from app.core.security.redact import safe_exc_message
 
 
 logger = logging.getLogger(__name__)
@@ -753,7 +754,7 @@ class OrderExecutionService:
             self._client_orders.mark_failed(
                 client_order_id, market_key=flight_key
             )
-            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
+            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=safe_exc_message(exc))
         except ccxt.InvalidOrder as exc:
             logger.error(
                 "[EXEC] Order rejected by exchange symbol=%s error=%s",
@@ -763,7 +764,7 @@ class OrderExecutionService:
             self._client_orders.mark_failed(
                 client_order_id, market_key=flight_key
             )
-            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
+            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=safe_exc_message(exc))
         except ccxt.ExchangeError as exc:
             logger.error(
                 "[EXEC] Exchange rejected order symbol=%s error=%s",
@@ -773,7 +774,7 @@ class OrderExecutionService:
             self._client_orders.mark_failed(
                 client_order_id, market_key=flight_key
             )
-            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
+            return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=safe_exc_message(exc))
         except ccxt.NetworkError as exc:
             logger.error(
                 "[EXEC] Network failure submitting order (retries "
@@ -787,7 +788,7 @@ class OrderExecutionService:
                 return recovered
             self._client_orders.mark_ambiguous(client_order_id)
             return ExecutionResult(
-                outcome=ExecutionOutcome.NETWORK_FAILED, error=str(exc)
+                outcome=ExecutionOutcome.NETWORK_FAILED, error=safe_exc_message(exc)
             )
         except TimeoutError as exc:
             logger.error(
@@ -800,7 +801,7 @@ class OrderExecutionService:
                 self._finalize_client_order(flight_key, client_order_id, recovered)
                 return recovered
             self._client_orders.mark_ambiguous(client_order_id)
-            return ExecutionResult(outcome=ExecutionOutcome.TIMED_OUT, error=str(exc))
+            return ExecutionResult(outcome=ExecutionOutcome.TIMED_OUT, error=safe_exc_message(exc))
         except Exception as exc:  # noqa: BLE001 -- never let this crash the caller
             # Import locally to avoid a hard cycle at module import time.
             from app.core.exchange.budgeted import (
@@ -819,7 +820,7 @@ class OrderExecutionService:
                 )
                 return ExecutionResult(
                     outcome=ExecutionOutcome.REJECTED,
-                    error=str(exc),
+                    error=safe_exc_message(exc),
                 )
 
             logger.exception(
@@ -831,7 +832,7 @@ class OrderExecutionService:
                 return recovered
             self._client_orders.mark_ambiguous(client_order_id)
             return ExecutionResult(
-                outcome=ExecutionOutcome.NETWORK_FAILED, error=str(exc)
+                outcome=ExecutionOutcome.NETWORK_FAILED, error=safe_exc_message(exc)
             )
 
         order_id = getattr(result, "order_id", None) if result is not None else None

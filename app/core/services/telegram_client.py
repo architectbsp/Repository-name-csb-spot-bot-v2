@@ -13,30 +13,21 @@ through ``redact_telegram_secrets``.
 from __future__ import annotations
 
 import logging
-import re
 
 import httpx
+
+from app.core.security.redact import redact_secrets
 
 
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org"
 
-# Matches https://api.telegram.org/bot<TOKEN>/... in exception/log text.
-_BOT_URL_RE = re.compile(
-    r"(https?://api\.telegram\.org/bot)([^/\s\"']+)(/?)",
-    re.IGNORECASE,
-)
-
 
 def redact_telegram_secrets(text: str, token: str | None = None) -> str:
     """Strip Telegram bot tokens from log / exception strings."""
-    if not text:
-        return text
-    redacted = text
-    if token:
-        redacted = redacted.replace(token, "***")
-    return _BOT_URL_RE.sub(r"\1***\3", redacted)
+    known = (token,) if token else None
+    return redact_secrets(text, known_secrets=known)
 
 
 class TelegramClient:

@@ -17,7 +17,7 @@ from typing import Any, Protocol, runtime_checkable
 import ccxt
 
 from app.core.domain.candle import Candle
-from app.core.exchange.base import BaseExchange
+from app.core.exchange.base import BaseExchange, safe_last_error
 from app.core.exchange.models import (
     ConnectionStatus,
     ExchangeState,
@@ -265,7 +265,7 @@ class PaperExchangeAdapter(BaseExchange):
                 self.state.status = ConnectionStatus.CONNECTED
         except Exception as exc:
             self.state.status = ConnectionStatus.ERROR
-            self.state.last_error = str(exc)
+            self.state.last_error = safe_last_error(exc)
             raise
 
     def disconnect(self) -> None:

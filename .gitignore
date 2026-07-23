@@ -29,6 +29,11 @@ logs/
 .env
 # Local database / optional settings mirror
 csb_spot_bot.db
+*.db-wal
+*.db-shm
+*.client_orders.json
+*.quarantine.json
+*.tmp
 config.json
 
 # Generated source dump

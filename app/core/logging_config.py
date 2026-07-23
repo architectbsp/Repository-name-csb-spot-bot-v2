@@ -15,6 +15,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from app.core.security.redact import RedactingFormatter
+
 # app/core/logging_config.py -> app/core -> app -> <project root>
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,6 +46,9 @@ def configure_logging(
     `bot.log.<backup_count>` (default 5), so disk usage never grows
     unbounded the way a plain shell-redirected log file does.
 
+    R6: both handlers use ``RedactingFormatter`` so credentials never
+    land in console or rotated log files.
+
     Idempotent by default (safe to import/call from multiple entry
     points, e.g. main.py and test fixtures); pass `force=True` to
     reconfigure (mainly useful in tests).
@@ -56,7 +61,7 @@ def configure_logging(
     directory = Path(log_dir) if log_dir is not None else DEFAULT_LOG_DIR
     directory.mkdir(parents=True, exist_ok=True)
 
-    formatter = logging.Formatter(
+    formatter = RedactingFormatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
 

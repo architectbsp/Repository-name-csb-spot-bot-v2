@@ -18,6 +18,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from app.core.domain.trade_journal import STATUS_CLOSED
+from app.core.security.redact import safe_error_text
 
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class TelegramCommandHandler:
         except Exception as exc:
             logger.error(
                 "[TELEGRAM] emergency_exit_all failed: %s",
-                exc,
+                safe_error_text(exc),
             )
             self._notifier._send(
                 f"⛔ EMERGENCY failed: {type(exc).__name__}",

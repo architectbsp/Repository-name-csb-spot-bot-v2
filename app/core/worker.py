@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.scheduler.scheduler import Scheduler
+from app.core.security.redact import safe_error_text
 
 
 logger = logging.getLogger(__name__)
@@ -127,7 +128,7 @@ class Worker:
                 self._notify_fatal(fatal)
 
     def _record_and_notify_error(self, exc: BaseException) -> None:
-        message = f"{type(exc).__name__}: {exc}"
+        message = safe_error_text(exc)
         with self._lock:
             self._error_count += 1
             self._consecutive_errors += 1

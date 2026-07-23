@@ -21,6 +21,7 @@ from app.core.exchange.models import ConnectionStatus
 from app.core.scheduler.job import Job
 from app.core.services.telegram_client import TelegramClient
 from app.core.services.telegram_command_handler import TelegramCommandHandler
+from app.core.security.redact import redact_secrets
 
 
 logger = logging.getLogger(__name__)
@@ -239,12 +240,13 @@ class TelegramNotifier:
         )
 
     def on_execution_error(self, event: dict) -> None:
+        detail = redact_secrets(str(event.get("error", "-")))
         self._send(
             "⚠️ ERROR — manual review required\n"
             f"Symbol: {event.get('symbol', '?')}\n"
             f"Side: {event.get('side', '?')}\n"
             f"Outcome: {event.get('outcome', '?')}\n"
-            f"Detail: {event.get('error', '-')}"
+            f"Detail: {detail}"
         )
 
     def on_daily_loss_limit(self, event: dict | None = None) -> None:
@@ -264,7 +266,7 @@ class TelegramNotifier:
             return
         self._send(
             f"🔌 API DISCONNECT — {name}\n"
-            f"Detail: {event.get('detail', event.get('error', '-'))}"
+            f"Detail: {redact_secrets(str(event.get('detail', event.get('error', '-'))))}"
         )
 
     def on_exchange_connected(self, event: dict) -> None:

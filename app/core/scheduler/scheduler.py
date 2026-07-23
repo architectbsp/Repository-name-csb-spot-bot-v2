@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timedelta
 
 from .job import Job
+from app.core.security.redact import safe_error_text
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class Scheduler:
             try:
                 job.callback()
             except Exception as exc:
-                job.last_error = f"{type(exc).__name__}: {exc}"
+                job.last_error = safe_error_text(exc)
                 logger.exception(
                     "[Scheduler] Job '%s' failed",
                     job.name,

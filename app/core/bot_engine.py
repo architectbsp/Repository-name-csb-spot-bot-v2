@@ -23,6 +23,7 @@ from app.core.stopwatch.stopwatch import Stopwatch
 from app.core.exchange.factory import create_exchanges
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.registry import ExchangeRegistry
+from app.core.security.redact import safe_error_text, safe_exc_message
 from app.core.services.chart_service import ChartService
 from app.core.services.dashboard_service import DashboardService
 from app.core.services.order_validator import OrderValidator
@@ -594,7 +595,7 @@ class BotEngine:
         payload = {
             "source": "worker",
             "error": type(exc).__name__,
-            "message": str(exc),
+            "message": safe_exc_message(exc),
             "error_count": health.error_count,
             "consecutive_errors": health.consecutive_errors,
         }
@@ -608,15 +609,15 @@ class BotEngine:
         self.runtime_health["worker_ok"] = False
         self.runtime_health["worker_alive"] = False
         if exc is not None:
-            self.runtime_health["worker_last_error"] = (
-                f"{type(exc).__name__}: {exc}"
-            )
+            self.runtime_health["worker_last_error"] = safe_error_text(exc)
 
         payload = {
             "source": "worker",
             "fatal": True,
             "error": type(exc).__name__ if exc is not None else "Unknown",
-            "message": str(exc) if exc is not None else "worker terminated",
+            "message": (
+                safe_exc_message(exc) if exc is not None else "worker terminated"
+            ),
         }
         try:
             self.event_bus.publish("worker.fatal", payload)

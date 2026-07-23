@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Deque
 
 from app.core.domain.dashboard import LogRow
-from app.core.services.telegram_client import redact_telegram_secrets
+from app.core.security.redact import redact_secrets
 
 
 class MemoryLogHandler(logging.Handler):
@@ -35,9 +35,8 @@ class MemoryLogHandler(logging.Handler):
             if self.formatter is not None:
                 message = record.getMessage()
 
-            # Defense in depth: never surface Telegram bot tokens in the
-            # dashboard log panel even if an upstream logger slipped.
-            message = redact_telegram_secrets(message)
+            # R6: never surface credentials in the dashboard log panel.
+            message = redact_secrets(message)
 
             row = LogRow(
                 time_display=datetime.fromtimestamp(record.created).strftime(
