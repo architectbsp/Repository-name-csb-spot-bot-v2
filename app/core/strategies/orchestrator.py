@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 from app.core.config.settings import AppSettings
+from app.core.exchange.budgeted import SharedMarketOrderGate
 from app.core.exchange.manager import ExchangeManager
 from app.core.persistence.service import PersistenceService
 from app.core.strategies.factory import parse_enabled_strategies
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 class MultiStrategyOrchestrator:
     def __init__(self) -> None:
         self._pipelines: list[StrategyPipeline] = []
+        self._order_gate = SharedMarketOrderGate()
 
     @property
     def pipelines(self) -> list[StrategyPipeline]:
@@ -37,12 +39,16 @@ class MultiStrategyOrchestrator:
         strategy_names: list[str] | None = None,
     ) -> list[StrategyPipeline]:
         names = strategy_names or parse_enabled_strategies()
+        # One shared gate so two pipelines cannot race the same market
+        # on the live wallet.
+        self._order_gate = SharedMarketOrderGate()
         self._pipelines = [
             build_strategy_pipeline(
                 name,
                 exchange_manager,
                 base_config=base_config,
                 persistence=persistence,
+                order_gate=self._order_gate,
             )
             for name in names
         ]

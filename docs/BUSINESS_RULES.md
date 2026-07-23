@@ -123,8 +123,10 @@ given pipeline follows that lifecycle; no module may bypass it.
 Optional **multi-strategy** mode (`STRATEGIES=dip_hunter,momentum,breakout,scalper`)
 runs named strategies as parallel pipelines. Each pipeline has its own
 WatchList, RiskManager, position book and virtual quote budget
-(`STRATEGY_BUDGET_<NAME>` / preset). Strategies must not share a coin's
-FSM state across pipelines.
+(`STRATEGY_BUDGET_<NAME>` / preset). Buys that would exceed remaining
+budget are rejected before the venue; same-market orders across
+pipelines are serialized by a shared gate. Strategies must not share a
+coin's FSM state across pipelines.
 
 ---
 
@@ -973,8 +975,12 @@ python -m app.core.backtest --csv ./data.csv --optimize grid \
 
 Set `STRATEGIES=dip_hunter,momentum,breakout,scalper` to run named
 strategies in parallel. Each pipeline has independent risk limits and a
-virtual quote budget (`STRATEGY_BUDGET_DIP_HUNTER`, …). Default when
-unset: single `dip_hunter` lane (unchanged behavior).
+virtual quote budget (`STRATEGY_BUDGET_DIP_HUNTER`, …). Buys that would
+exceed the remaining allotment are rejected **before** hitting the venue
+(`BudgetExceededError` → execution REJECTED). Concurrent orders for the
+same `(exchange, symbol)` across pipelines are serialized via a shared
+market-order gate. Default when unset: single `dip_hunter` lane
+(unchanged behavior).
 
 ## Unified Exchange Interface
 

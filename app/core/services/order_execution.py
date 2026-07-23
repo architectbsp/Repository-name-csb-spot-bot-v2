@@ -305,6 +305,23 @@ class OrderExecutionService:
             )
             return ExecutionResult(outcome=ExecutionOutcome.TIMED_OUT, error=str(exc))
         except Exception as exc:  # noqa: BLE001 -- never let this crash the caller
+            # Import locally to avoid a hard cycle at module import time.
+            from app.core.exchange.budgeted import (
+                BudgetExceededError,
+                MarketOrderInFlightError,
+            )
+
+            if isinstance(exc, (BudgetExceededError, MarketOrderInFlightError)):
+                logger.warning(
+                    "[EXEC] Order blocked by pipeline budget/gate symbol=%s error=%s",
+                    symbol,
+                    exc,
+                )
+                return ExecutionResult(
+                    outcome=ExecutionOutcome.REJECTED,
+                    error=str(exc),
+                )
+
             logger.exception(
                 "[EXEC] Unexpected error submitting order symbol=%s", symbol
             )

@@ -1,8 +1,18 @@
 """Multi-strategy pipelines -- isolation + orchestrator fan-out."""
 
+from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
+
 from app.core.config.settings import AppSettings
 from app.core.exchange.adapter import PaperExchangeAdapter
-from app.core.exchange.budgeted import BudgetedExchangeManager
+from app.core.exchange.budgeted import (
+    BudgetedExchangeManager,
+    BudgetExceededError,
+    MarketOrderInFlightError,
+    SharedMarketOrderGate,
+)
 from app.core.exchange.manager import ExchangeManager
 from app.core.exchange.models import ExchangeType, OrderResult
 from app.core.exchange.registry import ExchangeRegistry
@@ -13,7 +23,6 @@ from app.core.strategies.factory import (
 )
 from app.core.strategies.orchestrator import MultiStrategyOrchestrator
 from app.core.trading.models import TradeRequest, TradeSide
-from types import SimpleNamespace
 
 
 def test_supported_strategies_include_four_named_lanes():
@@ -49,7 +58,12 @@ def test_budgeted_exchange_manager_caps_and_debits():
     registry.register(ExchangeType.BINANCE, paper)
     inner = ExchangeManager(registry)
 
-    budgeted = BudgetedExchangeManager(inner, initial_budget=1_000.0, strategy_name="scalper")
+    budgeted = BudgetedExchangeManager(
+        inner,
+        initial_budget=1_000.0,
+        strategy_name="scalper",
+        buy_cost_buffer=0.0,
+    )
     assert budgeted.get_quote_balance(ExchangeType.BINANCE) == 1_000.0
 
     result = budgeted.execute_trade(
@@ -57,11 +71,70 @@ def test_budgeted_exchange_manager_caps_and_debits():
         TradeRequest(
             symbol="BTC/USDT",
             side=TradeSide.BUY,
-            quantity=__import__("decimal").Decimal("2"),
+            quantity=Decimal("2"),
         ),
     )
     assert isinstance(result, OrderResult)
     assert budgeted.cash == 800.0  # 2 * 100
+
+
+def test_budgeted_exchange_manager_rejects_buy_over_budget():
+    paper = PaperExchangeAdapter(
+        live=None,
+        exchange_type=ExchangeType.BINANCE,
+        initial_quote=50_000.0,
+        fee_rate=0.0,
+    )
+    paper.set_mark_price("BTC/USDT", 100.0)
+    paper.connect()
+    registry = ExchangeRegistry()
+    registry.register(ExchangeType.BINANCE, paper)
+    inner = ExchangeManager(registry)
+
+    budgeted = BudgetedExchangeManager(
+        inner,
+        initial_budget=150.0,
+        strategy_name="scalper",
+        buy_cost_buffer=0.0,
+    )
+
+    with pytest.raises(BudgetExceededError):
+        budgeted.place_market_buy(ExchangeType.BINANCE, "BTC/USDT", 2.0)
+
+    assert budgeted.cash == 150.0
+    assert paper.fetch_quote_balance("USDT") == 50_000.0
+
+
+def test_shared_market_order_gate_blocks_concurrent_same_market():
+    paper = PaperExchangeAdapter(
+        live=None,
+        exchange_type=ExchangeType.BINANCE,
+        initial_quote=50_000.0,
+        fee_rate=0.0,
+    )
+    paper.set_mark_price("BTC/USDT", 100.0)
+    paper.connect()
+    registry = ExchangeRegistry()
+    registry.register(ExchangeType.BINANCE, paper)
+    inner = ExchangeManager(registry)
+
+    gate = SharedMarketOrderGate()
+    assert gate.try_acquire("BINANCE:BTC/USDT") is True
+
+    a = BudgetedExchangeManager(
+        inner,
+        initial_budget=5_000.0,
+        strategy_name="dip_hunter",
+        order_gate=gate,
+        buy_cost_buffer=0.0,
+    )
+    with pytest.raises(MarketOrderInFlightError):
+        a.place_market_buy(ExchangeType.BINANCE, "BTC/USDT", 1.0)
+
+    gate.release("BINANCE:BTC/USDT")
+    result = a.place_market_buy(ExchangeType.BINANCE, "BTC/USDT", 1.0)
+    assert result.status == "CLOSED"
+    assert a.cash == 4_900.0
 
 
 def test_orchestrator_builds_isolated_pipelines():

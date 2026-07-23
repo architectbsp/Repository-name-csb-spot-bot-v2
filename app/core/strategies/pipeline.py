@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.config.settings import AppSettings
-from app.core.exchange.budgeted import BudgetedExchangeManager
+from app.core.exchange.budgeted import BudgetedExchangeManager, SharedMarketOrderGate
 from app.core.exchange.manager import ExchangeManager
 from app.core.persistence.service import PersistenceService
 from app.core.position_manager import PositionManager
@@ -106,6 +106,7 @@ def build_strategy_pipeline(
     budget: float | None = None,
     apply_preset: bool = True,
     strategy: BaseStrategy | None = None,
+    order_gate: SharedMarketOrderGate | None = None,
 ) -> StrategyPipeline:
     """
     Builds an isolated pipeline. Orders still hit ``shared_exchange``;
@@ -121,6 +122,7 @@ def build_strategy_pipeline(
         shared_exchange,
         initial_budget=allocated,
         strategy_name=name,
+        order_gate=order_gate,
     )
 
     persistence = persistence or PersistenceService.from_url("sqlite:///:memory:")
