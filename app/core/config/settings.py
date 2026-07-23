@@ -164,7 +164,7 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(slots=True)
 class TelegramSettings:
     """
-    Sprint 11 -- Telegram Bot API notifications.
+    Sprint 11 -- Telegram Bot API notifications + remote commands.
 
     Credentials come from the environment only (never Settings UI /
     SQLite). Enabled when token+chat_id are set and TELEGRAM_ENABLED
@@ -173,6 +173,9 @@ class TelegramSettings:
 
     bot_token: str = ""
     chat_id: str = ""
+    # Commands (/status /summary /emergency) only accepted from this id.
+    # Defaults to chat_id when unset (TELEGRAM_ADMIN_CHAT_ID).
+    admin_chat_id: str = ""
     enabled: bool = False
     # UTC hour (0-23) when the daily summary is sent.
     daily_summary_hour_utc: int = 0
@@ -184,6 +187,7 @@ class TelegramSettings:
 def load_telegram_settings() -> TelegramSettings:
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    admin_chat_id = (os.getenv("TELEGRAM_ADMIN_CHAT_ID") or "").strip() or chat_id
     explicit = os.getenv("TELEGRAM_ENABLED")
     if explicit is None:
         enabled = bool(token and chat_id)
@@ -193,6 +197,7 @@ def load_telegram_settings() -> TelegramSettings:
     return TelegramSettings(
         bot_token=token,
         chat_id=chat_id,
+        admin_chat_id=admin_chat_id,
         enabled=enabled and bool(token and chat_id),
         daily_summary_hour_utc=int(
             os.getenv("TELEGRAM_DAILY_SUMMARY_HOUR", "0")

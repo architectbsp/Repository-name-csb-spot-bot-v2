@@ -86,9 +86,11 @@ enabled venues; position size still uses that venue's free balance only.
 
 Changelog (2.9 -> 3.0): Telegram notifications (§8) -- optional Bot API
 alerts for BUY / SELL / STOP / ERROR / API disconnect / internet
-disconnect plus daily and weekly PnL summaries. Secrets stay in env
-(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`); a Telegram outage must never
-block trading.
+disconnect plus daily and weekly PnL summaries. Remote commands
+(`/status`, `/summary`, `/emergency`) from `TELEGRAM_ADMIN_CHAT_ID`.
+Secrets stay in env (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`); a
+Telegram outage must never block trading. Bot token is never logged
+(`redact_telegram_secrets`).
 
 Changelog (3.0 -> 3.1): database backend abstraction (§11) -- the same
 repository layer runs on SQLite (default), PostgreSQL or MariaDB/MySQL
@@ -921,13 +923,16 @@ Isolation rules (non-negotiable):
 ## Telegram Notifications
 
 `TelegramNotifier` (`app/core/services/telegram_notifier.py`) is an
-optional, read-only operator channel. It never places orders and never
-mutates Position / Risk / WatchList state. Send failures are logged and
-ignored so a Telegram outage cannot interrupt trading.
+optional operator channel. It never places orders itself; `/emergency`
+delegates to `RiskManager.emergency_exit_all`. Send failures are logged
+(with secrets redacted via `redact_telegram_secrets`) and ignored so a
+Telegram outage cannot interrupt trading.
 
 Configuration (environment only -- never stored in SQLite):
 
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (required to enable)
+- `TELEGRAM_ADMIN_CHAT_ID` (optional; defaults to `TELEGRAM_CHAT_ID`) —
+  only this chat may run remote commands
 - `TELEGRAM_ENABLED` (optional explicit on/off; defaults to on when both
   credentials are present)
 - `TELEGRAM_DAILY_SUMMARY_HOUR` (UTC hour, default `0`)
@@ -939,11 +944,23 @@ Alert types:
 |---|---|
 | **BUY** | `position.opened` after a filled market buy |
 | **SELL** | `position.closed` / `position.partial_exit` (non-stop reasons) |
-| **STOP** | `position.closed` with `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` |
+| **STOP / PARTIAL_TP** | `STOP_LOSS` / `BREAK_EVEN_STOP` / `TRAILING_STOP` / `PARTIAL_TP` |
 | **ERROR** | `order.needs_manual_review`, `risk.daily_loss_limit` |
 | **API Disconnect** | websocket close/error or exchange `ConnectionStatus` flip |
 | **Internet Disconnect** | periodic probe of `api.telegram.org` (state-change only) |
-| **Daily / Weekly Summary** | closed-trade PnL window from Trade Journal |
+| **Daily / Weekly Summary** | closed-trade PnL + win rate from Trade Journal |
+
+Remote commands (`TelegramCommandHandler`, polled on the notifier tick):
+
+| Command | Effect |
+|---|---|
+| `/status` | open positions, balance, ACTIVE/FROZEN + trading-hours mode |
+| `/summary` | today + week trade count, win rate, net PnL |
+| `/emergency` | `RiskManager.emergency_exit_all` + freeze new BUY |
+| `/help` | list commands |
+
+Unauthorized chat IDs are rejected with a `SECURITY` warning log and
+receive no reply.
 
 ---
 

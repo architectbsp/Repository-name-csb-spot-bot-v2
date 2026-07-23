@@ -19,12 +19,26 @@ from app.core.services.telegram_notifier import TelegramNotifier
 class FakeClient:
     def __init__(self) -> None:
         self.messages: list[str] = []
+        self.message_targets: list[str | None] = []
         self.reachable = True
         self.configured = True
+        self.updates: list[dict] = []
 
-    def send_message(self, text: str, *, parse_mode: str | None = None) -> bool:
+    def send_message(
+        self,
+        text: str,
+        *,
+        chat_id: str | None = None,
+        parse_mode: str | None = None,
+    ) -> bool:
         self.messages.append(text)
+        self.message_targets.append(chat_id)
         return True
+
+    def get_updates(self, *, timeout: int = 0, limit: int = 20) -> list[dict]:
+        batch = list(self.updates)
+        self.updates.clear()
+        return batch
 
     def probe_api_reachable(self) -> bool:
         return self.reachable
@@ -75,6 +89,7 @@ def make_notifier(client=None, **kwargs) -> TelegramNotifier:
     config.telegram = TelegramSettings(
         bot_token="token",
         chat_id="123",
+        admin_chat_id="123",
         enabled=True,
         daily_summary_hour_utc=0,
         weekly_summary_weekday=0,

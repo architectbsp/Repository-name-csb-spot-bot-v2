@@ -1,10 +1,13 @@
 """
-Sprint 11 -- Telegram notifier.
+Sprint 11 -- Telegram notifier + remote command polling.
 
 Subscribes to BotEngine EventBus topics and formats operator-facing
-alerts (BUY / SELL / STOP / ERROR / API disconnect / internet
-disconnect / daily & weekly summaries). Never places orders or mutates
-trading state; send failures are swallowed by TelegramClient.
+alerts (BUY / SELL / STOP / PARTIAL_TP / ERROR / API disconnect /
+internet disconnect / daily & weekly summaries). Polls Telegram for
+/status /summary /emergency from the authorized admin chat.
+
+Never places orders itself (emergency delegates to RiskManager). Send
+failures are swallowed by TelegramClient.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from app.core.domain.trade_journal import STATUS_CLOSED
 from app.core.exchange.models import ConnectionStatus
 from app.core.scheduler.job import Job
 from app.core.services.telegram_client import TelegramClient
+from app.core.services.telegram_command_handler import TelegramCommandHandler
 
 
 logger = logging.getLogger(__name__)
@@ -27,11 +31,26 @@ _STOP_REASONS = frozenset(
         "HARD_STOP",  # legacy alias
         "BREAK_EVEN_STOP",
         "TRAILING_STOP",
+        "PARTIAL_TP",
     }
 )
 
 _TICK_JOB = "telegram_notifier_tick"
 _TICK_INTERVAL_SECONDS = 30
+
+
+def _reason_key(reason) -> str:
+    if reason is None:
+        return ""
+    name = getattr(reason, "name", None)
+    if name:
+        return str(name)
+    value = getattr(reason, "value", None)
+    if value is not None and not hasattr(value, "name"):
+        text = str(value)
+        if text and not text.startswith("<"):
+            return text
+    return str(reason)
 
 
 class TelegramNotifier:
@@ -48,6 +67,7 @@ class TelegramNotifier:
         self._risk_manager = None
         self._position_manager = None
         self._initialized = False
+        self._commands = TelegramCommandHandler(self)
 
         self._internet_ok: bool | None = None
         self._api_ok: dict[str, bool] = {}
@@ -142,7 +162,8 @@ class TelegramNotifier:
         if self.is_enabled():
             self._send(
                 "🤖 CSB Spot Bot Telegram notifier online "
-                f"({datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC)"
+                f"({datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC)\n"
+                "Commands: /status /summary /emergency /help"
             )
 
     def stop(self) -> None:
@@ -169,7 +190,7 @@ class TelegramNotifier:
     def on_position_closed(self, event: dict) -> None:
         symbol = event.get("symbol", "?")
         exchange = event.get("exchange", "")
-        reason = str(event.get("reason") or "")
+        reason = _reason_key(event.get("reason"))
         price = event.get("price") or event.get("exit_price")
         position = event.get("position")
         pnl = getattr(position, "pnl", None) if position is not None else event.get("pnl")
@@ -178,10 +199,17 @@ class TelegramNotifier:
             if position is not None
             else event.get("pnl_percent")
         )
+        qty = (
+            getattr(position, "quantity", None)
+            if position is not None
+            else event.get("quantity")
+        )
         venue = f" [{exchange}]" if exchange else ""
 
-        if reason in _STOP_REASONS:
+        if reason in _STOP_REASONS and reason != "PARTIAL_TP":
             title = f"🛑 STOP ({reason}){venue}"
+        elif reason == "PARTIAL_TP":
+            title = f"🟠 PARTIAL_TP{venue}"
         else:
             title = f"🔴 SELL ({reason or 'CLOSED'}){venue}"
 
@@ -189,17 +217,19 @@ class TelegramNotifier:
             f"{title}\n"
             f"Symbol: {symbol}\n"
             f"Exit: {_fmt(price)}\n"
-            f"PnL: {_fmt(pnl)} ({_fmt(pnl_pct)}%)"
+            f"Qty: {_fmt(qty)}\n"
+            f"PnL: {_fmt(pnl)} USD ({_fmt(pnl_pct)}%)\n"
+            f"Reason: {reason or '-'}"
         )
 
     def on_partial_exit(self, event: dict) -> None:
         symbol = event.get("symbol", "?")
         self._send(
-            f"🟠 PARTIAL SELL\n"
+            f"🟠 PARTIAL_TP\n"
             f"Symbol: {symbol}\n"
             f"Qty: {_fmt(event.get('quantity'))}\n"
             f"Exit: {_fmt(event.get('exit_price'))}\n"
-            f"Realized: {_fmt(event.get('realized_pnl'))}"
+            f"Realized: {_fmt(event.get('realized_pnl'))} USD"
         )
 
     def on_execution_error(self, event: dict) -> None:
@@ -244,9 +274,33 @@ class TelegramNotifier:
     def tick(self) -> None:
         if not self.is_enabled():
             return
+        self._poll_commands()
         self._probe_internet()
         self._probe_exchange_status()
         self._maybe_send_summaries()
+
+    def _poll_commands(self) -> None:
+        if self._client is None:
+            return
+        updates = self._client.get_updates(timeout=0)
+        for update in updates:
+            message = update.get("message") or {}
+            chat = message.get("chat") or {}
+            chat_id = str(chat.get("id", "")).strip()
+            text = (message.get("text") or "").strip()
+            if not chat_id or not text:
+                continue
+            try:
+                self._commands.handle(chat_id, text)
+            except Exception as exc:
+                logger.error(
+                    "[TELEGRAM] command handler failed type=%s",
+                    type(exc).__name__,
+                )
+
+    def handle_command(self, chat_id: str, text: str) -> bool:
+        """Public entry for tests / alternate transports."""
+        return self._commands.handle(chat_id, text)
 
     def _probe_internet(self) -> None:
         if self._client is None:
@@ -328,7 +382,8 @@ class TelegramNotifier:
             f"Window: {day_start.date()} UTC\n"
             f"Closed trades: {stats['count']}\n"
             f"Wins / Losses: {stats['wins']} / {stats['losses']}\n"
-            f"Net PnL: {_fmt(stats['net_pnl'])}\n"
+            f"Win rate: {_win_rate_pct(stats)}%\n"
+            f"Net PnL: {_fmt(stats['net_pnl'])} USD\n"
             f"Open positions: {open_count}\n"
             f"Realized today (breaker): {_fmt(realized)}"
         )
@@ -343,7 +398,8 @@ class TelegramNotifier:
             f"Window: {week_start.date()} → {week_end.date()} UTC\n"
             f"Closed trades: {stats['count']}\n"
             f"Wins / Losses: {stats['wins']} / {stats['losses']}\n"
-            f"Net PnL: {_fmt(stats['net_pnl'])}"
+            f"Win rate: {_win_rate_pct(stats)}%\n"
+            f"Net PnL: {_fmt(stats['net_pnl'])} USD"
         )
 
     def _closed_stats(
@@ -380,10 +436,10 @@ class TelegramNotifier:
             "net_pnl": net,
         }
 
-    def _send(self, text: str) -> None:
+    def _send(self, text: str, *, chat_id: str | None = None) -> None:
         if not self.is_enabled() or self._client is None:
             return
-        self._client.send_message(text)
+        self._client.send_message(text, chat_id=chat_id)
 
 
 def _fmt(value) -> str:
@@ -392,3 +448,11 @@ def _fmt(value) -> str:
     if isinstance(value, float):
         return f"{value:.8g}"
     return str(value)
+
+
+def _win_rate_pct(stats: dict) -> str:
+    count = int(stats.get("count") or 0)
+    wins = int(stats.get("wins") or 0)
+    if count <= 0:
+        return "0"
+    return f"{(wins / count) * 100:.1f}"

@@ -53,10 +53,15 @@ class TelegramClient:
         self._timeout = timeout_seconds
         self._http = http_client
         self._owns_http = http_client is None
+        self._updates_offset: int | None = None
 
     @property
     def configured(self) -> bool:
         return bool(self._bot_token and self._chat_id)
+
+    @property
+    def chat_id(self) -> str:
+        return self._chat_id
 
     def _client(self) -> httpx.Client:
         if self._http is None:
@@ -71,7 +76,13 @@ class TelegramClient:
             self._http.close()
             self._http = None
 
-    def send_message(self, text: str, *, parse_mode: str | None = None) -> bool:
+    def send_message(
+        self,
+        text: str,
+        *,
+        chat_id: str | None = None,
+        parse_mode: str | None = None,
+    ) -> bool:
         if not self.configured:
             logger.debug("[TELEGRAM] send skipped -- not configured")
             return False
@@ -79,9 +90,13 @@ class TelegramClient:
         if not text:
             return False
 
+        target = (chat_id or self._chat_id).strip()
+        if not target:
+            return False
+
         url = f"{_TELEGRAM_API}/bot{self._bot_token}/sendMessage"
         payload: dict = {
-            "chat_id": self._chat_id,
+            "chat_id": target,
             "text": text[:4096],
             "disable_web_page_preview": True,
         }
@@ -114,6 +129,56 @@ class TelegramClient:
                 self._safe(str(exc)),
             )
             return False
+
+    def get_updates(
+        self,
+        *,
+        timeout: int = 0,
+        limit: int = 20,
+    ) -> list[dict]:
+        """
+        Long-poll ``getUpdates`` for inbound commands. Failures return []
+        so trading never blocks on Telegram.
+        """
+        if not self.configured:
+            return []
+
+        url = f"{_TELEGRAM_API}/bot{self._bot_token}/getUpdates"
+        params: dict = {
+            "timeout": max(0, int(timeout)),
+            "limit": max(1, min(100, int(limit))),
+        }
+        if self._updates_offset is not None:
+            params["offset"] = self._updates_offset
+
+        try:
+            response = self._client().get(url, params=params)
+            if response.status_code >= 400:
+                logger.error(
+                    "[TELEGRAM] getUpdates failed status=%s body=%.200s",
+                    response.status_code,
+                    self._safe(response.text),
+                )
+                return []
+            data = response.json()
+            if not data.get("ok", False):
+                logger.error(
+                    "[TELEGRAM] getUpdates rejected: %s",
+                    self._safe(str(data)),
+                )
+                return []
+            updates = list(data.get("result") or [])
+            if updates:
+                last_id = max(int(u.get("update_id", 0)) for u in updates)
+                self._updates_offset = last_id + 1
+            return updates
+        except Exception as exc:
+            logger.error(
+                "[TELEGRAM] getUpdates raised type=%s error=%s",
+                type(exc).__name__,
+                self._safe(str(exc)),
+            )
+            return []
 
     def probe_api_reachable(self) -> bool:
         """Cheap reachability check used for 'internet disconnect' alerts."""
