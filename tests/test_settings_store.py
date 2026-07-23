@@ -41,7 +41,9 @@ def test_every_schema_field_round_trips_through_persistence():
 
     changes = {}
     for field in SETTINGS_SCHEMA:
-        if field.value_type is str:
+        if field.name in {"trading_start_time", "trading_end_time"}:
+            changes[field.name] = "09:30" if field.name.endswith("start_time") else "18:00"
+        elif field.value_type is str:
             changes[field.name] = "TEST_VALUE"
         else:
             changes[field.name] = field.minimum
@@ -51,11 +53,14 @@ def test_every_schema_field_round_trips_through_persistence():
 
     for field in SETTINGS_SCHEMA:
         section = getattr(app_settings, field.section)
-        expected = (
-            "TEST_VALUE"
-            if field.value_type is str
-            else field.value_type(field.minimum)
-        )
+        if field.name == "trading_start_time":
+            expected = "09:30"
+        elif field.name == "trading_end_time":
+            expected = "18:00"
+        elif field.value_type is str:
+            expected = "TEST_VALUE"
+        else:
+            expected = field.value_type(field.minimum)
         assert getattr(section, field.name) == expected
 
     # A brand new AppSettings loaded from the same store must see the
@@ -65,11 +70,14 @@ def test_every_schema_field_round_trips_through_persistence():
 
     for field in SETTINGS_SCHEMA:
         section = getattr(reloaded, field.section)
-        expected = (
-            "TEST_VALUE"
-            if field.value_type is str
-            else field.value_type(field.minimum)
-        )
+        if field.name == "trading_start_time":
+            expected = "09:30"
+        elif field.name == "trading_end_time":
+            expected = "18:00"
+        elif field.value_type is str:
+            expected = "TEST_VALUE"
+        else:
+            expected = field.value_type(field.minimum)
         assert getattr(section, field.name) == expected
 
 
@@ -149,9 +157,9 @@ def test_schema_covers_every_field_the_user_requested():
         "scan_interval_seconds",
         "min_volume_usd",
         "trading_hours_enabled",
-        "weekend_closed",
-        "quiet_start_hour_utc",
-        "quiet_end_hour_utc",
+        "disable_weekend_trading",
+        "trading_start_time",
+        "trading_end_time",
         "blacklist_symbols",
         "filtered_patterns",
         "max_balance_utilization_percent",

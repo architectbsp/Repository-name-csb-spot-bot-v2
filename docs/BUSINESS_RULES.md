@@ -821,17 +821,24 @@ throttled API ping are the REST calls on a poll tick (best-effort).
 
 ## Trading Hours Constraint
 
-Optional UTC schedule (`StrategySettings`, Settings UI):
+Optional UTC schedule (`StrategySettings`, Settings UI). **Default OFF
+(7/24)** -- the bot does not restrict entries until an operator enables
+it.
 
-- `trading_hours_enabled` (0/1): when off, entries are always allowed.
-- `weekend_closed` (0/1): when on, Saturday/Sunday UTC block **new BUY
-  entries**.
-- `quiet_start_hour_utc` / `quiet_end_hour_utc`: passive window
-  `[start, end)` (default 02:00–05:00 UTC; wraps midnight if start>end).
+- `trading_hours_enabled` (0/1, default **0**): when off, entries are
+  always allowed.
+- `trading_start_time` / `trading_end_time` (`HH:MM` UTC, default
+  `08:00`–`23:00`): when enabled, **new BUY entries** are allowed only
+  inside `[start, end)` (wraps midnight if start > end).
+- `disable_weekend_trading` (0/1, default **0**): when on (and hours
+  enabled), Saturday/Sunday UTC block new BUY entries.
 
-Only **new entries** are gated (`RiskManager.can_open_trade`). Open
-positions continue stop/trailing/manual/emergency management regardless
-of the schedule. Dashboard shows TRADING HOURS AKTİF/PASİF.
+Implemented by `TimeConstraintService` / `TradingHoursManager`. Only
+**new entries** are gated (`RiskManager.can_open_trade` /
+`open_position`). Open positions continue stop / trailing / partial TP /
+manual / emergency management 7/24 regardless of the schedule.
+Dashboard shows TRADING HOURS AKTİF/PASİF. Changes apply immediately via
+`config.updated` (shared AppSettings, no restart).
 
 ## Volume Filter
 

@@ -59,6 +59,8 @@ PARAM_ALIASES: dict[str, str] = {
     "capital_pct": "max_balance_utilization_percent",
     "take_profit_activation": "partial_tp_activation_percent",
     "max_daily_loss": "max_daily_loss_percent",
+    "disable_weekend": "disable_weekend_trading",
+    "weekend_closed": "disable_weekend_trading",
 }
 
 

@@ -31,7 +31,6 @@ from app.core.exchange.models import ConnectionStatus, ExchangeType
 from app.core.market_data.models import NormalizedTicker
 from app.core.services.memory_log import get_memory_log_handler
 from app.core.services.system_metrics import SystemMetricsSampler
-from app.core.services.trading_hours import is_entry_allowed
 from app.core.watch_list import WatchState
 
 
@@ -239,18 +238,9 @@ class DashboardService:
     def _trading_hours_active(self, now: datetime) -> bool:
         if self._config is None:
             return True
-        strategy = self._config.strategy
-        return is_entry_allowed(
-            enabled=bool(int(getattr(strategy, "trading_hours_enabled", 0) or 0)),
-            weekend_closed=bool(int(getattr(strategy, "weekend_closed", 1) or 0)),
-            quiet_start_hour_utc=int(
-                getattr(strategy, "quiet_start_hour_utc", 2) or 0
-            ),
-            quiet_end_hour_utc=int(
-                getattr(strategy, "quiet_end_hour_utc", 5) or 0
-            ),
-            now=now,
-        )
+        from app.core.services.trading_hours import TimeConstraintService
+
+        return TimeConstraintService(self._config).is_entry_allowed(now=now)
 
     def _exchange_status(self) -> tuple[str, list[str], bool, bool]:
         if self._exchange_manager is None:

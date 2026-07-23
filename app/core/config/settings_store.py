@@ -61,7 +61,7 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     SettingField(
         "strategy",
         "trading_hours_enabled",
-        "Çalışma Saatleri (0=Kapalı 1=Aktif)",
+        "Çalışma Saatleri (0=Kapalı 7/24  1=Aktif)",
         int,
         0,
         1,
@@ -69,8 +69,8 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     ),
     SettingField(
         "strategy",
-        "weekend_closed",
-        "Hafta Sonu Kapalı (0=Hayır 1=Evet)",
+        "disable_weekend_trading",
+        "Hafta Sonu Alım Kapalı (0=Hayır 1=Evet)",
         int,
         0,
         1,
@@ -78,21 +78,21 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     ),
     SettingField(
         "strategy",
-        "quiet_start_hour_utc",
-        "Pasif Başlangıç Saati (UTC)",
-        int,
+        "trading_start_time",
+        "Aktif Başlangıç (UTC HH:MM)",
+        str,
         0,
-        23,
-        unit="saat",
+        8,
+        unit="",
     ),
     SettingField(
         "strategy",
-        "quiet_end_hour_utc",
-        "Pasif Bitiş Saati (UTC)",
-        int,
+        "trading_end_time",
+        "Aktif Bitiş (UTC HH:MM)",
+        str,
         0,
-        23,
-        unit="saat",
+        8,
+        unit="",
     ),
     SettingField(
         "strategy",
@@ -273,6 +273,11 @@ class SettingsStore:
 
             if field.value_type is str:
                 value = str(raw_value if raw_value is not None else "")
+                if name in {"trading_start_time", "trading_end_time"}:
+                    from app.core.services.trading_hours import parse_hhmm
+
+                    parsed = parse_hhmm(value, fallback=value)
+                    value = f"{parsed.hour:02d}:{parsed.minute:02d}"
                 max_len = int(field.maximum)
                 if max_len > 0 and len(value) > max_len:
                     errors.append(
@@ -309,6 +314,17 @@ class SettingsStore:
 
     def _persist(self, app_settings: AppSettings) -> None:
         values = self.current_values(app_settings)
+        strategy = app_settings.strategy
+        # Legacy NOT NULL columns still on SettingsEntity but not in schema.
+        values["weekend_closed"] = int(
+            getattr(strategy, "disable_weekend_trading", 0) or 0
+        )
+        values["quiet_start_hour_utc"] = int(
+            getattr(strategy, "quiet_start_hour_utc", 2) or 2
+        )
+        values["quiet_end_hour_utc"] = int(
+            getattr(strategy, "quiet_end_hour_utc", 5) or 5
+        )
 
         entity = SettingsEntity(
             id=1,

@@ -31,7 +31,11 @@ class SettingsEntity(Base):
     scan_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     # Trading hours (UTC). Defaults keep older DBs upgradeable.
     trading_hours_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    weekend_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    disable_weekend_trading: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trading_start_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
+    trading_end_time: Mapped[str] = mapped_column(String(5), nullable=False, default="23:00")
+    # Legacy quiet-window columns (no longer in SETTINGS_SCHEMA).
+    weekend_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     quiet_start_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     quiet_end_hour_utc: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     # Sprint 9 -- Symbol Filter / Blacklist (CSV text; upgradeable defaults).
