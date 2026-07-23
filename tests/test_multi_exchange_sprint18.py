@@ -13,7 +13,7 @@ from app.core.exchange.models import ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.exchange.manager import ExchangeManager
 from app.core.position_manager import PositionManager
-from app.core.services.order_execution import ExecutionOutcome, OrderExecutionService
+from app.core.services.order_execution import ExecutionOutcome
 from app.core.services.trade_journal import TradeJournal
 from app.core.trading.models import TradeRequest, TradeSide
 from app.core.watch_list import WatchList, WatchState

@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.exchange.market_key import market_key
-from app.core.watch_list import WatchState
 
 
 def strategy_config(config) -> Any:

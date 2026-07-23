@@ -39,27 +39,27 @@ def load_ohlcv_csv(path: str | Path) -> list[Candle]:
         except csv.Error:
             has_header = False
 
+        candles: list[Candle] = []
         if has_header:
-            reader = csv.DictReader(handle)
-            candles = [_candle_from_row(row) for row in reader]
+            for dict_row in csv.DictReader(handle):
+                candle = _candle_from_row(dict_row)
+                if candle is not None:
+                    candles.append(candle)
         else:
-            reader = csv.reader(handle)
-            candles = []
-            for row in reader:
-                if not row or len(row) < 6:
+            for cells in csv.reader(handle):
+                if not cells or len(cells) < 6:
                     continue
                 candles.append(
                     Candle(
-                        timestamp=_parse_timestamp(row[0]),
-                        open=float(row[1]),
-                        high=float(row[2]),
-                        low=float(row[3]),
-                        close=float(row[4]),
-                        volume=float(row[5]),
+                        timestamp=_parse_timestamp(cells[0]),
+                        open=float(cells[1]),
+                        high=float(cells[2]),
+                        low=float(cells[3]),
+                        close=float(cells[4]),
+                        volume=float(cells[5]),
                     )
                 )
 
-    candles = [c for c in candles if c is not None]
     candles.sort(key=lambda c: c.timestamp)
     if not candles:
         raise ValueError(f"No candles loaded from {file_path}")

@@ -982,12 +982,26 @@ same `(exchange, symbol)` across pipelines are serialized via a shared
 market-order gate. Default when unset: single `dip_hunter` lane
 (unchanged behavior).
 
-## Unified Exchange Interface
+## CI
 
-All venues implement `BaseExchange` / `ExchangeAdapter` (CCXT-shaped).
-Enable several at once with `EXCHANGES=binance,bybit,okx` and per-venue
-`BINANCE_API_KEY` / `BYBIT_…` / `OKX_PASSPHRASE`. Balances, streams and
-positions stay isolated by `market_key(exchange, symbol)`.
+Pull requests and pushes run `.github/workflows/ci.yml`:
+
+- `ruff check app tests` (flake8-equivalent lint)
+- `mypy app` (gradual typing; see `pyproject.toml` overrides)
+- `pytest`
+
+To mirror CI locally:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check app tests
+mypy app
+pytest -q
+```
+
+Branch protection on `main` (require CI green before merge) must be
+enabled in the GitHub repo settings — the workflow alone does not block
+merges until that is configured.
 
 ---
 

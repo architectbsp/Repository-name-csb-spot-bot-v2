@@ -15,8 +15,8 @@ from app.core.backtest.engine import BacktestResult
 from app.core.exchange.models import ExchangeType
 
 
-def _candle(ts: int, o: float, h: float, l: float, c: float) -> Candle:
-    return Candle(timestamp=ts, open=o, high=h, low=l, close=c, volume=1e6)
+def _candle(ts: int, o: float, h: float, low: float, c: float) -> Candle:
+    return Candle(timestamp=ts, open=o, high=h, low=low, close=c, volume=1e6)
 
 
 def _series() -> list[Candle]:

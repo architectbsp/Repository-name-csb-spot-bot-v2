@@ -1,0 +1,48 @@
+[project]
+name = "csb-spot-bot-v2"
+version = "0.0.0"
+requires-python = ">=3.12"
+description = "CSB spot trading bot"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+# Keep CI focused on correctness (flake8-equivalent). Import sorting /
+# pyupgrade can be enabled later without blocking merges.
+select = [
+    "E",
+    "F",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+exclude = [
+    "backup/",
+    "\\.venv/",
+]
+
+# Gradual typing: legacy modules still use Optional deps initialized as
+# None and assigned via setters. Keep them from blocking CI while new
+# modules (backtest/strategies/adapters) stay checked.
+[[tool.mypy.overrides]]
+module = [
+    "app.core.watch_list",
+    "app.core.market_scanner",
+    "app.core.risk_manager",
+    "app.core.exchange.binance_price_stream",
+    "app.core.persistence.mapper",
+    "app.ui.*",
+]
+ignore_errors = true

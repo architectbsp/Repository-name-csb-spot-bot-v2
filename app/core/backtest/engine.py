@@ -23,6 +23,7 @@ from app.core.risk_manager import RiskManager
 from app.core.services.analytics_service import AnalyticsService
 from app.core.services.order_validator import OrderValidator
 from app.core.services.trade_journal import TradeJournal
+from app.core.strategies.base import BaseStrategy
 from app.core.strategies.factory import create_strategy
 from app.core.watch_list import WatchList
 
@@ -92,7 +93,7 @@ class BacktestEngine:
 
         self._paper: PaperExchangeAdapter | None = None
         self._watch_list: WatchList | None = None
-        self._strategy = None
+        self._strategy: BaseStrategy | None = None
         self._risk_manager: RiskManager | None = None
         self._analytics: AnalyticsService | None = None
         self._exchange_manager: ExchangeManager | None = None

@@ -152,8 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         initial_balance=args.balance,
         strategy_name=args.strategy,
     )
-    result = engine.run()
-    print(format_report(result))
+    backtest_result = engine.run()
+    print(format_report(backtest_result))
     return 0
 
 
