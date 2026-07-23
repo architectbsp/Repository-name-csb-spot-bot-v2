@@ -156,19 +156,23 @@ class ExchangeManager:
         exchange_type: ExchangeType,
         symbol: str,
         amount: float,
+        params: dict | None = None,
     ):
         from app.core.exchange.spot_guard import (
             ORDER_TYPE_MARKET,
             assert_client_is_spot,
             assert_market_order_type,
+            assert_spot_order_params,
         )
 
         assert_market_order_type(ORDER_TYPE_MARKET)
+        assert_spot_order_params(params)
         exchange = self._get_exchange(exchange_type)
         assert_client_is_spot(getattr(exchange, "client", None))
         return exchange.place_market_buy(
             symbol,
             amount,
+            params,
         )
 
     def place_market_sell(
@@ -176,19 +180,23 @@ class ExchangeManager:
         exchange_type: ExchangeType,
         symbol: str,
         amount: float,
+        params: dict | None = None,
     ):
         from app.core.exchange.spot_guard import (
             ORDER_TYPE_MARKET,
             assert_client_is_spot,
             assert_market_order_type,
+            assert_spot_order_params,
         )
 
         assert_market_order_type(ORDER_TYPE_MARKET)
+        assert_spot_order_params(params)
         exchange = self._get_exchange(exchange_type)
         assert_client_is_spot(getattr(exchange, "client", None))
         return exchange.place_market_sell(
             symbol,
             amount,
+            params,
         )
 
     def fetch_order(
@@ -203,6 +211,18 @@ class ExchangeManager:
             order_id,
             symbol,
         )
+
+    def fetch_order_by_client_id(
+        self,
+        exchange_type: ExchangeType,
+        client_order_id: str,
+        symbol: str,
+    ):
+        exchange = self._get_exchange(exchange_type)
+        fetcher = getattr(exchange, "fetch_order_by_client_id", None)
+        if not callable(fetcher):
+            return None
+        return fetcher(client_order_id, symbol)
 
     def cancel_order(
         self,
@@ -300,15 +320,23 @@ class ExchangeManager:
         assert_market_order_type(value or ORDER_TYPE_MARKET)
         assert_spot_order_params(getattr(trade, "params", None))
 
+        params = None
+        client_order_id = getattr(trade, "client_order_id", None)
+        if client_order_id:
+            params = {"clientOrderId": str(client_order_id)}
+            assert_spot_order_params(params)
+
         if trade.side == TradeSide.BUY:
             return self.place_market_buy(
                 exchange_type,
                 trade.symbol,
                 float(trade.quantity),
+                params,
             )
 
         return self.place_market_sell(
             exchange_type,
             trade.symbol,
             float(trade.quantity),
+            params,
         )

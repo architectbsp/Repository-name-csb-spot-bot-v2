@@ -219,9 +219,9 @@ class BaseExchange(ABC):
         # Even for market, prefer the dedicated helpers.
         side_u = str(side).upper()
         if side_u == "BUY":
-            return self.place_market_buy(symbol, amount)
+            return self.place_market_buy(symbol, amount, params)
         if side_u == "SELL":
-            return self.place_market_sell(symbol, amount)
+            return self.place_market_sell(symbol, amount, params)
         from app.core.exchange.spot_guard import SpotOnlyViolationException
 
         raise SpotOnlyViolationException(
@@ -233,6 +233,7 @@ class BaseExchange(ABC):
         self,
         symbol: str,
         amount: float,
+        params: dict | None = None,
     ):
         ...
 
@@ -241,6 +242,7 @@ class BaseExchange(ABC):
         self,
         symbol: str,
         amount: float,
+        params: dict | None = None,
     ):
         ...
 
@@ -259,6 +261,56 @@ class BaseExchange(ABC):
         return self._normalize_order_result(
             self.client.fetch_order(order_id, symbol)
         )
+
+    def fetch_order_by_client_id(
+        self,
+        client_order_id: str,
+        symbol: str,
+    ) -> OrderResult | None:
+        """
+        R5: recover an order after timeout/retry/restart using the durable
+        clientOrderId. Tries unified fetch first, then open/closed scans.
+        """
+        if not client_order_id:
+            return None
+
+        try:
+            raw = self.client.fetch_order(
+                None,
+                symbol,
+                {"clientOrderId": client_order_id},
+            )
+            if raw:
+                return self._normalize_order_result(raw)
+        except Exception:
+            logger.debug(
+                "fetch_order by clientOrderId failed symbol=%s cid=%s",
+                symbol,
+                client_order_id,
+                exc_info=True,
+            )
+
+        for fetcher_name in ("fetch_open_orders", "fetch_closed_orders"):
+            fetcher = getattr(self.client, fetcher_name, None)
+            if not callable(fetcher):
+                continue
+            try:
+                if fetcher_name == "fetch_closed_orders":
+                    rows = fetcher(symbol, None, 50) or []
+                else:
+                    rows = fetcher(symbol) or []
+            except Exception:
+                logger.debug(
+                    "%s failed during clientOrderId recovery symbol=%s",
+                    fetcher_name,
+                    symbol,
+                    exc_info=True,
+                )
+                continue
+            for row in rows:
+                if _order_client_id_matches(row, client_order_id):
+                    return self._normalize_order_result(row)
+        return None
 
     def cancel_order(
         self,
@@ -359,3 +411,23 @@ class BaseExchange(ABC):
             timestamp=trade.get("timestamp"),
             raw=trade,
         )
+
+
+def _order_client_id_matches(order: dict, client_order_id: str) -> bool:
+    if str(order.get("clientOrderId") or "") == client_order_id:
+        return True
+    info = order.get("info") or {}
+    if not isinstance(info, dict):
+        return False
+    for key in (
+        "clientOrderId",
+        "newClientOrderId",
+        "clOrdId",
+        "orderLinkId",
+        "clientOid",
+        "client_order_id",
+    ):
+        if str(info.get(key) or "") == client_order_id:
+            return True
+    return False
+

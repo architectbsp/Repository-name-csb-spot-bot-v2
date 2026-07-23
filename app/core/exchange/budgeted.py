@@ -130,13 +130,16 @@ class BudgetedExchangeManager:
         exchange_type: ExchangeType,
         symbol: str,
         amount: float,
+        params=None,
     ):
         return self._run_gated_order(
             exchange_type,
             symbol,
             TradeSide.BUY,
             float(amount),
-            lambda: self._inner.place_market_buy(exchange_type, symbol, amount),
+            lambda: self._inner.place_market_buy(
+                exchange_type, symbol, amount, params
+            ),
         )
 
     def place_market_sell(
@@ -144,13 +147,16 @@ class BudgetedExchangeManager:
         exchange_type: ExchangeType,
         symbol: str,
         amount: float,
+        params=None,
     ):
         return self._run_gated_order(
             exchange_type,
             symbol,
             TradeSide.SELL,
             float(amount),
-            lambda: self._inner.place_market_sell(exchange_type, symbol, amount),
+            lambda: self._inner.place_market_sell(
+                exchange_type, symbol, amount, params
+            ),
         )
 
     def _run_gated_order(

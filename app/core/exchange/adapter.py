@@ -14,6 +14,8 @@ import math
 import time
 from typing import Any, Protocol, runtime_checkable
 
+import ccxt
+
 from app.core.domain.candle import Candle
 from app.core.exchange.base import BaseExchange
 from app.core.exchange.models import (
@@ -60,11 +62,19 @@ class ExchangeAdapter(Protocol):
 
     def normalize_price(self, symbol: str, price: float) -> float: ...
 
-    def place_market_buy(self, symbol: str, amount: float) -> OrderResult: ...
+    def place_market_buy(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult: ...
 
-    def place_market_sell(self, symbol: str, amount: float) -> OrderResult: ...
+    def place_market_sell(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult: ...
 
     def fetch_order(self, order_id: str, symbol: str) -> OrderResult: ...
+
+    def fetch_order_by_client_id(
+        self, client_order_id: str, symbol: str
+    ) -> OrderResult | None: ...
 
     def cancel_order(self, order_id: str, symbol: str) -> OrderResult: ...
 
@@ -146,14 +156,23 @@ class RealExchangeAdapter(BaseExchange):
     def normalize_price(self, symbol: str, price: float) -> float:
         return self._live.normalize_price(symbol, price)
 
-    def place_market_buy(self, symbol: str, amount: float) -> OrderResult:
-        return self._live.place_market_buy(symbol, amount)
+    def place_market_buy(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult:
+        return self._live.place_market_buy(symbol, amount, params)
 
-    def place_market_sell(self, symbol: str, amount: float) -> OrderResult:
-        return self._live.place_market_sell(symbol, amount)
+    def place_market_sell(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult:
+        return self._live.place_market_sell(symbol, amount, params)
 
     def fetch_order(self, order_id: str, symbol: str) -> OrderResult:
         return self._live.fetch_order(order_id, symbol)
+
+    def fetch_order_by_client_id(
+        self, client_order_id: str, symbol: str
+    ) -> OrderResult | None:
+        return self._live.fetch_order_by_client_id(client_order_id, symbol)
 
     def cancel_order(self, order_id: str, symbol: str) -> OrderResult:
         return self._live.cancel_order(order_id, symbol)
@@ -207,6 +226,7 @@ class PaperExchangeAdapter(BaseExchange):
         }
         self._last_prices: dict[str, float] = {}
         self._orders: dict[str, OrderResult] = {}
+        self._orders_by_client_id: dict[str, str] = {}
         self._fills: list[TradeFill] = []
         self._order_seq = 0
         self._ohlcv_cache: dict[str, list[Candle]] = {}
@@ -360,13 +380,25 @@ class PaperExchangeAdapter(BaseExchange):
                 )
         return _truncate(price, 8)
 
-    def place_market_buy(self, symbol: str, amount: float) -> OrderResult:
+    def place_market_buy(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult:
         from app.core.exchange.spot_guard import (
             ORDER_TYPE_MARKET,
             assert_market_order_type,
+            assert_spot_order_params,
         )
 
         assert_market_order_type(ORDER_TYPE_MARKET)
+        assert_spot_order_params(params)
+        client_order_id = _params_client_order_id(params)
+        if client_order_id:
+            existing = self._lookup_by_client_id(client_order_id)
+            if existing is not None:
+                raise ccxt.DuplicateOrderId(
+                    f"paper duplicate clientOrderId={client_order_id}"
+                )
+
         amount = self.normalize_amount(symbol, amount)
         if amount <= 0:
             raise ValueError(f"Invalid buy amount for {symbol}: {amount}")
@@ -394,15 +426,28 @@ class PaperExchangeAdapter(BaseExchange):
             cost=cost,
             fee=fee,
             fee_currency=quote,
+            client_order_id=client_order_id,
         )
 
-    def place_market_sell(self, symbol: str, amount: float) -> OrderResult:
+    def place_market_sell(
+        self, symbol: str, amount: float, params: dict | None = None
+    ) -> OrderResult:
         from app.core.exchange.spot_guard import (
             ORDER_TYPE_MARKET,
             assert_market_order_type,
+            assert_spot_order_params,
         )
 
         assert_market_order_type(ORDER_TYPE_MARKET)
+        assert_spot_order_params(params)
+        client_order_id = _params_client_order_id(params)
+        if client_order_id:
+            existing = self._lookup_by_client_id(client_order_id)
+            if existing is not None:
+                raise ccxt.DuplicateOrderId(
+                    f"paper duplicate clientOrderId={client_order_id}"
+                )
+
         amount = self.normalize_amount(symbol, amount)
         if amount <= 0:
             raise ValueError(f"Invalid sell amount for {symbol}: {amount}")
@@ -430,6 +475,7 @@ class PaperExchangeAdapter(BaseExchange):
             cost=proceeds,
             fee=fee,
             fee_currency=quote,
+            client_order_id=client_order_id,
         )
 
     def fetch_order(self, order_id: str, symbol: str) -> OrderResult:
@@ -437,6 +483,11 @@ class PaperExchangeAdapter(BaseExchange):
         if order is None:
             raise KeyError(f"Unknown paper order: {order_id}")
         return order
+
+    def fetch_order_by_client_id(
+        self, client_order_id: str, symbol: str
+    ) -> OrderResult | None:
+        return self._lookup_by_client_id(client_order_id)
 
     def cancel_order(self, order_id: str, symbol: str) -> OrderResult:
         order = self.fetch_order(order_id, symbol)
@@ -537,6 +588,7 @@ class PaperExchangeAdapter(BaseExchange):
         cost: float,
         fee: float,
         fee_currency: str,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         self._order_seq += 1
         order_id = f"paper-{self._order_seq}"
@@ -561,10 +613,14 @@ class PaperExchangeAdapter(BaseExchange):
                 "filled": amount,
                 "average": price,
                 "cost": cost,
-                "paper": True,
+                "clientOrderId": client_order_id,
+                "timestamp": ts,
+                "fee": {"cost": fee, "currency": fee_currency},
             },
         )
         self._orders[order_id] = order
+        if client_order_id:
+            self._orders_by_client_id[client_order_id] = order_id
         self._fills.append(
             TradeFill(
                 trade_id=trade_id,
@@ -577,19 +633,26 @@ class PaperExchangeAdapter(BaseExchange):
                 fee_cost=fee,
                 fee_currency=fee_currency,
                 timestamp=ts,
-                raw={"paper": True},
+                raw={"id": trade_id, "order": order_id},
             )
         )
-        logger.info(
-            "[PAPER] %s %s amount=%.8f price=%.8f fee=%.8f %s",
-            side,
-            symbol,
-            amount,
-            price,
-            fee,
-            fee_currency,
-        )
         return order
+
+    def _lookup_by_client_id(self, client_order_id: str) -> OrderResult | None:
+        order_id = self._orders_by_client_id.get(client_order_id)
+        if not order_id:
+            return None
+        return self._orders.get(order_id)
+
+
+def _params_client_order_id(params: dict | None) -> str | None:
+    if not params:
+        return None
+    value = params.get("clientOrderId")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _truncate(value: float, decimals: int) -> float:

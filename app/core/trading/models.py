@@ -35,6 +35,8 @@ class TradeRequest:
     side: TradeSide
     quantity: Decimal
     order_type: OrderType = OrderType.MARKET
+    # R5: set by OrderExecutionService only; RiskManager leaves this None.
+    client_order_id: str | None = None
 
     def __post_init__(self) -> None:
         # Frozen dataclass: validate via assert helpers.

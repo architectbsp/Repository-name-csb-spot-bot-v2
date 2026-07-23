@@ -30,12 +30,14 @@ import json
 import logging
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
 import ccxt
+
+from app.core.services.client_order_registry import ClientOrderRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -164,6 +166,7 @@ class OrderExecutionService:
         position_manager=None,
         on_ambiguous: Callable[[str, ExecutionResult], None] | None = None,
         quarantine_store_path: str | Path | None = None,
+        client_order_store_path: str | Path | None = None,
     ) -> None:
         self._exchange_manager = exchange_manager
         self._retry_policy = retry_policy
@@ -195,6 +198,8 @@ class OrderExecutionService:
             Path(quarantine_store_path) if quarantine_store_path else None
         )
         self._load_quarantine_store()
+        # R5: durable ClientOrderId registry (JSON sidecar).
+        self._client_orders = ClientOrderRegistry(client_order_store_path)
 
     def set_position_manager(self, position_manager) -> None:
         self._position_manager = position_manager
@@ -213,6 +218,10 @@ class OrderExecutionService:
         """R4: persist quarantine set across restarts (JSON sidecar)."""
         self._quarantine_store_path = Path(path) if path else None
         self._load_quarantine_store()
+
+    def set_client_order_store_path(self, path: str | Path | None) -> None:
+        """R5: persist ClientOrderId registry across restarts (JSON sidecar)."""
+        self._client_orders.set_store_path(path)
 
     def is_in_flight(self, symbol: str) -> bool:
         with self._lock:
@@ -233,8 +242,12 @@ class OrderExecutionService:
             if symbol in self._quarantined:
                 self._quarantined.discard(symbol)
                 self._persist_quarantine_store_unlocked()
-                return True
-            return False
+                cleared = True
+            else:
+                cleared = False
+        # Operator verified exchange; allow a new logical ClientOrderId.
+        self._client_orders.clear_market(symbol)
+        return cleared
 
     def quarantine(self, market: str) -> None:
         """Public quarantine entry used by PositionReconciler."""
@@ -439,13 +452,62 @@ class OrderExecutionService:
         raise RuntimeError("unreachable")  # pragma: no cover
 
     def _execute_with_protection(self, exchange_type, trade) -> ExecutionResult:
+        from app.core.exchange.market_key import market_key
+
         symbol = trade.symbol
+        flight_key = market_key(exchange_type, symbol)
+        exchange_name = (
+            exchange_type.name
+            if hasattr(exchange_type, "name")
+            else str(exchange_type)
+        )
+        side = getattr(trade, "side", None)
+        side_value = side.value if hasattr(side, "value") else str(side or "")
+
+        # R5: allocate or reuse durable ClientOrderId *before* submit.
+        client_order_id = self._client_orders.begin_logical_trade(
+            market_key=flight_key,
+            exchange=exchange_name,
+            symbol=symbol,
+            side=side_value,
+            quantity=getattr(trade, "quantity", ""),
+        )
+        trade = replace(trade, client_order_id=client_order_id)
+        logger.info(
+            "[EXEC] ClientOrderId bound symbol=%s exchange=%s side=%s cid=%s",
+            symbol,
+            exchange_name,
+            side_value,
+            client_order_id,
+        )
+
+        # Restart / ambiguous recovery: if the venue already has this id,
+        # classify that order instead of submitting a duplicate.
+        recovered = self._recover_by_client_order_id(exchange_type, trade)
+        if recovered is not None:
+            self._finalize_client_order(flight_key, client_order_id, recovered)
+            return recovered
 
         def submit():
             return self._exchange_manager.execute_trade(exchange_type, trade)
 
         try:
             result = self._call_exchange(submit)
+        except ccxt.DuplicateOrderId as exc:
+            logger.warning(
+                "[EXEC] DuplicateOrderId for cid=%s symbol=%s -- recovering",
+                client_order_id,
+                symbol,
+            )
+            recovered = self._recover_by_client_order_id(exchange_type, trade)
+            if recovered is not None:
+                self._finalize_client_order(flight_key, client_order_id, recovered)
+                return recovered
+            self._client_orders.mark_ambiguous(client_order_id)
+            return ExecutionResult(
+                outcome=ExecutionOutcome.UNRECONCILED,
+                error=f"duplicate_client_order_id:{exc}",
+            )
         except ccxt.InsufficientFunds as exc:
             # docs/BUSINESS_RULES.md §8: reaching this point means the 3
             # retries (1 minute apart) already happened inside
@@ -456,6 +518,9 @@ class OrderExecutionService:
                 symbol,
                 exc,
             )
+            self._client_orders.mark_failed(
+                client_order_id, market_key=flight_key
+            )
             return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
         except ccxt.InvalidOrder as exc:
             logger.error(
@@ -463,12 +528,18 @@ class OrderExecutionService:
                 symbol,
                 exc,
             )
+            self._client_orders.mark_failed(
+                client_order_id, market_key=flight_key
+            )
             return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
         except ccxt.ExchangeError as exc:
             logger.error(
                 "[EXEC] Exchange rejected order symbol=%s error=%s",
                 symbol,
                 exc,
+            )
+            self._client_orders.mark_failed(
+                client_order_id, market_key=flight_key
             )
             return ExecutionResult(outcome=ExecutionOutcome.REJECTED, error=str(exc))
         except ccxt.NetworkError as exc:
@@ -478,6 +549,11 @@ class OrderExecutionService:
                 symbol,
                 exc,
             )
+            recovered = self._recover_by_client_order_id(exchange_type, trade)
+            if recovered is not None:
+                self._finalize_client_order(flight_key, client_order_id, recovered)
+                return recovered
+            self._client_orders.mark_ambiguous(client_order_id)
             return ExecutionResult(
                 outcome=ExecutionOutcome.NETWORK_FAILED, error=str(exc)
             )
@@ -487,6 +563,11 @@ class OrderExecutionService:
                 symbol,
                 exc,
             )
+            recovered = self._recover_by_client_order_id(exchange_type, trade)
+            if recovered is not None:
+                self._finalize_client_order(flight_key, client_order_id, recovered)
+                return recovered
+            self._client_orders.mark_ambiguous(client_order_id)
             return ExecutionResult(outcome=ExecutionOutcome.TIMED_OUT, error=str(exc))
         except Exception as exc:  # noqa: BLE001 -- never let this crash the caller
             # Import locally to avoid a hard cycle at module import time.
@@ -501,6 +582,9 @@ class OrderExecutionService:
                     symbol,
                     exc,
                 )
+                self._client_orders.mark_failed(
+                    client_order_id, market_key=flight_key
+                )
                 return ExecutionResult(
                     outcome=ExecutionOutcome.REJECTED,
                     error=str(exc),
@@ -509,11 +593,99 @@ class OrderExecutionService:
             logger.exception(
                 "[EXEC] Unexpected error submitting order symbol=%s", symbol
             )
+            recovered = self._recover_by_client_order_id(exchange_type, trade)
+            if recovered is not None:
+                self._finalize_client_order(flight_key, client_order_id, recovered)
+                return recovered
+            self._client_orders.mark_ambiguous(client_order_id)
             return ExecutionResult(
                 outcome=ExecutionOutcome.NETWORK_FAILED, error=str(exc)
             )
 
-        return self._classify_result(exchange_type, trade, result)
+        order_id = getattr(result, "order_id", None) if result is not None else None
+        self._client_orders.mark_submitted(
+            client_order_id, exchange_order_id=order_id
+        )
+        classified = self._classify_result(exchange_type, trade, result)
+        self._finalize_client_order(flight_key, client_order_id, classified)
+        return classified
+
+    def _recover_by_client_order_id(
+        self, exchange_type, trade
+    ) -> ExecutionResult | None:
+        client_order_id = getattr(trade, "client_order_id", None)
+        if not client_order_id:
+            return None
+        fetcher = getattr(self._exchange_manager, "fetch_order_by_client_id", None)
+        if not callable(fetcher):
+            return None
+        try:
+            order = fetcher(exchange_type, client_order_id, trade.symbol)
+        except Exception:
+            logger.exception(
+                "[EXEC] clientOrderId recovery failed symbol=%s cid=%s",
+                trade.symbol,
+                client_order_id,
+            )
+            return None
+        if order is None:
+            return None
+        logger.warning(
+            "[EXEC] Recovered order via clientOrderId symbol=%s cid=%s "
+            "order_id=%s status=%s",
+            trade.symbol,
+            client_order_id,
+            getattr(order, "order_id", None),
+            getattr(order, "status", None),
+        )
+        return self._classify_result(exchange_type, trade, order)
+
+    def _finalize_client_order(
+        self,
+        market_key: str,
+        client_order_id: str,
+        result: ExecutionResult,
+    ) -> None:
+        order_id = None
+        if result.order_result is not None:
+            order_id = getattr(result.order_result, "order_id", None)
+        if result.outcome in {
+            ExecutionOutcome.FILLED,
+            ExecutionOutcome.REJECTED,
+            ExecutionOutcome.DUPLICATE,
+        }:
+            if result.outcome == ExecutionOutcome.REJECTED:
+                self._client_orders.mark_failed(
+                    client_order_id, market_key=market_key
+                )
+            else:
+                self._client_orders.mark_completed(
+                    client_order_id,
+                    market_key=market_key,
+                    exchange_order_id=order_id,
+                )
+            return
+        if result.is_ambiguous:
+            if order_id:
+                self._client_orders.mark_submitted(
+                    client_order_id, exchange_order_id=order_id
+                )
+            self._client_orders.mark_ambiguous(client_order_id)
+            return
+        # Non-ambiguous terminal-ish outcomes still release the slot.
+        if result.outcome in {
+            ExecutionOutcome.TIMED_OUT,
+        }:
+            # Clean pending cancel timeout (no error) -- order gone.
+            self._client_orders.mark_failed(
+                client_order_id, market_key=market_key
+            )
+            return
+        self._client_orders.mark_completed(
+            client_order_id,
+            market_key=market_key,
+            exchange_order_id=order_id,
+        )
 
     def _classify_result(self, exchange_type, trade, result) -> ExecutionResult:
         if result is None:

@@ -131,12 +131,17 @@ class OKXExchange(BaseExchange):
         self,
         symbol: str,
         amount: float,
+        params=None,
     ):
         self._guard_spot_market_order()
+        from app.core.exchange.spot_guard import assert_spot_order_params
+
+        assert_spot_order_params(params)
         return self._normalize_order_result(
             self.client.create_market_buy_order(
                 symbol,
                 amount,
+                params or {},
             )
         )
 
@@ -144,11 +149,16 @@ class OKXExchange(BaseExchange):
         self,
         symbol: str,
         amount: float,
+        params=None,
     ):
         self._guard_spot_market_order()
+        from app.core.exchange.spot_guard import assert_spot_order_params
+
+        assert_spot_order_params(params)
         return self._normalize_order_result(
             self.client.create_market_sell_order(
                 symbol,
                 amount,
+                params or {},
             )
         )

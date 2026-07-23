@@ -441,6 +441,9 @@ class BotEngine:
         order_execution.set_quarantine_store_path(
             self._order_quarantine_store_path()
         )
+        order_execution.set_client_order_store_path(
+            self._client_order_store_path()
+        )
         order_execution.set_on_ambiguous(
             lambda _market, _result: self.position_reconciler.reconcile_once()
         )
@@ -489,6 +492,18 @@ class BotEngine:
         if not raw:
             return "csb_spot_bot.quarantine.json"
         return f"{raw}.quarantine.json"
+
+    def _client_order_store_path(self) -> str | None:
+        """
+        R5: JSON sidecar for ClientOrderId registry (next to SQLite).
+        Does not modify the SQLite schema.
+        """
+        quarantine = self._order_quarantine_store_path()
+        if quarantine is None:
+            return None
+        if quarantine.endswith(".quarantine.json"):
+            return quarantine[: -len(".quarantine.json")] + ".client_orders.json"
+        return f"{quarantine}.client_orders.json"
 
     def shutdown(self):
         self.position_reconciler.shutdown()

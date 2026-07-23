@@ -107,12 +107,12 @@ def test_exchange_manager_execute_trade_uses_market_path_only():
     """Tüm alım/satım emirleri MARKET order tipiyle iletilir."""
     fills = []
 
-    def buy(symbol, amount):
-        fills.append(("BUY", symbol, amount, ORDER_TYPE_MARKET))
+    def buy(symbol, amount, params=None):
+        fills.append(("BUY", symbol, amount, ORDER_TYPE_MARKET, params))
         return SimpleNamespace(status="CLOSED", filled_quantity=amount)
 
-    def sell(symbol, amount):
-        fills.append(("SELL", symbol, amount, ORDER_TYPE_MARKET))
+    def sell(symbol, amount, params=None):
+        fills.append(("SELL", symbol, amount, ORDER_TYPE_MARKET, params))
         return SimpleNamespace(status="CLOSED", filled_quantity=amount)
 
     exchange = SimpleNamespace(
@@ -140,9 +140,25 @@ def test_exchange_manager_execute_trade_uses_market_path_only():
     manager.execute_trade(ExchangeType.BINANCE, sell_trade)
 
     assert fills == [
-        ("BUY", "ETH/USDT", 2.0, ORDER_TYPE_MARKET),
-        ("SELL", "ETH/USDT", 2.0, ORDER_TYPE_MARKET),
+        ("BUY", "ETH/USDT", 2.0, ORDER_TYPE_MARKET, None),
+        ("SELL", "ETH/USDT", 2.0, ORDER_TYPE_MARKET, None),
     ]
+
+    with_cid = TradeRequest(
+        symbol="ETH/USDT",
+        side=TradeSide.BUY,
+        quantity=Decimal("1"),
+        order_type=OrderType.MARKET,
+        client_order_id="csbtestcid001",
+    )
+    manager.execute_trade(ExchangeType.BINANCE, with_cid)
+    assert fills[-1] == (
+        "BUY",
+        "ETH/USDT",
+        1.0,
+        ORDER_TYPE_MARKET,
+        {"clientOrderId": "csbtestcid001"},
+    )
 
 
 def test_base_exchange_rejects_limit_helper():
