@@ -47,7 +47,22 @@ class TradeJournalRepositoryProtocol(Protocol):
 
     def get_open_by_symbol(self, symbol: str) -> TradeJournalEntity | None: ...
 
+    def list_open(self) -> list[TradeJournalEntity]: ...
+
     def list_all(self) -> list[TradeJournalEntity]: ...
+
+    def query(
+        self,
+        *,
+        symbol: str | None = None,
+        date_from=None,
+        date_to=None,
+        strategy: str | None = None,
+        close_reason: str | None = None,
+        status: str | None = None,
+        exchange: str | None = None,
+        limit: int = 200,
+    ) -> list[TradeJournalEntity]: ...
 
     def get_last_closed_by_symbol(
         self,

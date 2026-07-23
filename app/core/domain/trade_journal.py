@@ -4,6 +4,8 @@ Trade Journal: permanent decision history for every trade, independent of
 append-only `trade_logs` (entry / in-trade extremes / partial / exit).
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -43,6 +45,7 @@ class TradeJournalEntry:
     fall_events: int = 0
 
     # Snapshot at BUY: volume / path / price filters that justified entry.
+    # Brief alias: "indicators" / trigger snapshot.
     entry_conditions: dict = field(default_factory=dict)
     # Free quote wallet (e.g. USDT) immediately after / around the BUY.
     wallet_quote_free: float | None = None
@@ -61,6 +64,9 @@ class TradeJournalEntry:
     partial_exit_pnl: float = 0.0
     partial_exits: list[dict] = field(default_factory=list)
 
+    # Fees accumulated across entry / partial / exit fills (quote currency).
+    commission: float | None = None
+
     # Populated once the trade fully closes.
     exit_time: datetime | None = None
     exit_price: float | None = None
@@ -68,6 +74,43 @@ class TradeJournalEntry:
     duration_minutes: float | None = None
     pnl: float | None = None
     pnl_percent: float | None = None
+
+    @property
+    def trigger_condition(self) -> str:
+        """Brief alias for ``entry_reason``."""
+        return self.entry_reason
+
+    @property
+    def duration_sec(self) -> float | None:
+        if self.duration_minutes is None:
+            return None
+        return float(self.duration_minutes) * 60.0
+
+    @property
+    def mfe_percent(self) -> float | None:
+        """Max Favorable Excursion vs entry (long): peak % above entry."""
+        if self.highest_price is None or self.entry_price <= 0:
+            return None
+        return ((self.highest_price - self.entry_price) / self.entry_price) * 100.0
+
+    @property
+    def mae_percent(self) -> float | None:
+        """Max Adverse Excursion vs entry (long): trough % below entry."""
+        if self.lowest_price is None or self.entry_price <= 0:
+            return None
+        return ((self.lowest_price - self.entry_price) / self.entry_price) * 100.0
+
+    @property
+    def mfe_usd(self) -> float | None:
+        if self.highest_price is None:
+            return None
+        return (self.highest_price - self.entry_price) * self.quantity
+
+    @property
+    def mae_usd(self) -> float | None:
+        if self.lowest_price is None:
+            return None
+        return (self.lowest_price - self.entry_price) * self.quantity
 
 
 @dataclass(slots=True)
@@ -78,3 +121,7 @@ class TradeLog:
     message: str | None = None
     payload: dict = field(default_factory=dict)
     id: int | None = None
+
+
+# Brief / Sprint 5 naming aliases.
+TradeJournalLog = TradeLog

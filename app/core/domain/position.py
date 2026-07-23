@@ -87,6 +87,9 @@ class Position:
     # highest price). Drives the CloseReason recorded when the stop
     # actually triggers.
     stop_stage: str = "HARD"
+    # Optional fill fee from the opening BUY (quote currency) — forwarded
+    # into TradeJournal.commission on entry.
+    entry_commission: float | None = None
 
     @property
     def remaining_quantity(self) -> float:

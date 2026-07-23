@@ -641,33 +641,41 @@ reconciliation, quarantine) described above -- there is no separate
 
 Every trade (from the BUY that opens a position to the SELL that finally
 closes it) gets a permanent `trade_journals` row (`TradeJournalEntry` /
-`app/core/services/trade_journal.py`) plus an append-only `trade_logs`
-event stream, independent of the `positions` table -- closing a position
-deletes its `positions` row, but journal history is never deleted.
-Legacy DBs with the old `trade_journal` table name are renamed on
-`sync_schema()`.
+`TradeJournal` service, alias `TradeJournalService`) plus an append-only
+`trade_logs` event stream (`TradeLog` / `TradeJournalLog`), independent
+of the `positions` table -- closing a position deletes its `positions`
+row, but journal history is never deleted. Legacy DBs with the old
+`trade_journal` table name are renamed on `sync_schema()`. On startup,
+open journal rows are rehydrated into memory (`load_open_entries`) so
+MFE/MAE tracking continues after a restart.
 
 - **Recorded at entry** (by Strategy, the instant a BUY fills and the
   position is promoted to `POSITION_OPEN`): symbol, exchange, entry
-  price/quantity, `entry_reason` (`PATH_A_DIRECT_RISE` or
-  `PATH_B_DIP_RECOVERY` -- see §2), when the watch cycle started, how
+  price/quantity, `entry_reason` / `trigger_condition` (`PATH_A_DIRECT_RISE`
+  or `PATH_B_DIP_RECOVERY` -- see §2), when the watch cycle started, how
   many minutes it was watched before the BUY, watch `rise_events` /
   `fall_events`, **entry conditions** (volume_24h, change_24h, strategy
-  thresholds), and **wallet quote free** balance. A matching `trade_logs`
-  row with `event_type=ENTRY` is appended.
+  thresholds — indicator/trigger snapshot), **wallet quote free** balance,
+  and opening **commission** when the fill reports a fee. A matching
+  `trade_logs` row with `event_type=ENTRY` is appended.
 - **Recorded while OPEN** (by RiskManager on every price tick via
-  `record_price_update`): highest/lowest price seen (MFE/MAE style),
-  peak/trough print counts, and hold minutes in the log payload. Only
+  `record_price_update`): highest/lowest price seen (MFE/MAE anchors;
+  `mfe_percent` / `mae_percent` / USD helpers on the entry), peak/trough
+  print counts (`swings`), and `duration_sec` in the log payload. Only
   extreme changes persist (`event_type=PRICE_EXTREME`) to avoid spam.
 - **Recorded on every partial exit** (by RiskManager's Scale Out /
-  Partial Take Profit): quantity sold, exit price, realized PnL, running
-  totals (`partial_exit_count`, `partial_exit_pnl`) + `PARTIAL_EXIT` log.
-  The trade stays `OPEN` in the journal.
+  Partial Take Profit): quantity sold, exit price, realized PnL, fee
+  accumulation, running totals (`partial_exit_count`, `partial_exit_pnl`)
+  + `PARTIAL_EXIT` log. The trade stays `OPEN` in the journal.
 - **Recorded on final exit** (by RiskManager, for every full-close path --
   ordinary stop-loss, Manual Close, Emergency Exit, or Maximum Position
-  Duration): exit price, `exit_reason` (CloseReason / stage-aware),
-  net PnL %, USD PnL, duration minutes, plus final extremes. Marked
-  `CLOSED` with an `EXIT` log row.
+  Duration): exit price, `exit_reason` / `close_reason` (CloseReason /
+  stage-aware), net PnL %, USD PnL, `duration_minutes` / `duration_sec`,
+  commission total, plus final MFE/MAE. Marked `CLOSED` with an `EXIT`
+  log row.
+- **Query API** (`TradeJournal.query` / repository): filter history by
+  symbol, date range (`entry_time`), strategy (inside entry_conditions),
+  `close_reason` (`exit_reason`), status, or exchange for UI / analytics.
 
 ---
 

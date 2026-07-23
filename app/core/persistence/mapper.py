@@ -84,6 +84,7 @@ def journal_to_entity(entry: TradeJournalEntry) -> TradeJournalEntity:
         duration_minutes=entry.duration_minutes,
         pnl=entry.pnl,
         pnl_percent=entry.pnl_percent,
+        commission=entry.commission,
     )
 
 
@@ -121,6 +122,7 @@ def journal_to_domain(entity: TradeJournalEntity) -> TradeJournalEntry:
         duration_minutes=entity.duration_minutes,
         pnl=entity.pnl,
         pnl_percent=entity.pnl_percent,
+        commission=getattr(entity, "commission", None),
     )
 
 

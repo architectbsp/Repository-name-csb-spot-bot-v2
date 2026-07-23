@@ -422,6 +422,9 @@ class BotEngine:
         for position in self.persistence.load_positions():
             self.position_manager.restore(position)
 
+        # Sprint 5: continue MFE/MAE + exit journaling for restored opens.
+        self.trade_journal.load_open_entries()
+
     def shutdown(self):
         self.position_reconciler.shutdown()
         self.telegram_notifier.shutdown()

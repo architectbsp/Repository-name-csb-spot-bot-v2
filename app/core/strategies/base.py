@@ -184,6 +184,7 @@ class BaseStrategy(ABC):
             fall_events=coin.get("fall_count", 0),
             entry_conditions=entry_conditions,
             wallet_quote_free=wallet_quote_free,
+            commission=getattr(position, "entry_commission", None),
         )
 
     def _handle_position_open(self, watch_list, ticker) -> None:

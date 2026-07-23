@@ -199,6 +199,8 @@ class TradeJournalEntity(Base):
     duration_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Accumulated fill fees (quote currency) across the trade lifecycle.
+    commission: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class TradeLogEntity(Base):

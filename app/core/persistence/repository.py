@@ -143,10 +143,60 @@ class TradeJournalRepository:
             .first()
         )
 
+    def list_open(self) -> list[TradeJournalEntity]:
+        return (
+            self._session.query(TradeJournalEntity)
+            .filter_by(status="OPEN")
+            .order_by(TradeJournalEntity.entry_time.desc())
+            .all()
+        )
+
     def list_all(self) -> list[TradeJournalEntity]:
         return (
             self._session.query(TradeJournalEntity)
             .order_by(TradeJournalEntity.entry_time.desc())
+            .all()
+        )
+
+    def query(
+        self,
+        *,
+        symbol: str | None = None,
+        date_from=None,
+        date_to=None,
+        strategy: str | None = None,
+        close_reason: str | None = None,
+        status: str | None = None,
+        exchange: str | None = None,
+        limit: int = 200,
+    ) -> list[TradeJournalEntity]:
+        """
+        Filtered journal lookup for UI / analytics (Sprint 5).
+        ``strategy`` matches a substring inside ``entry_conditions_json``.
+        ``close_reason`` filters ``exit_reason``.
+        Date bounds apply to ``entry_time``.
+        """
+        q = self._session.query(TradeJournalEntity)
+        if symbol:
+            q = q.filter(TradeJournalEntity.symbol == symbol)
+        if exchange:
+            q = q.filter(TradeJournalEntity.exchange == exchange)
+        if status:
+            q = q.filter(TradeJournalEntity.status == status)
+        if close_reason:
+            q = q.filter(TradeJournalEntity.exit_reason == close_reason)
+        if date_from is not None:
+            q = q.filter(TradeJournalEntity.entry_time >= date_from)
+        if date_to is not None:
+            q = q.filter(TradeJournalEntity.entry_time <= date_to)
+        if strategy:
+            # entry_conditions JSON blob -- portable LIKE match.
+            q = q.filter(
+                TradeJournalEntity.entry_conditions_json.contains(strategy)
+            )
+        return (
+            q.order_by(TradeJournalEntity.entry_time.desc())
+            .limit(max(1, int(limit)))
             .all()
         )
 

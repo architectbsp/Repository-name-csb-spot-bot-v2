@@ -10,6 +10,9 @@ Writers:
   - Strategy.record_entry (BUY fill + why)
   - RiskManager.record_price_update (in-trade MFE/MAE + peaks)
   - RiskManager.record_partial_exit / record_exit
+
+Readers: ``query()`` / ``list_*`` for UI and analytics (Sprint 5
+``TradeJournalService`` alias).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from app.core.domain.trade_journal import (
     LOG_PARTIAL_EXIT,
     LOG_PRICE_EXTREME,
     STATUS_CLOSED,
+    STATUS_OPEN,
     TradeJournalEntry,
     TradeLog,
 )
@@ -37,6 +41,19 @@ from app.core.persistence.mapper import (
 logger = logging.getLogger(__name__)
 
 
+def _add_commission(entry: TradeJournalEntry, fee: float | None) -> None:
+    if fee is None:
+        return
+    try:
+        amount = float(fee)
+    except (TypeError, ValueError):
+        return
+    if amount == 0:
+        return
+    current = entry.commission or 0.0
+    entry.commission = current + amount
+
+
 class TradeJournal:
     def __init__(self) -> None:
         self._repository = None
@@ -48,6 +65,23 @@ class TradeJournal:
 
     def set_repository(self, repository) -> None:
         self._repository = repository
+
+    def load_open_entries(self) -> int:
+        """
+        Rehydrate in-memory open rows from SQLite after restart so
+        MFE/MAE ticks and exits continue on restored positions.
+        """
+        if self._repository is None or not hasattr(self._repository, "list_open"):
+            return 0
+        loaded = 0
+        for entity in self._repository.list_open():
+            entry = journal_to_domain(entity)
+            key = self._entry_key(entry.symbol, entry.exchange)
+            self._open_entries[key] = entry
+            loaded += 1
+        if loaded:
+            logger.info("[JOURNAL] Rehydrated %d open journal entr(y/ies)", loaded)
+        return loaded
 
     def _append_log(
         self,
@@ -85,6 +119,7 @@ class TradeJournal:
         fall_events: int = 0,
         entry_conditions: dict | None = None,
         wallet_quote_free: float | None = None,
+        commission: float | None = None,
     ) -> TradeJournalEntry:
         conditions = dict(entry_conditions or {})
         entry = TradeJournalEntry(
@@ -102,6 +137,7 @@ class TradeJournal:
             wallet_quote_free=wallet_quote_free,
             highest_price=entry_price,
             lowest_price=entry_price,
+            commission=float(commission) if commission is not None else None,
         )
 
         if self._repository is not None:
@@ -121,6 +157,8 @@ class TradeJournal:
                 "fall_events": fall_events,
                 "entry_conditions": conditions,
                 "wallet_quote_free": wallet_quote_free,
+                "commission": entry.commission,
+                "trigger_condition": entry_reason,
             },
         )
 
@@ -149,8 +187,9 @@ class TradeJournal:
         exchange=None,
     ) -> TradeJournalEntry | None:
         """
-        In-trade tracking: hold extremes (highest/lowest) and peak/trough
-        print counts. Persists + logs only when an extreme changes.
+        In-trade tracking: hold extremes (highest/lowest = MFE/MAE price
+        anchors) and peak/trough print counts. Persists + logs only when
+        an extreme changes.
         """
         entry = self._resolve_open(symbol, exchange)
         if entry is None:
@@ -169,9 +208,7 @@ class TradeJournal:
         if not changed:
             return entry
 
-        hold_minutes = (
-            datetime.now(UTC) - entry.entry_time
-        ).total_seconds() / 60.0
+        hold_seconds = (datetime.now(UTC) - entry.entry_time).total_seconds()
 
         if self._repository is not None and entry.id is not None:
             self._repository.update(journal_to_entity(entry))
@@ -184,9 +221,11 @@ class TradeJournal:
                 "price": price,
                 "highest_price": entry.highest_price,
                 "lowest_price": entry.lowest_price,
+                "mfe_percent": entry.mfe_percent,
+                "mae_percent": entry.mae_percent,
                 "peak_count": entry.peak_count,
                 "trough_count": entry.trough_count,
-                "hold_minutes": hold_minutes,
+                "duration_sec": hold_seconds,
             },
         )
         return entry
@@ -200,6 +239,7 @@ class TradeJournal:
         realized_pnl: float,
         reason: str = "PARTIAL_TP",
         exchange=None,
+        commission: float | None = None,
     ) -> TradeJournalEntry | None:
         entry = self._resolve_open(symbol, exchange)
         if entry is None:
@@ -212,12 +252,14 @@ class TradeJournal:
 
         entry.partial_exit_count += 1
         entry.partial_exit_pnl += realized_pnl
+        _add_commission(entry, commission)
         partial = {
             "time": datetime.now(UTC).isoformat(),
             "exit_price": exit_price,
             "quantity": quantity,
             "realized_pnl": realized_pnl,
             "reason": reason,
+            "commission": commission,
         }
         entry.partial_exits.append(partial)
 
@@ -253,6 +295,7 @@ class TradeJournal:
         pnl_percent: float | None = None,
         exit_time: datetime | None = None,
         exchange=None,
+        commission: float | None = None,
     ) -> TradeJournalEntry | None:
         key = self._entry_key(symbol, exchange)
         entry = self._open_entries.pop(key, None)
@@ -283,6 +326,7 @@ class TradeJournal:
         entry.duration_minutes = (
             exit_time - entry.entry_time
         ).total_seconds() / 60.0
+        _add_commission(entry, commission)
 
         if self._repository is not None and entry.id is not None:
             self._repository.update(journal_to_entity(entry))
@@ -294,25 +338,32 @@ class TradeJournal:
             payload={
                 "exit_price": exit_price,
                 "exit_reason": reason,
+                "close_reason": reason,
                 "pnl": pnl,
                 "pnl_percent": pnl_percent,
                 "duration_minutes": entry.duration_minutes,
+                "duration_sec": entry.duration_sec,
                 "highest_price": entry.highest_price,
                 "lowest_price": entry.lowest_price,
+                "mfe_percent": entry.mfe_percent,
+                "mae_percent": entry.mae_percent,
                 "peak_count": entry.peak_count,
                 "trough_count": entry.trough_count,
+                "commission": entry.commission,
             },
         )
 
         logger.info(
             "[JOURNAL] EXIT symbol=%s reason=%s price=%.8f pnl=%s "
-            "pnl_percent=%s duration_minutes=%.1f",
+            "pnl_percent=%s duration_sec=%s mfe=%.2f%% mae=%.2f%%",
             symbol,
             reason,
             exit_price,
             f"{pnl:.8f}" if pnl is not None else "n/a",
             f"{pnl_percent:.4f}" if pnl_percent is not None else "n/a",
-            entry.duration_minutes,
+            f"{entry.duration_sec:.1f}" if entry.duration_sec is not None else "n/a",
+            entry.mfe_percent or 0.0,
+            entry.mae_percent or 0.0,
         )
 
         return entry
@@ -365,3 +416,65 @@ class TradeJournal:
             journal_to_domain(entity)
             for entity in self._repository.list_all()
         ]
+
+    def query(
+        self,
+        *,
+        symbol: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        strategy: str | None = None,
+        close_reason: str | None = None,
+        status: str | None = None,
+        exchange: str | None = None,
+        limit: int = 200,
+    ) -> list[TradeJournalEntry]:
+        """
+        Sprint 5 query API for UI / analytics: filter by symbol, date
+        range, strategy name (inside entry_conditions), close_reason,
+        status, or exchange.
+        """
+        if self._repository is not None and hasattr(self._repository, "query"):
+            return [
+                journal_to_domain(entity)
+                for entity in self._repository.query(
+                    symbol=symbol,
+                    date_from=date_from,
+                    date_to=date_to,
+                    strategy=strategy,
+                    close_reason=close_reason,
+                    status=status,
+                    exchange=exchange,
+                    limit=limit,
+                )
+            ]
+
+        # In-memory fallback (tests without repo.query).
+        rows = list(self._open_entries.values())
+        if status == STATUS_CLOSED:
+            rows = []
+        elif status == STATUS_OPEN or status is None:
+            pass
+        out: list[TradeJournalEntry] = []
+        for entry in rows:
+            if symbol and entry.symbol != symbol:
+                continue
+            if exchange and entry.exchange != exchange:
+                continue
+            if close_reason and entry.exit_reason != close_reason:
+                continue
+            if strategy:
+                blob = str(entry.entry_conditions)
+                if strategy not in blob:
+                    continue
+            if date_from is not None and entry.entry_time < date_from:
+                continue
+            if date_to is not None and entry.entry_time > date_to:
+                continue
+            out.append(entry)
+        out.sort(key=lambda e: e.entry_time, reverse=True)
+        return out[: max(1, int(limit))]
+
+
+# Brief / Sprint 5 service naming.
+TradeJournalService = TradeJournal

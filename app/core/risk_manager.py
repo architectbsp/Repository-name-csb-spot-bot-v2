@@ -834,6 +834,7 @@ class RiskManager:
             opened_at=datetime.now(UTC),
             stop_price=stop_price,
             exchange=exchange_type,
+            entry_commission=getattr(result, "fee_cost", None),
         )
 
         if not self._position_manager.add(position):
@@ -1049,6 +1050,7 @@ class RiskManager:
                 realized_pnl=realized,
                 reason=CloseReason.PARTIAL_TP,
                 exchange=position.exchange,
+                commission=getattr(result, "fee_cost", None),
             )
 
         logger.info(
@@ -1367,6 +1369,7 @@ class RiskManager:
                 pnl=getattr(position, "pnl", None),
                 pnl_percent=getattr(position, "pnl_percent", None),
                 exchange=position.exchange,
+                commission=getattr(result, "fee_cost", None) if result else None,
             )
 
         if self._event_bus is not None:
