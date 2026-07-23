@@ -4,11 +4,16 @@ Sprint 11 -- thin Telegram Bot API client.
 Uses httpx (already pinned) to call `sendMessage`. Never raises into
 trading paths: every failure is logged and returned as False so a
 Telegram outage cannot break order flow.
+
+Logging never includes the bot token: URLs embed `/bot<token>/` and
+httpx exceptions often echo the request URL, so every log path runs
+through ``redact_telegram_secrets``.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
@@ -16,6 +21,22 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org"
+
+# Matches https://api.telegram.org/bot<TOKEN>/... in exception/log text.
+_BOT_URL_RE = re.compile(
+    r"(https?://api\.telegram\.org/bot)([^/\s\"']+)(/?)",
+    re.IGNORECASE,
+)
+
+
+def redact_telegram_secrets(text: str, token: str | None = None) -> str:
+    """Strip Telegram bot tokens from log / exception strings."""
+    if not text:
+        return text
+    redacted = text
+    if token:
+        redacted = redacted.replace(token, "***")
+    return _BOT_URL_RE.sub(r"\1***\3", redacted)
 
 
 class TelegramClient:
@@ -41,6 +62,9 @@ class TelegramClient:
         if self._http is None:
             self._http = httpx.Client(timeout=self._timeout)
         return self._http
+
+    def _safe(self, text: str) -> str:
+        return redact_telegram_secrets(text, self._bot_token)
 
     def close(self) -> None:
         if self._owns_http and self._http is not None:
@@ -70,16 +94,25 @@ class TelegramClient:
                 logger.error(
                     "[TELEGRAM] sendMessage failed status=%s body=%.200s",
                     response.status_code,
-                    response.text,
+                    self._safe(response.text),
                 )
                 return False
             data = response.json()
             if not data.get("ok", False):
-                logger.error("[TELEGRAM] sendMessage rejected: %s", data)
+                logger.error(
+                    "[TELEGRAM] sendMessage rejected: %s",
+                    self._safe(str(data)),
+                )
                 return False
             return True
-        except Exception:
-            logger.exception("[TELEGRAM] sendMessage raised")
+        except Exception as exc:
+            # Never logger.exception here: httpx often embeds the full
+            # request URL (with token) in the exception message / repr.
+            logger.error(
+                "[TELEGRAM] sendMessage raised type=%s error=%s",
+                type(exc).__name__,
+                self._safe(str(exc)),
+            )
             return False
 
     def probe_api_reachable(self) -> bool:

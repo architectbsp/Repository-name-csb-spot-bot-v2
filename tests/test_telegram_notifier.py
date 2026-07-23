@@ -233,6 +233,73 @@ def test_telegram_client_skips_when_unconfigured():
     assert client.send_message("hi") is False
 
 
+def test_redact_telegram_secrets_strips_bot_url_and_token():
+    from app.core.services.telegram_client import redact_telegram_secrets
+
+    token = "123456:ABC-DEF_secret-token"
+    raw = (
+        f"POST https://api.telegram.org/bot{token}/sendMessage "
+        f"failed; token={token}"
+    )
+    safe = redact_telegram_secrets(raw, token)
+    assert token not in safe
+    assert "api.telegram.org/bot***/" in safe or "api.telegram.org/bot***" in safe
+    assert "***" in safe
+
+
+def test_telegram_client_logs_do_not_leak_token(caplog):
+    """httpx-style errors that embed the request URL must not log the token."""
+    import logging
+
+    import httpx
+
+    token = "999:LEAK_ME_NOW"
+    transport = httpx.MockTransport(
+        lambda request: (_ for _ in ()).throw(
+            httpx.ConnectError(
+                f"Connection failed to https://api.telegram.org/bot{token}/sendMessage"
+            )
+        )
+    )
+    client = TelegramClient(
+        token,
+        "42",
+        http_client=httpx.Client(transport=transport),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        assert client.send_message("hi") is False
+
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert token not in joined
+    assert "LEAK_ME_NOW" not in joined
+    assert "sendMessage raised" in joined
+
+
+def test_memory_log_redacts_telegram_bot_urls():
+    import logging
+
+    from app.core.services.memory_log import MemoryLogHandler
+
+    handler = MemoryLogHandler(capacity=10)
+    logger = logging.getLogger("test.telegram.leak")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    token = "111:SECRETTOKEN"
+    logger.error(
+        "boom https://api.telegram.org/bot%s/sendMessage",
+        token,
+    )
+
+    rows = handler.recent()
+    assert rows
+    assert token not in rows[-1].message
+    assert "***/" in rows[-1].message or "***" in rows[-1].message
+
+    logger.removeHandler(handler)
+
+
 def test_load_telegram_settings_requires_credentials(monkeypatch):
     from app.core.config.settings import load_telegram_settings
 
