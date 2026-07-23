@@ -224,6 +224,18 @@ class OrderExecutionService:
         flight_key = market_key(exchange_type, symbol)
         started = time.perf_counter()
 
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_market_order_type,
+        )
+        from app.core.trading.models import OrderType
+
+        order_type = getattr(trade, "order_type", OrderType.MARKET)
+        assert_market_order_type(
+            order_type.value if hasattr(order_type, "value") else order_type
+            or ORDER_TYPE_MARKET
+        )
+
         # Duplicate BUY guard: open local position for this market.
         side = getattr(trade, "side", None)
         if side == TradeSide.BUY and self._has_open_position(exchange_type, symbol):

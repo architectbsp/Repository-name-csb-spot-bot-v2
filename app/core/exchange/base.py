@@ -175,12 +175,58 @@ class BaseExchange(ABC):
     ) -> float:
         """
         Truncates `price` to this exchange's PRICE_FILTER/tickSize.
-        Forward-looking infrastructure for any future limit-order support;
-        market orders (the only order type currently placed, per
-        docs/BUSINESS_RULES.md §10) do not submit a price. Must only be
-        called at the moment of order submission (see truncate_to_precision).
+        Market orders (the only legal order type -- docs/BUSINESS_RULES.md
+        §3 / §10) do not submit a price; this helper exists for display /
+        overlay math and must only truncate at submission boundaries
+        (see truncate_to_precision).
         """
         ...
+
+    def _guard_spot_market_order(self, params=None) -> None:
+        """Sprint 13 -- refuse futures/margin clients and non-market params."""
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            SpotOnlyViolationException,
+            assert_client_is_spot,
+            assert_market_order_type,
+            assert_spot_order_params,
+        )
+
+        assert_client_is_spot(getattr(self, "client", None))
+        assert_market_order_type(ORDER_TYPE_MARKET)
+        assert_spot_order_params(params)
+
+    def place_limit_order(self, *args, **kwargs):
+        """Limit orders are permanently disabled for this spot bot."""
+        from app.core.exchange.spot_guard import SpotOnlyViolationException
+
+        raise SpotOnlyViolationException(
+            "Market-order guard: limit orders are not allowed"
+        )
+
+    def create_order(self, symbol, type, side, amount, price=None, params=None):
+        """
+        Catch-all: any non-market create_order attempt is rejected before
+        it reaches the exchange client.
+        """
+        from app.core.exchange.spot_guard import (
+            assert_market_order_type,
+            assert_spot_order_params,
+        )
+
+        assert_market_order_type(type)
+        assert_spot_order_params(params)
+        # Even for market, prefer the dedicated helpers.
+        side_u = str(side).upper()
+        if side_u == "BUY":
+            return self.place_market_buy(symbol, amount)
+        if side_u == "SELL":
+            return self.place_market_sell(symbol, amount)
+        from app.core.exchange.spot_guard import SpotOnlyViolationException
+
+        raise SpotOnlyViolationException(
+            f"Spot-only guard: unsupported side '{side}'"
+        )
 
     @abstractmethod
     def place_market_buy(

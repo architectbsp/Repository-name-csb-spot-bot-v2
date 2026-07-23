@@ -701,10 +701,13 @@ class RiskManager:
         quantity: Decimal,
         side: TradeSide = TradeSide.BUY,
     ) -> TradeRequest:
+        from app.core.trading.models import OrderType
+
         return TradeRequest(
             symbol=symbol,
             side=side,
             quantity=quantity,
+            order_type=OrderType.MARKET,
         )
 
     _NEEDS_MANUAL_REVIEW = frozenset(

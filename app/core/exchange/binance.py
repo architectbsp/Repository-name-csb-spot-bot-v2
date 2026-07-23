@@ -8,6 +8,7 @@ from app.core.exchange.base import (
 )
 from app.core.exchange.binance_price_stream import BinancePriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
+from app.core.exchange.spot_guard import ensure_spot_ccxt_options
 
 
 class BinanceExchange(BaseExchange):
@@ -23,6 +24,7 @@ class BinanceExchange(BaseExchange):
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
                 "enableRateLimit": True,
+                "options": ensure_spot_ccxt_options({}),
             }
         )
 
@@ -125,6 +127,7 @@ class BinanceExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
+        self._guard_spot_market_order()
         return self._normalize_order_result(
             self.client.create_market_buy_order(
                 symbol,
@@ -137,6 +140,7 @@ class BinanceExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
+        self._guard_spot_market_order()
         return self._normalize_order_result(
             self.client.create_market_sell_order(
                 symbol,

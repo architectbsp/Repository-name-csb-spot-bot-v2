@@ -157,9 +157,16 @@ class ExchangeManager:
         symbol: str,
         amount: float,
     ):
-        return self._get_exchange(
-            exchange_type
-        ).place_market_buy(
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_client_is_spot,
+            assert_market_order_type,
+        )
+
+        assert_market_order_type(ORDER_TYPE_MARKET)
+        exchange = self._get_exchange(exchange_type)
+        assert_client_is_spot(getattr(exchange, "client", None))
+        return exchange.place_market_buy(
             symbol,
             amount,
         )
@@ -170,9 +177,16 @@ class ExchangeManager:
         symbol: str,
         amount: float,
     ):
-        return self._get_exchange(
-            exchange_type
-        ).place_market_sell(
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_client_is_spot,
+            assert_market_order_type,
+        )
+
+        assert_market_order_type(ORDER_TYPE_MARKET)
+        exchange = self._get_exchange(exchange_type)
+        assert_client_is_spot(getattr(exchange, "client", None))
+        return exchange.place_market_sell(
             symbol,
             amount,
         )
@@ -270,6 +284,22 @@ class ExchangeManager:
         exchange_type: ExchangeType,
         trade: TradeRequest,
     ):
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_market_order_type,
+            assert_spot_order_params,
+        )
+        from app.core.trading.models import OrderType
+
+        order_type = getattr(trade, "order_type", OrderType.MARKET)
+        value = (
+            order_type.value
+            if hasattr(order_type, "value")
+            else order_type
+        )
+        assert_market_order_type(value or ORDER_TYPE_MARKET)
+        assert_spot_order_params(getattr(trade, "params", None))
+
         if trade.side == TradeSide.BUY:
             return self.place_market_buy(
                 exchange_type,

@@ -347,6 +347,12 @@ class PaperExchangeAdapter(BaseExchange):
         return _truncate(price, 8)
 
     def place_market_buy(self, symbol: str, amount: float) -> OrderResult:
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_market_order_type,
+        )
+
+        assert_market_order_type(ORDER_TYPE_MARKET)
         amount = self.normalize_amount(symbol, amount)
         if amount <= 0:
             raise ValueError(f"Invalid buy amount for {symbol}: {amount}")
@@ -377,6 +383,12 @@ class PaperExchangeAdapter(BaseExchange):
         )
 
     def place_market_sell(self, symbol: str, amount: float) -> OrderResult:
+        from app.core.exchange.spot_guard import (
+            ORDER_TYPE_MARKET,
+            assert_market_order_type,
+        )
+
+        assert_market_order_type(ORDER_TYPE_MARKET)
         amount = self.normalize_amount(symbol, amount)
         if amount <= 0:
             raise ValueError(f"Invalid sell amount for {symbol}: {amount}")

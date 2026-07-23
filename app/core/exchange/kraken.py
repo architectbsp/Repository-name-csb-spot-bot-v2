@@ -8,6 +8,7 @@ from app.core.exchange.base import (
 )
 from app.core.exchange.kraken_price_stream import KrakenPriceStream
 from app.core.exchange.models import ConnectionStatus, ExchangeState, MarketMetadata
+from app.core.exchange.spot_guard import ensure_spot_ccxt_options
 
 
 class KrakenExchange(BaseExchange):
@@ -23,9 +24,9 @@ class KrakenExchange(BaseExchange):
                 "apiKey": settings.api_key,
                 "secret": settings.api_secret,
                 "enableRateLimit": True,
-                "options": {
+                "options": ensure_spot_ccxt_options({
                     "defaultType": "spot",
-                },
+                }),
             }
         )
 
@@ -131,6 +132,7 @@ class KrakenExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
+        self._guard_spot_market_order()
         return self._normalize_order_result(
             self.client.create_market_buy_order(
                 symbol,
@@ -143,6 +145,7 @@ class KrakenExchange(BaseExchange):
         symbol: str,
         amount: float,
     ):
+        self._guard_spot_market_order()
         return self._normalize_order_result(
             self.client.create_market_sell_order(
                 symbol,

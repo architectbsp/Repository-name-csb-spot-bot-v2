@@ -878,9 +878,21 @@ immediately on `config.updated` (no restart).
 
 ---
 
-## Order Type
+## Trading Scope Guards (Sprint 13)
 
-- All entries use Market Orders.
+Hard safety rails in `app/core/exchange/spot_guard.py`:
+
+- **Spot only**: `defaultType` / market-type labels other than `spot`
+  (futures, swap, margin, delivery, …) raise
+  `SpotOnlyViolationException` at client construction and order time.
+- **Market orders only**: `TradeRequest.order_type` is locked to
+  `OrderType.MARKET`; limit / non-market types and futures-flavoured
+  createOrder params (`leverage`, `tdMode`, …) are rejected before they
+  reach the exchange. `BaseExchange.place_limit_order` always raises.
+
+Persistence stays behind repository protocols
+(`SettingsRepository`, `PositionRepository`, `TradeJournalRepository`) —
+business logic never opens raw SQL connections.
 
 ---
 
