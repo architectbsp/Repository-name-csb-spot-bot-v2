@@ -100,16 +100,28 @@ def verify_sqlite_integrity(engine: Engine) -> None:
     Startup recovery gate for SQLite: fail fast on corruption.
     No-op for other dialects / empty brand-new DBs that report ``ok``.
     """
-    if engine.dialect.name != "sqlite":
+    status = sqlite_quick_check_status(engine)
+    if status in {"ok", "n/a"}:
         return
+    logger.critical("[DB] SQLite quick_check failed: %s", status)
+    raise RuntimeError(f"SQLite integrity check failed: {status}")
+
+
+def sqlite_quick_check_status(engine: Engine) -> str:
+    """
+    R7: non-raising integrity probe for health snapshots.
+    Returns ``ok``, ``n/a`` (non-sqlite), or the pragma detail string.
+    """
+    if engine.dialect.name != "sqlite":
+        return "n/a"
 
     with engine.connect() as connection:
         row = connection.execute(text("PRAGMA quick_check")).fetchone()
 
     status = row[0] if row is not None else None
-    if status != "ok":
-        logger.critical("[DB] SQLite quick_check failed: %s", status)
-        raise RuntimeError(f"SQLite integrity check failed: {status}")
+    if status is None:
+        return "unknown"
+    return str(status)
 
 
 def checkpoint_sqlite_wal(engine: Engine) -> None:

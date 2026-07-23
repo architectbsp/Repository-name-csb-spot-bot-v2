@@ -356,3 +356,8 @@ class WebsocketPriceStreamBase(PriceStream, ABC):
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def connected(self) -> bool:
+        """R7: whether the WS handshake is currently open."""
+        return self._connected.is_set()

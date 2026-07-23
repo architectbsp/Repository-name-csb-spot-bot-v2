@@ -460,6 +460,21 @@ class OrderExecutionService:
         with self._lock:
             return sorted(self._quarantined)
 
+    def list_active_client_orders(self) -> list[dict]:
+        """R7: operator-facing active ClientOrderId statuses (no secrets)."""
+        rows: list[dict] = []
+        for record in self._client_orders.list_active():
+            rows.append(
+                {
+                    "exchange": record.exchange,
+                    "symbol": record.symbol,
+                    "side": record.side,
+                    "status": record.status,
+                    "client_order_id": record.client_order_id,
+                }
+            )
+        return rows
+
     def clear_quarantine(self, symbol: str) -> bool:
         """For manual/operator use once the exchange state has been
         checked by hand. Returns True if the symbol was quarantined."""

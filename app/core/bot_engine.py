@@ -34,6 +34,7 @@ from app.core.services.telegram_client import TelegramClient
 from app.core.services.telegram_notifier import TelegramNotifier
 from app.core.services.telemetry_service import TelemetryService
 from app.core.services.trade_journal import TradeJournal
+from app.core.services.runtime_health import RuntimeHealthService
 from app.core.persistence.service import PersistenceService
 from app.core.worker import Worker
 
@@ -76,7 +77,12 @@ class BotEngine:
             "worker_error_count": 0,
             "worker_last_error": None,
             "worker_last_error_at": None,
+            "degraded": False,
+            "mode": "stopped",
+            "issues": [],
         }
+        self.runtime_health_service = RuntimeHealthService()
+        self.runtime_health_service.set_engine(self)
         self.worker = Worker(
             self.scheduler,
             on_error=self._on_worker_error,
@@ -567,6 +573,14 @@ class BotEngine:
                 "[BotEngine] startup client-order recovery failed"
             )
         logger.info("BotEngine started successfully")
+
+    def health_snapshot(self) -> dict:
+        """
+        R7: operator-facing runtime diagnostics (read-only).
+        Aggregates worker, scheduler, exchange, websocket freshness,
+        recovery, persistence, and EventBus signals. Secrets redacted.
+        """
+        return self.runtime_health_service.snapshot()
 
     def _on_exchange_connected_reconcile(self, event=None, **kwargs) -> None:
         """R4: WS reconnect must not skip inventory reconciliation."""

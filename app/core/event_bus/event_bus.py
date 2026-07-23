@@ -15,6 +15,9 @@ class EventBus:
         # R1: protect subscriber map against concurrent subscribe/publish
         # (WS callbacks, Worker, UI). Handlers run outside the lock.
         self._lock = threading.RLock()
+        # R7: observability counters (no behavioral change).
+        self._publish_count = 0
+        self._handler_errors = 0
 
     def subscribe(
         self,
@@ -51,11 +54,14 @@ class EventBus:
         # lock across handlers (deadlock / re-entrancy safe).
         with self._lock:
             subscribers = tuple(self._subscribers.get(event, ()))
+            self._publish_count += 1
 
         for callback in subscribers:
             try:
                 callback(*args, **kwargs)
             except Exception as e:
+                with self._lock:
+                    self._handler_errors += 1
                 logger.error(
                     "[EventBus] Callback exception for event '%s': %s",
                     event,
@@ -67,6 +73,17 @@ class EventBus:
         with self._lock:
             return bool(self._subscribers.get(event))
 
+    def stats(self) -> dict[str, int]:
+        """R7: lightweight EventBus counters for health snapshots."""
+        with self._lock:
+            return {
+                "publish_count": self._publish_count,
+                "handler_errors": self._handler_errors,
+                "topic_count": len(self._subscribers),
+            }
+
     def clear(self) -> None:
         with self._lock:
             self._subscribers.clear()
+            self._publish_count = 0
+            self._handler_errors = 0
