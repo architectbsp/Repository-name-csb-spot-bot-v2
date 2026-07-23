@@ -104,16 +104,16 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
     SettingField(
         "risk",
         "position_sizing_mode",
-        "Pozisyon Boyutu Modu (0=Likidite 1=Hibrit 2=FixedRisk 3=ATR 4=Kelly)",
+        "Pozisyon Boyutu (0=Likidite 1=Hibrit 2=FixedRisk 3=ATR 4=Dynamic/Kelly 5=Fixed%)",
         int,
         0,
-        4,
+        5,
         unit="",
     ),
     SettingField(
         "risk",
         "risk_per_trade_percent",
-        "İşlem Başına Risk (Fixed Risk / ATR)",
+        "İşlem Başına Risk / Fixed% (Fixed Risk / ATR / Fixed%)",
         float,
         0.1,
         20.0,
@@ -152,6 +152,15 @@ SETTINGS_SCHEMA: tuple[SettingField, ...] = (
         "Kelly Min. Kapalı İşlem",
         int,
         5,
+        500,
+        unit="adet",
+    ),
+    SettingField(
+        "risk",
+        "dynamic_lookback_trades",
+        "Dynamic/Kelly Lookback (0 = tümü)",
+        int,
+        0,
         500,
         unit="adet",
     ),
@@ -224,6 +233,17 @@ class SettingsStore:
 
             if field is None:
                 continue
+
+            if name == "position_sizing_mode":
+                from app.core.risk_manager import resolve_position_sizing_mode
+
+                try:
+                    raw_value = resolve_position_sizing_mode(raw_value)
+                except ValueError:
+                    errors.append(
+                        f"{field.label}: geçersiz değer ('{raw_value}')"
+                    )
+                    continue
 
             try:
                 value = field.value_type(raw_value)

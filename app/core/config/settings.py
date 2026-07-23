@@ -46,14 +46,14 @@ class RiskSettings:
     max_volume_share_percent: float = 0.1
 
     # Position sizing mode (docs/BUSINESS_RULES.md §8):
-    # 0 = liquidity-only (min(balance_cap, liquidity_cap)),
-    # 1 = hybrid (default): min of Fixed Risk + ATR + realized-vol caps,
-    # 2 = Fixed Risk only (+ hard safety caps),
-    # 3 = Volatility / ATR-based only (+ hard safety caps),
-    # 4 = Kelly Criterion (+ hard safety caps).
+    # 0 = liquidity-only, 1 = hybrid (default), 2 = Fixed Risk,
+    # 3 = ATR / volatility, 4 = Kelly / DYNAMIC, 5 = FIXED_PERCENT.
+    # Settings may also store brief strings (FIXED_RISK, ATR_BASED, …);
+    # RiskManager.resolve_position_sizing_mode normalizes them.
     position_sizing_mode: int = 1
     # How much of the treasury (percent) may be lost if the hard stop
-    # fires -- drives both risk-based and ATR-based sizing.
+    # fires -- drives Fixed Risk / ATR; for FIXED_PERCENT this is the
+    # notional allocation of balance.
     risk_per_trade_percent: float = 1.0
     # ATR lookback period (candles) and multiplier for the ATR stop
     # distance used when computing the ATR-based size cap.
@@ -64,10 +64,12 @@ class RiskSettings:
     # volatility cap entirely.
     volatility_target_percent: float = 2.0
     volatility_lookback: int = 20
-    # Kelly: fraction of full-Kelly stake (0.5 = half-Kelly) and minimum
-    # closed trades required before Kelly sizing activates.
+    # Kelly / DYNAMIC: fraction of full-Kelly stake (0.5 = half-Kelly),
+    # minimum closed trades before activation, and optional rolling
+    # lookback (0 = use all closed trades).
     kelly_fraction: float = 0.5
     kelly_min_trades: int = 10
+    dynamic_lookback_trades: int = 0
 
 
 @dataclass(slots=True)

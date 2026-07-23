@@ -56,6 +56,9 @@ class SettingsEntity(Base):
     # (0.5 = half-Kelly) and minimum closed trades before Kelly activates.
     kelly_fraction: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     kelly_min_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    dynamic_lookback_trades: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     partial_tp_activation_percent: Mapped[float] = mapped_column(Float, nullable=False)
     partial_tp_sell_percent: Mapped[float] = mapped_column(Float, nullable=False)
 

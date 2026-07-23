@@ -147,6 +147,7 @@ def test_schema_covers_every_field_the_user_requested():
         "volatility_lookback",
         "kelly_fraction",
         "kelly_min_trades",
+        "dynamic_lookback_trades",
         "max_position_hours",
         "max_daily_loss_percent",
         "partial_tp_activation_percent",

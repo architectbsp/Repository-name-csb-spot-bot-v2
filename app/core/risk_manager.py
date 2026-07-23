@@ -28,7 +28,47 @@ _SIZING_MODE_LIQUIDITY_ONLY = 0
 _SIZING_MODE_HYBRID = 1
 _SIZING_MODE_FIXED_RISK = 2
 _SIZING_MODE_ATR = 3
-_SIZING_MODE_KELLY = 4
+_SIZING_MODE_KELLY = 4  # DYNAMIC / performance-based (Kelly)
+_SIZING_MODE_FIXED_PERCENT = 5
+
+# Brief / Settings string aliases → int modes.
+SIZING_MODE_ALIASES: dict[str, int] = {
+    "liquidity": _SIZING_MODE_LIQUIDITY_ONLY,
+    "liquidity_only": _SIZING_MODE_LIQUIDITY_ONLY,
+    "hybrid": _SIZING_MODE_HYBRID,
+    "fixed_risk": _SIZING_MODE_FIXED_RISK,
+    "fixed_percent": _SIZING_MODE_FIXED_PERCENT,
+    "atr": _SIZING_MODE_ATR,
+    "atr_based": _SIZING_MODE_ATR,
+    "kelly": _SIZING_MODE_KELLY,
+    "dynamic": _SIZING_MODE_KELLY,
+}
+
+
+def resolve_position_sizing_mode(raw) -> int:
+    """
+    Accepts int 0-5 or brief strings (FIXED_PERCENT / FIXED_RISK /
+    ATR_BASED / DYNAMIC / HYBRID / …). Unknown values raise ValueError.
+    """
+    if raw is None:
+        return _SIZING_MODE_HYBRID
+    if isinstance(raw, bool):
+        raise ValueError(f"Invalid position_sizing_mode: {raw!r}")
+    if isinstance(raw, int):
+        if 0 <= raw <= _SIZING_MODE_FIXED_PERCENT:
+            return raw
+        raise ValueError(f"Invalid position_sizing_mode int: {raw}")
+    text = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+    if text.isdigit():
+        return resolve_position_sizing_mode(int(text))
+    if text in SIZING_MODE_ALIASES:
+        return SIZING_MODE_ALIASES[text]
+    raise ValueError(
+        f"Unsupported position_sizing_mode {raw!r}. "
+        f"Use 0-5 or {', '.join(sorted(SIZING_MODE_ALIASES))}."
+    )
+
+
 # Clamp so a dead-flat market can't blow the vol-scaled size past the
 # balance cap, and a spike can't shrink it to a dust amount.
 _VOL_SCALE_MIN = 0.25
@@ -233,13 +273,14 @@ class RiskManager:
         Position sizing (docs/BUSINESS_RULES.md §8).
 
         Always applies hard safety caps (balance + liquidity). Then, based
-        on `position_sizing_mode`:
+        on `position_sizing_mode` (int or string alias):
 
           0 liquidity-only
           1 hybrid (default): Fixed Risk + ATR + realized-vol
           2 Fixed Risk only
           3 Volatility / ATR-based (ATR + optional realized-vol scale)
-          4 Kelly Criterion (from closed Trade Journal stats)
+          4 Kelly / DYNAMIC (from closed Trade Journal stats)
+          5 FIXED_PERCENT: allocate risk_per_trade% of balance as notional
 
         Missing candle / journal data never blocks a trade -- those caps
         are skipped and sizing falls back to the hard safety floors.
@@ -261,9 +302,15 @@ class RiskManager:
             ) / Decimal("100")
             caps.append(liquidity_cap)
 
-        sizing_mode = int(
+        sizing_mode = resolve_position_sizing_mode(
             getattr(self._risk, "position_sizing_mode", _SIZING_MODE_HYBRID)
         )
+
+        if sizing_mode == _SIZING_MODE_FIXED_PERCENT:
+            pct = float(getattr(self._risk, "risk_per_trade_percent", 0.0) or 0.0)
+            if pct > 0:
+                caps.append(balance_dec * Decimal(str(pct)) / Decimal("100"))
+            return float(min(caps))
 
         use_risk = sizing_mode in (
             _SIZING_MODE_HYBRID,
@@ -394,6 +441,14 @@ class RiskManager:
             for entry in self._trade_journal.list_all()
             if entry.status == STATUS_CLOSED and entry.pnl is not None
         ]
+        # DYNAMIC / Kelly: optionally use only the most recent N exits.
+        lookback = int(getattr(self._risk, "dynamic_lookback_trades", 0) or 0)
+        if lookback > 0 and len(closed) > lookback:
+            closed = sorted(
+                closed,
+                key=lambda e: e.exit_time or e.entry_time,
+                reverse=True,
+            )[:lookback]
         if len(closed) < min_trades:
             return None
 

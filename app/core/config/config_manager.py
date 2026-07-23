@@ -186,6 +186,14 @@ class ConfigManager:
         out: dict[str, object] = {}
         for key, value in changes.items():
             name = PARAM_ALIASES.get(key, key)
+            if name == "position_sizing_mode":
+                from app.core.risk_manager import resolve_position_sizing_mode
+
+                try:
+                    value = resolve_position_sizing_mode(value)
+                except ValueError:
+                    # Leave raw value for SettingsStore validation error path.
+                    pass
             out[name] = value
         return out
 

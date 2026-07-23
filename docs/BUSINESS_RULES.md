@@ -448,19 +448,19 @@ safety_size = min(balance * 99.5%, volume_24h * 0.1%)
   typically smaller than the balance cap, so only the liquidity-safe
   amount is committed (automatic risk distribution across positions).
 
-### Advanced Position Sizing (Fixed Risk / ATR / Kelly)
+### Advanced Position Sizing (Fixed Risk / ATR / Kelly / Fixed Percent)
 
-`position_sizing_mode` (Settings screen):
+`position_sizing_mode` (Settings / ConfigManager) accepts int `0–5` or
+string aliases (case-insensitive):
 
-- **0 = Liquidity-only**: `position_size = safety_size` (legacy behaviour).
-- **1 = Hybrid** (default): min of Fixed Risk + ATR + realized-vol caps.
-- **2 = Fixed Risk**: risk-based cap only (+ hard safety caps).
-- **3 = Volatility / ATR**: ATR-based + optional realized-vol scale.
-- **4 = Kelly Criterion**: stake from closed Trade Journal win-rate /
-  payoff stats (`f* = W - (1-W)/R`), scaled by `kelly_fraction`
-  (default half-Kelly) and hard-capped at 25% of balance. Requires at
-  least `kelly_min_trades` closed trades; otherwise falls back to
-  safety caps only.
+| Mode | Alias | Behaviour |
+|------|-------|-----------|
+| **0** | `LIQUIDITY` | `position_size = safety_size` (legacy). |
+| **1** | `HYBRID` (default) | min of Fixed Risk + ATR + realized-vol caps. |
+| **2** | `FIXED_RISK` | risk-based cap only (+ hard safety caps). |
+| **3** | `ATR_BASED` / `ATR` | ATR-based + optional realized-vol scale. |
+| **4** | `DYNAMIC` / `KELLY` | Kelly Criterion from Trade Journal win-rate / payoff (`f* = W - (1-W)/R`), scaled by `kelly_fraction` (default half-Kelly), hard-capped at 25% of balance. Optional `dynamic_lookback_trades` (last N closed trades; `0` = all). Requires at least `kelly_min_trades`; otherwise falls back to safety caps. |
+| **5** | `FIXED_PERCENT` | allocate `risk_per_trade_percent` of balance as notional (capped by safety / liquidity). |
 
 Missing OHLCV / journal data never blocks a trade -- those caps are
 skipped and sizing falls back to `safety_size`.
@@ -474,15 +474,18 @@ Advanced caps (all use Decimal math; all are Settings-editable):
    (isolation rule), compute ATR(`atr_period`), treat
    `ATR * atr_multiplier` as the stop distance:
    `balance * risk_per_trade% * price / (ATR * atr_multiplier)`.
+   Higher ATR → smaller position; lower ATR → larger position.
 3. **Volatility-based**: scale the balance cap by
    `volatility_target_percent / realized_vol%` (close-to-close sample
    stdev over `volatility_lookback` returns), clamped to
    `[0.25, 1.0]` so a quiet market never exceeds the balance cap and a
    spike never shrinks size below a quarter of it. Set
    `volatility_target_percent = 0` to disable this cap.
+4. **Fixed Percent**: notional = `balance * risk_per_trade%`, then
+   `min(that, safety_size)`.
 
 ```
-position_size = min(safety_size, risk_cap?, atr_cap?, vol_cap?)
+position_size = min(safety_size, risk_cap?, atr_cap?, vol_cap?, kelly_cap?)
 ```
 
 ---
