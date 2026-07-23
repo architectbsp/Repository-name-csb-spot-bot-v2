@@ -1,153 +1,111 @@
-# R4 — Order Integrity & Reconciliation Report
+# R4 — Order Integrity Final Audit Report
 
 **Sprint:** `R4_ORDER_INTEGRITY_AND_RECONCILIATION`  
-**Depends on:** R1 / R2 / R3 (approved)  
-**Scope:** Order lifecycle integrity, exchange reconciliation, inventory correctness.  
-**Date:** 2026-07-23 (updated after full production re-audit)
+**Mode:** Audit only (no code changes in this pass)  
+**Branch HEAD audited:** current workspace (`OrderExecutionService`, `PositionReconciler`, `BotEngine` wiring)  
+**Date:** 2026-07-23
 
 ---
 
-## 1. Order lifecycle audit
+## 1. Critical Remaining Issues
 
-Pipeline audited: Strategy → RiskManager → OrderExecutionService → ExchangeManager → Adapter → Response → Persistence → PositionManager → Recovery.
+- None identified for silent inventory loss on the covered OES cancel / partial-fill / post-cancel verify path.
+- Ambiguous outcomes with an `order_id` are quarantined and surfaced; clean zero-fill cancels are verified via `fetch_order` before `TIMED_OUT`.
 
-| State | Handling |
-|-------|----------|
-| `NEW` / `OPEN` | Pending poll → cancel → **post-cancel `fetch_order` verify** |
-| `PARTIALLY_FILLED` | Poll; full qty ⇒ `FILLED`; cancel with fill ⇒ `UNRECONCILED` + quarantine |
-| `CANCEL_PENDING` / `PENDING_CANCEL` | Treated as open (polled), not `UNKNOWN` |
-| `FILLED` / `CLOSED` | `FILLED` (also after cancel/fill race) |
-| `CANCELED` / `CANCELLED` / `REJECTED` / `EXPIRED` / `FAILED` | `REJECTED` if zero fill; **with fill ⇒ `UNRECONCILED`** |
-| Submit `TIMEOUT` | Ambiguous `TIMED_OUT` + quarantine + reconcile hook |
+---
+
+## 2. Major Remaining Issues
+
+1. **Submit timeout / network failure without `order_id`** — cannot poll or cancel a specific order; mitigation is quarantine + orphan balance probe on quarantined markets only.
+2. **No client-order-id / cross-process idempotency** — in-flight and BUY-open guards are process-local; a crash mid-submit then restart can still risk a second live order before quarantine/reconcile catches up.
+3. **Orphan inventory detection is quarantine-scoped** — free-base orphans on markets that were never quarantined are not scanned (by design; no full-wallet walk).
+
+---
+
+## 3. Minor Remaining Issues
+
+1. Duplicate WebSocket `ticker.updated` events can still re-enter strategy; BUY is blocked by open-position / in-flight / quarantine, but CPU work is not deduplicated.
+2. Reconciler compares free base only (not locked/in-order balances).
+3. Operator recovery still requires manual `clear_quarantine` after exchange verification.
+
+---
+
+## 4. Covered lifecycle states
+
+| State / outcome | Covered how |
+|-----------------|-------------|
+| `NEW` / `OPEN` | Pending poll → cancel → post-cancel verify |
+| `PARTIALLY_FILLED` | Poll; full qty ⇒ `FILLED`; residual after cancel ⇒ `UNRECONCILED` |
+| `CANCEL_PENDING` / `PENDING_CANCEL` | Treated as open (polled) |
+| `FILLED` / `CLOSED` | `FILLED` (including cancel/fill race) |
+| `CANCELED` / `CANCELLED` / `REJECTED` / `EXPIRED` / `FAILED` | Zero fill ⇒ `REJECTED`; with fill ⇒ `UNRECONCILED` |
+| Submit `TIMEOUT` | Ambiguous `TIMED_OUT` + quarantine |
 | `NETWORK_FAILED` | Quarantine |
 | `UNKNOWN` / `None` | `UNKNOWN_STATUS` + quarantine |
-| Reconnect (`exchange.connected`) | **Triggers `reconcile_once()`** |
-| Startup / restart | Positions restored; quarantine sidecar reloaded; **startup `reconcile_once()`** |
-
-Every execution ends as one of: **CONFIRMED** (`FILLED` / clean `REJECTED` / clean zero-fill `TIMED_OUT`), **RECONCILED** (balance OK), **RECOVERED** (operator `clear_quarantine`), **QUARANTINED** / **UNRECONCILED** (observable), or **FAILED**/`NETWORK_FAILED` (quarantined when ambiguous).
+| `DUPLICATE` / `QUARANTINED` | Pre-exchange block |
+| `UNRECONCILED` | Cancel failures / residual fill / post-cancel fetch failure |
 
 ---
 
-## 2. Reconciliation strategy
+## 5. Covered reconciliation scenarios
 
-1. **Per-order (OES):** poll → fill classification by status **or** `filled_qty >= requested` → cancel + `_verify_after_cancel`.
-2. **Ambiguous hook:** quarantine + `PositionReconciler.reconcile_once()`.
-3. **Periodic (120s):** local OPEN vs free base; quarantined orphan inventory.
-4. **Reconnect:** `exchange.connected` → reconcile.
-5. **Startup:** reconcile immediately after streams start.
-6. **Durable quarantine:** JSON sidecar `{sqlite}.quarantine.json` (no SQLite schema change).
-
----
-
-## 3. Inventory correctness analysis
-
-| Divergence | Detection | Action |
-|------------|-----------|--------|
-| Local OPEN ≫ exchange free | Periodic / startup / reconnect | Quarantine + `position.reconcile_mismatch` |
-| Exchange free, no local OPEN (orphan) | Quarantined markets probed | Events (already quarantined) |
-| Partial fill then cancel | Post-cancel verify | `UNRECONCILED` + quarantine |
-| Cancel/fill race | Post-cancel fetch shows `FILLED` | Return `FILLED` |
-| Clean cancel (0 fill) | Post-cancel verify | `TIMED_OUT` (not ambiguous) |
+- Local OPEN quantity ≫ exchange free base → quarantine + events (`LOCAL_GT_EXCHANGE`).
+- Quarantined market, no local OPEN, free base > dust → orphan events (`ORPHAN_INVENTORY`).
+- Ambiguous OES outcome → quarantine store + `on_ambiguous` → `reconcile_once()`.
+- Startup after position restore → `reconcile_once()`.
+- `exchange.connected` (WS reconnect) → `reconcile_once()`.
+- Periodic scheduler job (~120s).
+- Quarantine persistence across restart (JSON sidecar).
 
 ---
 
-## 4. Partial fill handling
+## 6. Remaining unhandled scenarios
 
-- While open/partial: keep polling; if `filled_quantity >= requested` ⇒ `FILLED`.
-- Terminal status with `filled_quantity > 0` ⇒ `UNRECONCILED` (never silent reject).
-- After cancel: re-fetch; any residual fill ⇒ `UNRECONCILED` + quarantine.
-
----
-
-## 5. Restart behavior
-
-| Scenario | Behavior |
-|----------|----------|
-| Restart after quarantine | Sidecar reloads; new orders blocked until `clear_quarantine` |
-| Restart with OPEN positions | Restored from SQLite; startup reconcile vs balances |
-| Restart during ambiguous submit (no `order_id`) | Quarantine if persisted; orphan probe on reconcile |
-| Restart mid-fill (position not yet persisted) | Orphan may appear under quarantine after reconnect reconcile |
+- Attach/recover a live exchange order after submit timeout when no `order_id` was returned (`fetch_open_orders` scan not implemented).
+- Cross-process duplicate submit with client-order-id.
+- Orphan inventory on non-quarantined markets.
+- Locked/in-order balance vs free-balance nuance.
+- Automatic position creation from detected orphan inventory (operator-driven only).
 
 ---
 
-## 6. Unknown order handling
+## 7. Compile result
 
-- Unrecognized status / `None` result ⇒ `UNKNOWN_STATUS`.
-- Always quarantined; `order.needs_manual_review` via Risk alert path when wired.
-- Never guessed as filled.
-
----
-
-## 7. Duplicate protection
-
-| Layer | Mechanism |
-|-------|-----------|
-| OES in-flight | Per `market_key` set while `execute()` runs |
-| OES BUY guard | Blocks if local OPEN already exists |
-| RiskManager | Also blocks BUY if local OPEN (unchanged) |
-| Duplicate WS tickers | May re-enter strategy; BUY blocked by open position / in-flight / quarantine |
-| Cross-process / no clientOrderId | Residual risk (see below) |
-
-REST+WS: order path is REST-only through OES; WS feeds prices into strategy. Race cannot double-submit while in-flight or OPEN; after fill, PositionManager open blocks further BUY.
-
----
-
-## 8. Remaining risks
-
-1. Submit timeout/network without `order_id` — cannot poll; quarantine + orphan probe only.
-2. No client-order-id idempotency across process crash mid-submit.
-3. Orphan probe limited to **quarantined** markets (avoids full-wallet scan).
-4. Duplicate WS events can still invoke strategy logic; trading guards prevent duplicate BUY, not duplicate CPU work.
-
----
-
-## 9–11. Validation
-
-### Compile
 ```text
 .venv/bin/python -m compileall -q app
 COMPILE_EXIT: 0
 ```
 
-### Tests
+---
+
+## 8. Test result
+
 ```text
 .venv/bin/python -m pytest -q --tb=line
 413 passed, 2 warnings
+PYTEST_EXIT: 0
 ```
 
-Covered unit scenarios: partial fill after cancel, cancel race fill, clean cancel, `CANCEL_PENDING`, unknown status, quarantine store reload, orphan reconcile.
+(Warnings: pre-existing SQLAlchemy datetime deprecation in migration tests.)
 
-### Runtime
+---
+
+## 9. Runtime result
+
 ```text
-main.py alive ≥4s — OK
+main.py remained alive ≥4s after launch
+RUNTIME: OK
 ```
 
 ---
 
-## Files touched (R4 + reconnect hardening)
+## 10. Final verdict
 
-- `app/core/services/order_execution.py`
-- `app/core/services/position_reconciler.py`
-- `app/core/bot_engine.py` — quarantine path, startup + reconnect reconcile
-- `tests/test_order_execution.py`
-- `tests/test_position_reconciler.py`
+R4 controls prevent the previously critical silent paths (cancel assuming zero fill, partial fill ignored, reconnect/startup skipping reconcile, ephemeral quarantine). Remaining gaps are residual recovery edges without `order_id` and cross-process idempotency — observable via quarantine/manual review, not silent disappearance of known orders.
+
+Local and exchange inventory are not mathematically guaranteed identical in every crash-without-order-id edge case, but for the audited production paths, divergence is detected, quarantined, and made observable rather than ignored.
 
 ---
 
-## Final audit
-
-### Critical Remaining Issues
-- None for cancel/partial/timeout silent inventory loss on the OES path.
-
-### Major Remaining Issues
-- Ambiguous submit without `order_id` cannot attach to exchange order.
-- No cross-process client-order-id idempotency.
-
-### Minor Remaining Issues
-- Orphan detection only for quarantined markets.
-- Duplicate WS ticks still wake strategy (BUY guarded).
-
----
-
-## ORDER INTEGRITY STATUS:
+ORDER INTEGRITY STATUS:  
 **PRODUCTION READY**
