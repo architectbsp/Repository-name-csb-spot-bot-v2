@@ -20,6 +20,10 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.domain.performance import PerformanceReport
 from app.core.domain.trade_journal import STATUS_CLOSED
+from app.core.exchange.trading_mode import (
+    normalize_trading_mode,
+    resolve_trading_mode,
+)
 
 
 PERIOD_TODAY = "today"
@@ -42,6 +46,7 @@ def _empty_report(
     period: str = PERIOD_ALL_TIME,
     strategy: str | None = None,
     exchange: str | None = None,
+    trading_mode: str | None = None,
 ) -> PerformanceReport:
     return PerformanceReport(
         generated_at=datetime.now(UTC),
@@ -64,6 +69,7 @@ def _empty_report(
         period=period,
         strategy=strategy,
         exchange=exchange,
+        trading_mode=trading_mode,
     )
 
 
@@ -119,6 +125,7 @@ class PerformanceAnalytics:
         *,
         strategy: str | None = None,
         exchange: str | None = None,
+        trading_mode: str | None = None,
     ) -> list:
         if self._trade_journal is None:
             return []
@@ -127,6 +134,7 @@ class PerformanceAnalytics:
             rows = self._trade_journal.query(
                 strategy=strategy,
                 exchange=exchange,
+                trading_mode=trading_mode,
                 status=STATUS_CLOSED,
                 limit=50_000,
             )
@@ -143,6 +151,13 @@ class PerformanceAnalytics:
                     e
                     for e in rows
                     if (e.exchange or "").upper() == exchange.upper()
+                ]
+            if trading_mode:
+                mode = normalize_trading_mode(trading_mode).value
+                rows = [
+                    e
+                    for e in rows
+                    if (getattr(e, "trading_mode", None) or "") == mode
                 ]
 
         return [e for e in rows if e.status == STATUS_CLOSED and e.pnl is not None]
@@ -179,14 +194,17 @@ class PerformanceAnalytics:
         period: str = PERIOD_ALL_TIME,
         strategy: str | None = None,
         exchange: str | None = None,
+        trading_mode: str | None = None,
         now: datetime | None = None,
     ) -> PerformanceReport:
         """
         Computes a PerformanceReport from closed trades.
 
         If ``trades`` is omitted, loads from the wired TradeJournal and
-        applies ``period`` / ``strategy`` / ``exchange`` filters
-        (period uses exit_time UTC).
+        applies ``period`` / ``strategy`` / ``exchange`` / ``trading_mode``
+        filters (period uses exit_time UTC). When ``trading_mode`` is
+        omitted, defaults to the process trading mode so PAPER and REAL
+        stats stay isolated.
         """
         period_key = (period or PERIOD_ALL_TIME).strip().lower()
         if period_key not in SUPPORTED_PERIODS:
@@ -195,17 +213,27 @@ class PerformanceAnalytics:
                 f"Supported: {', '.join(sorted(SUPPORTED_PERIODS))}"
             )
 
+        mode_explicit = trading_mode is not None
         if trades is None:
+            mode_key = normalize_trading_mode(
+                trading_mode if mode_explicit else resolve_trading_mode()
+            ).value
             trades = self._fetch_closed_trades(
                 strategy=strategy,
                 exchange=exchange,
+                trading_mode=mode_key,
             )
             trades = self._filter_by_exit_period(
                 trades, period=period_key, now=now
             )
         else:
-            # Explicit trade list: still allow optional period/strategy/
-            # exchange narrowing for callers that pass a superset.
+            # Explicit trade list: only apply mode filter when the caller
+            # asked for one (legacy unit tests pass mixed/untagged rows).
+            mode_key = (
+                normalize_trading_mode(trading_mode).value
+                if mode_explicit
+                else None
+            )
             if strategy:
                 trades = [
                     e
@@ -219,6 +247,12 @@ class PerformanceAnalytics:
                     if (getattr(e, "exchange", None) or "").upper()
                     == exchange.upper()
                 ]
+            if mode_key is not None:
+                trades = [
+                    e
+                    for e in trades
+                    if (getattr(e, "trading_mode", None) or mode_key) == mode_key
+                ]
             if period_key != PERIOD_ALL_TIME:
                 trades = self._filter_by_exit_period(
                     trades, period=period_key, now=now
@@ -226,7 +260,10 @@ class PerformanceAnalytics:
 
         if not trades:
             return _empty_report(
-                period=period_key, strategy=strategy, exchange=exchange
+                period=period_key,
+                strategy=strategy,
+                exchange=exchange,
+                trading_mode=mode_key,
             )
 
         trades = sorted(
@@ -300,6 +337,7 @@ class PerformanceAnalytics:
             period=period_key,
             strategy=strategy,
             exchange=exchange,
+            trading_mode=mode_key,
         )
 
 

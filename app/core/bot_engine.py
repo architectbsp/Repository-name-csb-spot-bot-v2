@@ -134,6 +134,10 @@ class BotEngine:
         self.trade_journal.set_repository(
             self.persistence.trade_journal_repository(),
         )
+        from app.core.exchange.trading_mode import resolve_trading_mode
+
+        self.trading_mode = resolve_trading_mode()
+        self.trade_journal.set_trading_mode(self.trading_mode)
 
         # Performance Analytics (AnalyticsService): closed-trade metrics
         # for the dashboard / Kelly sizing. Alias kept for older callers.
@@ -210,6 +214,7 @@ class BotEngine:
         self.dashboard_service.set_analytics_service(self.analytics_service)
         self.dashboard_service.set_config(self.config)
         self.dashboard_service.set_bot_running_fn(lambda: self.running)
+        self.dashboard_service.set_trading_mode(self.trading_mode)
 
         self.risk_manager.set_telemetry(self.telemetry)
         self.watch_list.set_telemetry(self.telemetry)
@@ -229,6 +234,7 @@ class BotEngine:
         self.telegram_notifier.set_trade_journal(self.trade_journal)
         self.telegram_notifier.set_risk_manager(self.risk_manager)
         self.telegram_notifier.set_position_manager(self.position_manager)
+        self.telegram_notifier.set_trading_mode(self.trading_mode)
 
         # Balance ↔ local OPEN positions sync (Unknown Order / DB drift).
         self.position_reconciler = PositionReconciler()

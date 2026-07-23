@@ -1,6 +1,6 @@
 # BUSINESS_RULES
 
-Version: 3.2
+Version: 3.3
 Status: Active
 Scope: CSB Spot Bot MVP
 
@@ -104,6 +104,14 @@ BUY → trailing update → partial TP → full SELL; open-position stop /
 highest / quantity are persisted on every price tick so graceful
 restart rehydrates trailing and scale-out state; SQLite-naive datetimes
 are normalized to aware UTC on repository load.
+
+Changelog (3.2 -> 3.3): Sprint 14 PAPER|REAL isolation --
+`trading_mode` resolves from `TRADE_MODE` / `TRADING_MODE` /
+`PAPER_TRADING` (PAPER aliases: paper/sim; REAL aliases: real/live/
+production). PAPER fills never touch live balance or order endpoints;
+REAL refuses to build adapters without API key+secret (OKX also needs
+passphrase). Trade Journal + Analytics filter by `trading_mode`;
+Dashboard and Telegram label the active mode as PAPER or REAL.
 
 ---
 
@@ -915,20 +923,45 @@ integration suite (`tests/test_full_integration.py`):
    BUY → trailing-stop update → partial take-profit → full SELL
    (`TRAILING_STOP`). Orders remain **spot + MARKET only** (Sprint 13
    Spot Guard).
-2. **Graceful shutdown & rehydrate** — After `stop`/`shutdown`, a new
+2. **PAPER vs REAL isolation** — Process mode is `PAPER` or `REAL`
+   (`TRADE_MODE` / `TRADING_MODE` / `PAPER_TRADING`). PAPER uses
+   `PaperExchangeAdapter`: prices may come from a live public feed, but
+   `fetch_balance` / `place_market_*` / private trade history never hit
+   the venue account (local wallet fills only). REAL requires non-empty
+   API key + secret before the adapter is built (OKX also requires a
+   passphrase). Journal rows store `trading_mode`; Analytics defaults to
+   the process mode so paper PnL never mixes with live stats. Dashboard
+   Account / top-bar and Telegram messages show a clear **PAPER** or
+   **REAL** badge (`[PAPER]` / `[REAL]` prefix on Telegram).
+3. **Graceful shutdown & rehydrate** — After `stop`/`shutdown`, a new
    process loads open rows via `PersistenceService.load_positions()` +
    `PositionManager.restore()` and `TradeJournal.load_open_entries()`.
    Trailing / highest / quantity must survive because
    `RiskManager.update_position` persists open positions on every tick
    (`PositionManager.persist`). ConfigManager is a process singleton;
    tests reset it between runs (`ConfigManager.reset_instance`).
-3. **Resource integrity** — Module shutdown must not leave orphaned
+4. **Resource integrity** — Module shutdown must not leave orphaned
    asyncio tasks; repository sessions are closed so the SQLAlchemy pool
    reports zero checked-out connections. Datetimes loaded from SQLite
    are normalized to timezone-aware UTC.
 
 Regression gate: `pytest` must be fully green (zero failures) before
 production enablement.
+
+---
+
+## Paper Trading
+
+When `TRADE_MODE=paper` / `TRADING_MODE=PAPER` or `PAPER_TRADING=true`,
+the exchange factory wraps each live venue in `PaperExchangeAdapter`:
+
+- **Prices**: optional real WebSocket / REST data from the configured venue.
+- **Orders / balances**: filled locally against a virtual wallet
+  (`PAPER_INITIAL_BALANCE`, default 10000 quote units) — never private
+  balance or order endpoints.
+- **REAL mode**: `TRADE_MODE=real` / `live` / `production` (default when
+  unset) uses `RealExchangeAdapter` and submits real market orders only
+  after API credentials validate.
 
 ---
 
@@ -1062,19 +1095,6 @@ Precedence: `DATABASE_URL` env → `config.json` `database` section →
 `pip install -r requirements-db.txt` (`psycopg`, `PyMySQL`). Schema
 evolution uses the dialect-aware `sync_schema()` helper (no Alembic).
 See `config.example.json`.
-
----
-
-## Paper Trading
-
-When `TRADE_MODE=paper` or `PAPER_TRADING=true`, the exchange factory wraps
-each live venue in `PaperExchangeAdapter`:
-
-- **Prices**: real WebSocket / REST data from the configured venue.
-- **Orders**: filled locally against a virtual wallet
-  (`PAPER_INITIAL_BALANCE`, default 10000 quote units).
-- **Live mode**: `TRADE_MODE=live` (default) uses `RealExchangeAdapter`
-  and submits real market orders.
 
 ---
 

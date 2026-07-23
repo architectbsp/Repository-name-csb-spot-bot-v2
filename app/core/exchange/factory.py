@@ -12,6 +12,12 @@ from app.core.exchange.kraken import KrakenExchange
 from app.core.exchange.mexc import MEXCExchange
 from app.core.exchange.models import ExchangeState, ExchangeType
 from app.core.exchange.okx import OKXExchange
+from app.core.exchange.trading_mode import (
+    TradingMode,
+    paper_trading_enabled,
+    require_real_api_credentials,
+    resolve_trading_mode,
+)
 
 
 _ExchangeFactoryFn = Callable[[ExchangeState, ExchangeSettings], BaseExchange]
@@ -31,20 +37,6 @@ _EXCHANGE_CLASSES: dict[str, tuple[ExchangeType, _ExchangeFactoryFn]] = {
 
 def supported_exchange_names() -> list[str]:
     return sorted(_EXCHANGE_CLASSES.keys())
-
-
-def paper_trading_enabled() -> bool:
-    """
-    Paper mode: real WS/REST prices, local simulated fills.
-
-    Enabled when ``TRADE_MODE=paper`` or ``PAPER_TRADING`` is truthy
-    (1/true/yes/on). ``TRADE_MODE=live`` forces live orders.
-    """
-    mode = (os.getenv("TRADE_MODE") or "").strip().lower()
-    if mode in {"paper", "live"}:
-        return mode == "paper"
-    flag = (os.getenv("PAPER_TRADING") or "").strip().lower()
-    return flag in {"1", "true", "yes", "on"}
 
 
 def paper_initial_balance() -> float:
@@ -84,12 +76,16 @@ def create_exchange(settings: ExchangeSettings) -> BaseExchange:
     """
     Builds a single exchange integration from `settings`.
 
-    Returns ``PaperExchangeAdapter`` (real prices, virtual wallet) when
-    paper trading is enabled, otherwise ``RealExchangeAdapter``.
+    PAPER → ``PaperExchangeAdapter`` (optional live prices, virtual fills).
+    REAL → ``RealExchangeAdapter`` after API key/secret validation.
     """
+    mode = resolve_trading_mode()
+    if mode is TradingMode.REAL:
+        require_real_api_credentials(settings)
+
     live = _create_live_exchange(settings)
 
-    if paper_trading_enabled():
+    if mode is TradingMode.PAPER:
         return PaperExchangeAdapter(
             live,
             initial_quote=paper_initial_balance(),
@@ -117,3 +113,15 @@ def create_exchanges(
         raise ValueError("No exchanges configured.")
 
     return list(by_type.values())
+
+
+__all__ = [
+    "TradingMode",
+    "create_exchange",
+    "create_exchanges",
+    "paper_initial_balance",
+    "paper_trading_enabled",
+    "require_real_api_credentials",
+    "resolve_trading_mode",
+    "supported_exchange_names",
+]

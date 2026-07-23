@@ -177,6 +177,13 @@ class TradeJournalEntity(Base):
 
     symbol: Mapped[str] = mapped_column(String(30), nullable=False)
     exchange: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Sprint 14 -- PAPER | REAL so analytics never mixes simulated fills
+    # with live production trades. Default PAPER for legacy rows.
+    trading_mode: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="PAPER",
+    )
 
     entry_time: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     entry_price: Mapped[float] = mapped_column(Float, nullable=False)

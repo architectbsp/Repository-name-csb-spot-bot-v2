@@ -54,3 +54,5 @@ class PerformanceReport:
     period: str = "all_time"
     strategy: str | None = None
     exchange: str | None = None
+    # Sprint 14 -- PAPER | REAL isolation.
+    trading_mode: str | None = None

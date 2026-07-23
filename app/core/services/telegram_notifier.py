@@ -73,6 +73,7 @@ class TelegramNotifier:
         self._api_ok: dict[str, bool] = {}
         self._last_daily_key: str | None = None
         self._last_weekly_key: str | None = None
+        self._trading_mode = "PAPER"
 
     # ---- wiring ---------------------------------------------------------
 
@@ -93,6 +94,11 @@ class TelegramNotifier:
 
     def set_trade_journal(self, trade_journal) -> None:
         self._trade_journal = trade_journal
+
+    def set_trading_mode(self, mode) -> None:
+        from app.core.exchange.trading_mode import normalize_trading_mode
+
+        self._trading_mode = normalize_trading_mode(mode).value
 
     def set_risk_manager(self, risk_manager) -> None:
         self._risk_manager = risk_manager
@@ -439,7 +445,9 @@ class TelegramNotifier:
     def _send(self, text: str, *, chat_id: str | None = None) -> None:
         if not self.is_enabled() or self._client is None:
             return
-        self._client.send_message(text, chat_id=chat_id)
+        mode = (self._trading_mode or "PAPER").upper()
+        tagged = f"[{mode}] {text}" if not text.startswith("[") else text
+        self._client.send_message(tagged, chat_id=chat_id)
 
 
 def _fmt(value) -> str:

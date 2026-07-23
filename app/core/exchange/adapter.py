@@ -104,6 +104,14 @@ class RealExchangeAdapter(BaseExchange):
     def live(self) -> BaseExchange:
         return self._live
 
+    @property
+    def is_paper(self) -> bool:
+        return False
+
+    @property
+    def trading_mode(self) -> str:
+        return "REAL"
+
     def connect(self) -> None:
         self._live.connect()
 
@@ -212,6 +220,10 @@ class PaperExchangeAdapter(BaseExchange):
     def is_paper(self) -> bool:
         return True
 
+    @property
+    def trading_mode(self) -> str:
+        return "PAPER"
+
     def set_mark_price(self, symbol: str, price: float) -> None:
         if price <= 0:
             raise ValueError(f"Mark price must be positive, got {price}")
@@ -242,6 +254,7 @@ class PaperExchangeAdapter(BaseExchange):
         self.state.status = ConnectionStatus.DISCONNECTED
 
     def fetch_balance(self):
+        # Sprint 14 isolation: never read the live venue wallet in PAPER.
         # ccxt-shaped free/used/total maps plus per-asset rows.
         free = {asset: row["free"] for asset, row in self._balances.items()}
         used = {asset: row["used"] for asset, row in self._balances.items()}
@@ -253,6 +266,19 @@ class PaperExchangeAdapter(BaseExchange):
         }
         payload.update(self._balances)
         return payload
+
+    def fetch_my_trades(
+        self,
+        symbol: str | None = None,
+        limit: int | None = None,
+    ) -> list[TradeFill]:
+        # Local paper fills only -- never live private trade history.
+        fills = self._fills
+        if symbol is not None:
+            fills = [f for f in fills if f.symbol == symbol]
+        if limit is not None:
+            fills = fills[-limit:]
+        return list(fills)
 
     def fetch_markets(self):
         if self._live is not None:
@@ -289,18 +315,6 @@ class PaperExchangeAdapter(BaseExchange):
             }
             for symbol, price in self._last_prices.items()
         }
-
-    def fetch_my_trades(
-        self,
-        symbol: str | None = None,
-        limit: int | None = None,
-    ) -> list[TradeFill]:
-        fills = self._fills
-        if symbol is not None:
-            fills = [f for f in fills if f.symbol == symbol]
-        if limit is not None:
-            fills = fills[-limit:]
-        return list(fills)
 
     def get_price_stream(self) -> PriceStream | None:
         # Paper mode listens to the real venue stream when available.

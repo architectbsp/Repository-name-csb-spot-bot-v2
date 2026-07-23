@@ -30,6 +30,7 @@ def test_market_key_round_trip():
 def test_create_exchanges_registers_multiple_venues(monkeypatch):
     monkeypatch.setenv("EXCHANGES", "binance,bybit")
     monkeypatch.delenv("EXCHANGE", raising=False)
+    monkeypatch.setenv("TRADE_MODE", "PAPER")
 
     exchanges = create_exchanges()
     types = {ex.state.exchange for ex in exchanges}
@@ -39,6 +40,7 @@ def test_create_exchanges_registers_multiple_venues(monkeypatch):
 
 def test_create_exchanges_deduplicates_by_type(monkeypatch):
     monkeypatch.setenv("EXCHANGES", "binance,binance,bybit")
+    monkeypatch.setenv("TRADE_MODE", "PAPER")
 
     exchanges = create_exchanges()
     types = [ex.state.exchange for ex in exchanges]
@@ -47,7 +49,8 @@ def test_create_exchanges_deduplicates_by_type(monkeypatch):
     assert ExchangeType.BYBIT in types
 
 
-def test_enabled_exchange_types_lists_every_registered_venue():
+def test_enabled_exchange_types_lists_every_registered_venue(monkeypatch):
+    monkeypatch.setenv("TRADE_MODE", "PAPER")
     registry = ExchangeRegistry()
     for exchange_type, settings_name in (
         (ExchangeType.BINANCE, "binance"),

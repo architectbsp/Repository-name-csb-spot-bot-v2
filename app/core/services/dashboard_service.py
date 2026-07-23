@@ -79,6 +79,7 @@ class DashboardService:
         self._exec_alerts: list[dict] = []
         self._exec_alerts_lock = threading.Lock()
         self._exec_alerts_capacity = 20
+        self._trading_mode = "PAPER"
 
     # ---- wiring ---------------------------------------------------------
 
@@ -94,6 +95,11 @@ class DashboardService:
 
     def set_trade_journal(self, trade_journal) -> None:
         self._trade_journal = trade_journal
+
+    def set_trading_mode(self, mode) -> None:
+        from app.core.exchange.trading_mode import normalize_trading_mode
+
+        self._trading_mode = normalize_trading_mode(mode).value
 
     def set_risk_manager(self, risk_manager) -> None:
         self._risk_manager = risk_manager
@@ -178,7 +184,9 @@ class DashboardService:
         coin_rows = self._coin_rows()
         history_rows, report = self._history_and_report_24h(now)
         performance = (
-            self._analytics_service.generate_report()
+            self._analytics_service.generate_report(
+                trading_mode=self._trading_mode,
+            )
             if self._analytics_service is not None
             else None
         )
@@ -197,6 +205,7 @@ class DashboardService:
             exchange_name=name,
             enabled_exchanges=enabled,
             testnet=testnet,
+            trading_mode=self._trading_mode,
             api_connected=api_connected,
             quote_balance=balance,
             available_balance=balance,

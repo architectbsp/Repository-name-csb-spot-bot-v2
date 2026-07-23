@@ -168,12 +168,14 @@ class TradeJournalRepository:
         close_reason: str | None = None,
         status: str | None = None,
         exchange: str | None = None,
+        trading_mode: str | None = None,
         limit: int = 200,
     ) -> list[TradeJournalEntity]:
         """
         Filtered journal lookup for UI / analytics (Sprint 5).
         ``strategy`` matches a substring inside ``entry_conditions_json``.
         ``close_reason`` filters ``exit_reason``.
+        ``trading_mode`` isolates PAPER vs REAL rows (Sprint 14).
         Date bounds apply to ``entry_time``.
         """
         q = self._session.query(TradeJournalEntity)
@@ -181,6 +183,8 @@ class TradeJournalRepository:
             q = q.filter(TradeJournalEntity.symbol == symbol)
         if exchange:
             q = q.filter(TradeJournalEntity.exchange == exchange)
+        if trading_mode:
+            q = q.filter(TradeJournalEntity.trading_mode == trading_mode)
         if status:
             q = q.filter(TradeJournalEntity.status == status)
         if close_reason:

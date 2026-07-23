@@ -17,6 +17,10 @@ ENTRY_PATH_B_DIP_RECOVERY = "PATH_B_DIP_RECOVERY"
 STATUS_OPEN = "OPEN"
 STATUS_CLOSED = "CLOSED"
 
+# Sprint 14 -- PAPER vs REAL isolation on journal / analytics rows.
+MODE_PAPER = "PAPER"
+MODE_REAL = "REAL"
+
 # trade_logs.event_type values
 LOG_ENTRY = "ENTRY"
 LOG_PRICE_EXTREME = "PRICE_EXTREME"
@@ -33,6 +37,8 @@ class TradeJournalEntry:
     entry_reason: str
     id: int | None = None
     exchange: str | None = None
+    # PAPER | REAL -- isolates simulated fills from live production stats.
+    trading_mode: str = MODE_PAPER
     # When the coin first entered WATCH_FALLING/WATCH_RISING, before this
     # BUY was decided -- used to compute wait_minutes.
     watch_started_at: datetime | None = None

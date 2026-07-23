@@ -25,12 +25,17 @@ from app.core.domain.trade_journal import (
     LOG_EXIT,
     LOG_PARTIAL_EXIT,
     LOG_PRICE_EXTREME,
+    MODE_PAPER,
     STATUS_CLOSED,
     STATUS_OPEN,
     TradeJournalEntry,
     TradeLog,
 )
 from app.core.exchange.market_key import market_key
+from app.core.exchange.trading_mode import (
+    normalize_trading_mode,
+    resolve_trading_mode,
+)
 from app.core.persistence.mapper import (
     journal_to_domain,
     journal_to_entity,
@@ -59,12 +64,21 @@ class TradeJournal:
         self._repository = None
         # Sprint 18: one open trade per (exchange, symbol).
         self._open_entries: dict[str, TradeJournalEntry] = {}
+        # Sprint 14: stamp new entries with the process trading mode.
+        self._trading_mode = resolve_trading_mode().value
 
     def _entry_key(self, symbol: str, exchange=None) -> str:
         return market_key(exchange, symbol)
 
     def set_repository(self, repository) -> None:
         self._repository = repository
+
+    def set_trading_mode(self, mode) -> None:
+        self._trading_mode = normalize_trading_mode(mode).value
+
+    @property
+    def trading_mode(self) -> str:
+        return self._trading_mode
 
     def load_open_entries(self) -> int:
         """
@@ -120,8 +134,12 @@ class TradeJournal:
         entry_conditions: dict | None = None,
         wallet_quote_free: float | None = None,
         commission: float | None = None,
+        trading_mode: str | None = None,
     ) -> TradeJournalEntry:
         conditions = dict(entry_conditions or {})
+        mode = normalize_trading_mode(
+            trading_mode or self._trading_mode or MODE_PAPER
+        ).value
         entry = TradeJournalEntry(
             symbol=symbol,
             entry_time=datetime.now(UTC),
@@ -129,6 +147,7 @@ class TradeJournal:
             quantity=quantity,
             entry_reason=entry_reason,
             exchange=exchange,
+            trading_mode=mode,
             watch_started_at=watch_started_at,
             wait_minutes=wait_minutes,
             rise_events=rise_events,
@@ -163,11 +182,12 @@ class TradeJournal:
         )
 
         logger.info(
-            "[JOURNAL] ENTRY symbol=%s exchange=%s reason=%s price=%.8f "
+            "[JOURNAL] ENTRY symbol=%s exchange=%s mode=%s reason=%s price=%.8f "
             "qty=%.8f wait_minutes=%s wallet_free=%s rise_events=%d "
             "fall_events=%d",
             symbol,
             exchange,
+            mode,
             entry_reason,
             entry_price,
             quantity,
@@ -427,12 +447,13 @@ class TradeJournal:
         close_reason: str | None = None,
         status: str | None = None,
         exchange: str | None = None,
+        trading_mode: str | None = None,
         limit: int = 200,
     ) -> list[TradeJournalEntry]:
         """
         Sprint 5 query API for UI / analytics: filter by symbol, date
         range, strategy name (inside entry_conditions), close_reason,
-        status, or exchange.
+        status, exchange, or trading_mode (PAPER|REAL).
         """
         if self._repository is not None and hasattr(self._repository, "query"):
             return [
@@ -445,6 +466,7 @@ class TradeJournal:
                     close_reason=close_reason,
                     status=status,
                     exchange=exchange,
+                    trading_mode=trading_mode,
                     limit=limit,
                 )
             ]
@@ -456,10 +478,17 @@ class TradeJournal:
         elif status == STATUS_OPEN or status is None:
             pass
         out: list[TradeJournalEntry] = []
+        mode_key = (
+            normalize_trading_mode(trading_mode).value
+            if trading_mode
+            else None
+        )
         for entry in rows:
             if symbol and entry.symbol != symbol:
                 continue
             if exchange and entry.exchange != exchange:
+                continue
+            if mode_key and (entry.trading_mode or "") != mode_key:
                 continue
             if close_reason and entry.exit_reason != close_reason:
                 continue

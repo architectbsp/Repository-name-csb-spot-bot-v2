@@ -613,3 +613,62 @@ def test_modules_stop_cleanly_without_open_positions():
     assert not pipe.risk.is_running()
     assert not pipe.scanner.is_initialized()
     assert pipe.positions.open_count() == 0
+
+
+def test_paper_adapter_lifecycle_never_hits_live_order_endpoints(monkeypatch):
+    """PAPER mode: BUY → trailing → partial TP → SELL on PaperExchangeAdapter."""
+    from app.core.exchange.adapter import PaperExchangeAdapter
+    from app.core.exchange.manager import ExchangeManager
+    from app.core.exchange.registry import ExchangeRegistry
+    from app.core.services.order_validator import OrderValidator
+
+    monkeypatch.setenv("TRADE_MODE", "PAPER")
+
+    paper = PaperExchangeAdapter(
+        live=None,
+        exchange_type=EXCHANGE,
+        initial_quote=50_000.0,
+        fee_rate=0.0,
+        slippage_bps=0,
+    )
+    paper.connect()
+    paper.set_mark_price(SYMBOL, 100.0)
+
+    registry = ExchangeRegistry()
+    registry.register(EXCHANGE, paper)
+    manager = ExchangeManager(registry)
+
+    config = make_config(
+        trailing_activation=2.0,
+        trailing_percent=2.5,
+        partial_tp_activation=5.0,
+        partial_tp_sell=50.0,
+        stop_loss_percent=10.0,
+    )
+    pipe = wire_pipeline(manager, config)
+    pipe.journal.set_trading_mode("PAPER")
+    pipe.telegram.set_trading_mode("PAPER")
+    pipe.risk.set_order_validator(OrderValidator(manager))
+
+    seed_via_scanner_and_path_b(pipe, entry_price=106.0)
+    position = pipe.positions.get(SYMBOL, exchange=EXCHANGE)
+    assert position is not None
+    entry = position.entry_price
+    assert pipe.journal.get_open(SYMBOL, exchange=EXCHANGE).trading_mode == "PAPER"
+    assert any(m.startswith("[PAPER]") for m in pipe.telegram_client.messages)
+
+    trail_tick = entry * 1.03
+    paper.set_mark_price(SYMBOL, trail_tick)
+    pipe.risk.on_price_tick(make_ticker(trail_tick))
+    assert position.stop_stage == "TRAILING"
+
+    partial_tick = entry * 1.10
+    paper.set_mark_price(SYMBOL, partial_tick)
+    pipe.risk.on_price_tick(make_ticker(partial_tick))
+    assert position.partial_exits_taken == 1
+
+    crash = position.stop_price * 0.99
+    paper.set_mark_price(SYMBOL, crash)
+    pipe.risk.on_price_tick(make_ticker(crash))
+    assert not pipe.positions.is_open(SYMBOL, exchange=EXCHANGE)
+    shutdown_pipeline(pipe)

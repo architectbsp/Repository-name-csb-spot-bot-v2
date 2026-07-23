@@ -89,6 +89,9 @@ class DashboardSnapshot:
     # Uppercase names of every currently enabled exchange (top-bar chips).
     enabled_exchanges: list[str] = field(default_factory=list)
     testnet: bool = False
+    # Sprint 14 -- PAPER | REAL process trading mode (distinct from
+    # exchange sandbox/testnet flags).
+    trading_mode: str = "PAPER"
     api_connected: bool = False
 
     quote_balance: float | None = None

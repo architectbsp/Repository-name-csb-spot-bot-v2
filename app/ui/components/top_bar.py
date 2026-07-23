@@ -103,6 +103,8 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
         api = "DISCONNECTED"
         api_color = "#EF4444"
         exchange = "-"
+        mode = "-"
+        mode_color = "#94A3B8"
         # Until a real probe exists, mirror API connectivity as a
         # best-effort "internet" signal (no separate connectivity check).
         internet = "UNKNOWN"
@@ -113,6 +115,8 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
         api = "CONNECTED" if snapshot.api_connected else "DISCONNECTED"
         api_color = "#22C55E" if snapshot.api_connected else "#EF4444"
         exchange = snapshot.exchange_name
+        mode = (snapshot.trading_mode or "PAPER").upper()
+        mode_color = "#F59E0B" if mode == "PAPER" else "#EF4444"
         internet = "ONLINE" if snapshot.api_connected else "CHECK"
         internet_color = "#22C55E" if snapshot.api_connected else "#F59E0B"
 
@@ -139,6 +143,7 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
                         spacing=10,
                         controls=[
                             _status_box("BOT", bot, bot_color),
+                            _status_box("MODE", mode, mode_color),
                             _status_box("INTERNET", internet, internet_color),
                             _status_box("API", api, api_color),
                             _status_box("EXCHANGE", exchange, "#FFFFFF"),

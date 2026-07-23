@@ -76,6 +76,7 @@ def test_account_panel_reflects_bot_and_api_status():
         generated_at=datetime.now(UTC),
         exchange_name="BINANCE",
         testnet=True,
+        trading_mode="PAPER",
         bot_running=True,
         api_connected=True,
         quote_balance=100.0,
@@ -85,7 +86,7 @@ def test_account_panel_reflects_bot_and_api_status():
     texts = _texts(build_account_panel(snap))
 
     assert "BINANCE" in texts
-    assert "Testnet" in texts
+    assert "PAPER" in texts
     assert "ONLINE" in texts
     assert "CONNECTED" in texts
 
@@ -94,6 +95,7 @@ def test_top_bar_highlights_the_active_exchange():
     snap = DashboardSnapshot(
         generated_at=datetime.now(UTC),
         exchange_name="OKX",
+        trading_mode="REAL",
         bot_running=False,
         api_connected=False,
     )
@@ -103,6 +105,7 @@ def test_top_bar_highlights_the_active_exchange():
 
     assert "OFFLINE" in texts
     assert "OKX" in texts
+    assert "REAL" in texts
     assert "DISCONNECTED" in texts
 
 

@@ -28,6 +28,7 @@ def build_account_panel(snapshot: DashboardSnapshot | None = None):
     if snapshot is None:
         exchange = "-"
         mode = "-"
+        mode_color = "#FFFFFF"
         wallet = "-"
         available = "-"
         bot_status = "OFFLINE"
@@ -36,7 +37,8 @@ def build_account_panel(snapshot: DashboardSnapshot | None = None):
         api_color = "#EF4444"
     else:
         exchange = snapshot.exchange_name
-        mode = "Testnet" if snapshot.testnet else "Live"
+        mode = (snapshot.trading_mode or "PAPER").upper()
+        mode_color = "#F59E0B" if mode == "PAPER" else "#EF4444"
         wallet = money_usd(snapshot.quote_balance)
         available = money_usd(snapshot.available_balance)
         bot_status = "ONLINE" if snapshot.bot_running else "OFFLINE"
@@ -59,7 +61,7 @@ def build_account_panel(snapshot: DashboardSnapshot | None = None):
                     color="#FFFFFF",
                 ),
                 _info("Exchange", exchange),
-                _info("Mode", mode),
+                _info("Mode", mode, mode_color),
                 _info("Wallet", wallet),
                 _info("Available", available, "#22C55E"),
                 _info("Bot Status", bot_status, bot_color),

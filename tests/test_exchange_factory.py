@@ -18,6 +18,10 @@ from app.core.exchange.okx import OKXExchange
 def make_settings(exchange: str) -> ExchangeSettings:
     settings = ExchangeSettings()
     settings.exchange = exchange
+    settings.api_key = "test-key"
+    settings.api_secret = "test-secret"
+    if exchange.lower() == "okx":
+        settings.passphrase = "test-pass"
     return settings
 
 
@@ -35,7 +39,7 @@ def test_create_exchange_resolves_exchange_from_env_value(
     name, expected_type, expected_class, monkeypatch
 ):
     monkeypatch.delenv("PAPER_TRADING", raising=False)
-    monkeypatch.delenv("TRADE_MODE", raising=False)
+    monkeypatch.setenv("TRADE_MODE", "REAL")
 
     exchange = create_exchange(make_settings(name))
 
@@ -43,6 +47,7 @@ def test_create_exchange_resolves_exchange_from_env_value(
     assert isinstance(exchange.live, expected_class)
     assert exchange.state.exchange == expected_type
     assert exchange.state.enabled is True
+    assert exchange.trading_mode == "REAL"
 
     # Requirement 3 (dynamic price stream): each exchange must ship its
     # own, already-wired PriceStream instance.
@@ -60,6 +65,8 @@ def test_create_exchange_paper_mode_wraps_live_venue(monkeypatch):
     assert isinstance(exchange.live, BinanceExchange)
     assert exchange.fetch_quote_balance("USDT") == 2500.0
     assert exchange.get_price_stream() is not None
+    assert exchange.trading_mode == "PAPER"
+    assert exchange.is_paper is True
 
 
 def test_paper_trading_enabled_respects_trade_mode(monkeypatch):
@@ -72,7 +79,16 @@ def test_paper_trading_enabled_respects_trade_mode(monkeypatch):
     assert paper_trading_enabled() is False
 
 
-def test_create_exchange_rejects_unsupported_names():
+def test_create_exchange_real_rejects_missing_keys(monkeypatch):
+    monkeypatch.setenv("TRADE_MODE", "REAL")
+    monkeypatch.delenv("PAPER_TRADING", raising=False)
+    settings = ExchangeSettings(exchange="binance", api_key="", api_secret="")
+    with pytest.raises(Exception):
+        create_exchange(settings)
+
+
+def test_create_exchange_rejects_unsupported_names(monkeypatch):
+    monkeypatch.setenv("TRADE_MODE", "REAL")
     with pytest.raises(ValueError):
         create_exchange(make_settings("unknown-exchange"))
 

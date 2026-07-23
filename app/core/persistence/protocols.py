@@ -61,6 +61,7 @@ class TradeJournalRepositoryProtocol(Protocol):
         close_reason: str | None = None,
         status: str | None = None,
         exchange: str | None = None,
+        trading_mode: str | None = None,
         limit: int = 200,
     ) -> list[TradeJournalEntity]: ...
 

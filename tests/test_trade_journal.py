@@ -60,6 +60,7 @@ class DummyTradeJournalRepository:
         close_reason=None,
         status=None,
         exchange=None,
+        trading_mode=None,
         limit=200,
     ):
         rows = list(self._rows.values())
@@ -68,6 +69,8 @@ class DummyTradeJournalRepository:
             if symbol and row.symbol != symbol:
                 continue
             if exchange and row.exchange != exchange:
+                continue
+            if trading_mode and getattr(row, "trading_mode", None) != trading_mode:
                 continue
             if status and row.status != status:
                 continue
