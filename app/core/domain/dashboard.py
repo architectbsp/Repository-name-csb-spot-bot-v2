@@ -88,6 +88,8 @@ class DashboardSnapshot:
     exchange_name: str = "-"
     # Uppercase names of every currently enabled exchange (top-bar chips).
     enabled_exchanges: list[str] = field(default_factory=list)
+    # Single selected/active venue for the Exchange Selection UI (uppercase).
+    active_exchange: str = "-"
     testnet: bool = False
     # Sprint 14 -- PAPER | REAL process trading mode (distinct from
     # exchange sandbox/testnet flags).

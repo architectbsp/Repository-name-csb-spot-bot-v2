@@ -22,6 +22,7 @@ from app.core.timer.timer import Timer
 from app.core.stopwatch.stopwatch import Stopwatch
 from app.core.exchange.factory import create_exchanges
 from app.core.exchange.manager import ExchangeManager
+from app.core.exchange.models import ExchangeType
 from app.core.exchange.registry import ExchangeRegistry
 from app.core.security.redact import safe_error_text, safe_exc_message
 from app.core.services.chart_service import ChartService
@@ -119,6 +120,7 @@ class BotEngine:
             )
 
         self.exchange = ExchangeManager(self.exchange_registry)
+        self._apply_configured_active_exchange()
         self.order_validator = OrderValidator(self.exchange)
 
         self.market_scanner = MarketScanner()
@@ -514,6 +516,37 @@ class BotEngine:
         if quarantine.endswith(".quarantine.json"):
             return quarantine[: -len(".quarantine.json")] + ".client_orders.json"
         return f"{quarantine}.client_orders.json"
+
+    def _apply_configured_active_exchange(self) -> None:
+        """Seed ExchangeManager selection from config / env (startup)."""
+        preferred = (self.config.exchange.exchange or "binance").strip().upper()
+        try:
+            self.exchange.set_active_exchange_type(ExchangeType[preferred])
+        except KeyError:
+            logger.warning(
+                "[BotEngine] Unknown configured exchange %r — leaving active unset",
+                preferred,
+            )
+
+    def select_active_exchange(self, exchange_name: str) -> ExchangeType:
+        """
+        UI Exchange Selection: set the single active venue.
+
+        Updates config + ExchangeManager. Callers that persist ``EXCHANGE=``
+        to ``.env`` should do so alongside this (UI layer).
+        """
+        name = (exchange_name or "").strip().lower()
+        if not name:
+            raise ValueError("exchange_name is required")
+        try:
+            exchange_type = ExchangeType[name.upper()]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported exchange: {exchange_name!r}") from exc
+
+        self.config.exchange.exchange = name
+        self.exchange.set_active_exchange_type(exchange_type)
+        logger.info("[BotEngine] Active exchange selected: %s", exchange_type.name)
+        return exchange_type
 
     def shutdown(self):
         self.position_reconciler.shutdown()

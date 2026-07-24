@@ -10,6 +10,10 @@ class ExchangeManager:
     def __init__(self, registry: ExchangeRegistry) -> None:
         self._registry = registry
         self._market_data = MarketDataService()
+        # Single source of truth for UI / single-venue call sites.
+        # May reference a registered venue; if unset, falls back to first
+        # enabled exchange (legacy behaviour).
+        self._active: ExchangeType | None = None
 
     def start(self) -> None:
         for exchange in self._registry.enabled():
@@ -48,15 +52,33 @@ class ExchangeManager:
 
         return [exchange.state.exchange for exchange in enabled]
 
+    def set_active_exchange_type(self, exchange_type: ExchangeType) -> None:
+        """
+        Select the single active exchange for UI and single-venue call sites.
+
+        The venue should already be registered. Selection is stored even when
+        the venue is currently disconnected so the UI can reflect intent;
+        ``active_exchange_type()`` only returns it when registered.
+        """
+        if not isinstance(exchange_type, ExchangeType):
+            raise TypeError(
+                f"exchange_type must be ExchangeType, got {type(exchange_type)!r}"
+            )
+        self._active = exchange_type
+
+    def selected_exchange_type(self) -> ExchangeType | None:
+        """Currently selected exchange (may be unset)."""
+        return self._active
+
     def active_exchange_type(self) -> ExchangeType:
         """
-        Back-compat shim: returns the first enabled exchange type.
+        The single active exchange for charts / balance / legacy call sites.
 
-        Sprint 18 allows multiple simultaneous connections -- new code
-        should call enabled_exchange_types() and iterate. This method
-        remains for single-exchange call sites (charts opened without a
-        row-level exchange, legacy tests).
+        Prefers the user-selected venue when it is registered; otherwise
+        falls back to the first enabled exchange.
         """
+        if self._active is not None and self._registry.get(self._active) is not None:
+            return self._active
         return self.enabled_exchange_types()[0]
 
     def get_price_stream(

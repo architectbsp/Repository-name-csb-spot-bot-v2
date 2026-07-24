@@ -199,11 +199,14 @@ class DashboardService:
         pending_count = self._count_watch_states({WatchState.BUY_PENDING})
         watch_path_count = self._count_watch_states(_WATCH_PATH_STATES)
 
+        active = self._active_exchange_name(enabled)
+
         return DashboardSnapshot(
             generated_at=now,
             bot_running=bool(self._bot_running_fn()),
             exchange_name=name,
             enabled_exchanges=enabled,
+            active_exchange=active,
             testnet=testnet,
             trading_mode=self._trading_mode,
             api_connected=api_connected,
@@ -254,6 +257,28 @@ class DashboardService:
 
         return TimeConstraintService(self._config).is_entry_allowed(now=now)
 
+    def _active_exchange_name(self, enabled: list[str]) -> str:
+        """Uppercase name of the single selected/active venue for the UI."""
+        if self._exchange_manager is not None:
+            selected_fn = getattr(
+                self._exchange_manager, "selected_exchange_type", None
+            )
+            if callable(selected_fn):
+                selected = selected_fn()
+                if selected is not None:
+                    return selected.name
+            try:
+                return self._exchange_manager.active_exchange_type().name
+            except Exception:
+                pass
+        if self._config is not None:
+            configured = (self._config.exchange.exchange or "").strip().upper()
+            if configured:
+                return configured
+        if enabled:
+            return str(enabled[0]).strip().upper()
+        return "-"
+
     def _exchange_status(self) -> tuple[str, list[str], bool, bool]:
         if self._exchange_manager is None:
             return "-", [], False, bool(
@@ -283,7 +308,7 @@ class DashboardService:
         return ",".join(enabled_names), enabled_names, connected, testnet
 
     def _quote_balance(self) -> float | None:
-        """Sprint 18: sum free quote balances across every enabled venue."""
+        """Quote balance for the selected account (configured exchange)."""
         if self._exchange_manager is None:
             return None
         try:
@@ -292,21 +317,34 @@ class DashboardService:
             logger.debug("Dashboard: quote balance unavailable", exc_info=True)
             return None
 
-        total = 0.0
-        any_ok = False
-        for exchange_type in exchange_types:
+        target = None
+        if self._exchange_manager is not None:
             try:
-                total += float(
-                    self._exchange_manager.get_quote_balance(exchange_type)
-                )
-                any_ok = True
+                target = self._exchange_manager.active_exchange_type()
             except Exception:
-                logger.debug(
-                    "Dashboard: quote balance unavailable for %s",
-                    exchange_type,
-                    exc_info=True,
-                )
-        return total if any_ok else None
+                target = None
+
+        if target is None and self._config is not None:
+            configured = (self._config.exchange.exchange or "").strip().upper()
+            for exchange_type in exchange_types:
+                if exchange_type.name == configured:
+                    target = exchange_type
+                    break
+
+        if target is None and exchange_types:
+            target = exchange_types[0]
+        if target is None:
+            return None
+
+        try:
+            return float(self._exchange_manager.get_quote_balance(target))
+        except Exception:
+            logger.debug(
+                "Dashboard: quote balance unavailable for %s",
+                target,
+                exc_info=True,
+            )
+            return None
 
     def _daily_pnl(self) -> tuple[float | None, float | None, float | None]:
         if self._risk_manager is None:

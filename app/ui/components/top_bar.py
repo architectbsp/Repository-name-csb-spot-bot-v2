@@ -49,7 +49,7 @@ def _status_box(title, value, color="#22C55E"):
     )
 
 
-def _action(text):
+def _action(text: str, on_click=None):
     icons = {
         "API": ft.Icons.KEY,
         "TELEGRAM": ft.Icons.SEND,
@@ -62,6 +62,8 @@ def _action(text):
         border_radius=10,
         bgcolor="#0B1220",
         padding=14,
+        ink=on_click is not None,
+        on_click=(lambda _: on_click(text)) if on_click is not None else None,
         content=ft.Row(
             spacing=8,
             controls=[
@@ -81,12 +83,18 @@ def _action(text):
     )
 
 
-def _exchange(name, active=False):
+def _exchange(name, active=False, on_select=None):
+    def _handle(_event) -> None:
+        if on_select is not None:
+            on_select(name)
+
     return ft.Container(
         height=40,
         border_radius=10,
         bgcolor="#2563EB" if active else "#0B1220",
         padding=14,
+        ink=on_select is not None,
+        on_click=_handle if on_select is not None else None,
         content=ft.Text(
             name,
             size=12,
@@ -96,7 +104,28 @@ def _exchange(name, active=False):
     )
 
 
-def build_top_bar(snapshot: DashboardSnapshot | None = None):
+def _resolve_active_exchange(snapshot: DashboardSnapshot | None) -> str:
+    if snapshot is None:
+        return ""
+    active = (snapshot.active_exchange or "").strip().upper()
+    if active and active != "-":
+        return active
+    # Legacy snapshots: single exchange_name (not a comma list).
+    name = (snapshot.exchange_name or "").strip().upper()
+    if name and "," not in name and name != "-":
+        return name
+    enabled = snapshot.enabled_exchanges or []
+    if enabled:
+        return str(enabled[0]).strip().upper()
+    return ""
+
+
+def build_top_bar(
+    snapshot: DashboardSnapshot | None = None,
+    *,
+    on_action=None,
+    on_exchange_select=None,
+):
     if snapshot is None:
         bot = "OFFLINE"
         bot_color = "#EF4444"
@@ -114,24 +143,15 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
         bot_color = "#22C55E" if snapshot.bot_running else "#EF4444"
         api = "CONNECTED" if snapshot.api_connected else "DISCONNECTED"
         api_color = "#22C55E" if snapshot.api_connected else "#EF4444"
-        exchange = snapshot.exchange_name
+        active = _resolve_active_exchange(snapshot)
+        exchange = active or snapshot.exchange_name or "-"
         mode = (snapshot.trading_mode or "PAPER").upper()
         mode_color = "#F59E0B" if mode == "PAPER" else "#EF4444"
         internet = "ONLINE" if snapshot.api_connected else "CHECK"
         internet_color = "#22C55E" if snapshot.api_connected else "#F59E0B"
 
     now = datetime.now().strftime("%H:%M")
-    enabled = {
-        name.upper()
-        for name in (snapshot.enabled_exchanges if snapshot else [])
-    }
-    # Legacy: when only exchange_name is set (older snapshots / tests).
-    if not enabled and snapshot and snapshot.exchange_name:
-        enabled = {
-            part.strip().upper()
-            for part in snapshot.exchange_name.split(",")
-            if part.strip()
-        }
+    active_name = _resolve_active_exchange(snapshot)
 
     return ft.Column(
         spacing=12,
@@ -153,10 +173,10 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
                     ft.Row(
                         spacing=10,
                         controls=[
-                            _action("API"),
-                            _action("TELEGRAM"),
-                            _action("LOG"),
-                            _action("SETTINGS"),
+                            _action("API", on_action),
+                            _action("TELEGRAM", on_action),
+                            _action("LOG", on_action),
+                            _action("SETTINGS", on_action),
                         ],
                     ),
                 ],
@@ -167,7 +187,11 @@ def build_top_bar(snapshot: DashboardSnapshot | None = None):
                     ft.Row(
                         spacing=10,
                         controls=[
-                            _exchange(name, active=(name in enabled))
+                            _exchange(
+                                name,
+                                active=(name == active_name),
+                                on_select=on_exchange_select,
+                            )
                             for name in _EXCHANGES
                         ],
                     ),

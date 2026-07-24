@@ -9,6 +9,7 @@ from app.core.bot_engine import BotEngine
 from app.core.exchange.factory import supported_exchange_names
 from app.ui.api_config import (
     ExchangeCredentialsSession,
+    persist_env_values,
     requires_passphrase,
 )
 from app.ui.components.account_panel import build_account_panel
@@ -355,6 +356,21 @@ def _build_notifications(alerts: list[dict]) -> ft.Container:
     )
 
 
+def _apply_exchange_credentials_to_config(engine: BotEngine, exchange_name: str) -> None:
+    """Load the selected venue's saved .env credentials into config.exchange."""
+    supported = [name.lower() for name in supported_exchange_names()]
+    session = ExchangeCredentialsSession(_ENV_PATH, supported)
+    name = exchange_name.strip().lower()
+    draft = session.snapshot(name)
+    engine.config.exchange.exchange = name
+    engine.config.exchange.api_key = draft.api_key
+    engine.config.exchange.api_secret = draft.api_secret
+    engine.config.exchange.passphrase = (
+        draft.passphrase if requires_passphrase(name) else ""
+    )
+    engine.config.exchange.testnet = draft.testnet
+
+
 def _build_view(
     view_name: str,
     engine: BotEngine,
@@ -363,6 +379,7 @@ def _build_view(
     coin_search_query: str = "",
     on_coin_search=None,
     on_coin_refresh=None,
+    on_exchange_select=None,
 ):
     def _on_top_action(action: str) -> None:
         if action == "LOG":
@@ -395,12 +412,18 @@ def _build_view(
         )
 
     snapshot = engine.dashboard_service.build_snapshot()
+    top_bar = lambda: build_top_bar(
+        snapshot,
+        on_action=_on_top_action,
+        on_exchange_select=on_exchange_select,
+    )
     if view_name == DASHBOARD:
         return build_dashboard_view(
             engine,
             page,
             snapshot,
             on_top_action=_on_top_action,
+            on_exchange_select=on_exchange_select,
             coin_search_query=coin_search_query,
             on_coin_search=on_coin_search,
             on_coin_refresh=on_coin_refresh,
@@ -410,7 +433,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 build_coin_table(
                     engine,
                     page,
@@ -426,7 +449,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 ft.Row(
                     expand=True,
                     spacing=15,
@@ -442,7 +465,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 build_open_positions(engine, page, snapshot),
             ],
         )
@@ -451,7 +474,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 build_dashboard_cards(snapshot),
                 build_account_panel(snapshot),
             ],
@@ -461,7 +484,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 ft.Row(
                     spacing=15,
                     controls=[
@@ -477,7 +500,7 @@ def _build_view(
             expand=True,
             spacing=15,
             controls=[
-                build_top_bar(snapshot, on_action=_on_top_action),
+                top_bar(),
                 build_bot_log(snapshot),
                 _build_notifications(engine.dashboard_service.recent_execution_alerts()),
             ],
@@ -487,6 +510,7 @@ def _build_view(
         page,
         snapshot,
         on_top_action=_on_top_action,
+        on_exchange_select=on_exchange_select,
         coin_search_query=coin_search_query,
         on_coin_search=on_coin_search,
         on_coin_refresh=on_coin_refresh,
@@ -539,6 +563,20 @@ def main(page: ft.Page):
         coin_search["query"] = (getattr(event.control, "value", "") or "").strip()
         navigate(current_view["name"])
 
+    def _handle_exchange_select(exchange_name: str) -> None:
+        try:
+            selected = engine.select_active_exchange(exchange_name)
+        except ValueError as exc:
+            logger.warning("Exchange selection rejected: %s", exc)
+            return
+        _apply_exchange_credentials_to_config(engine, selected.name)
+        try:
+            persist_env_values(_ENV_PATH, {"EXCHANGE": selected.name.lower()})
+        except OSError:
+            logger.exception("Failed to persist selected exchange")
+        # Rebuild current view so chips / status reflect the new active venue.
+        navigate(current_view["name"])
+
     def navigate(view_name: str) -> None:
         current_view["name"] = view_name
         sidebar_area.content = build_sidebar(view_name, navigate)
@@ -550,6 +588,7 @@ def main(page: ft.Page):
             coin_search_query=coin_search["query"],
             on_coin_search=_handle_coin_search,
             on_coin_refresh=_handle_coin_refresh,
+            on_exchange_select=_handle_exchange_select,
         )
         sidebar_area.update()
         content_area.update()
@@ -563,6 +602,7 @@ def main(page: ft.Page):
         coin_search_query=coin_search["query"],
         on_coin_search=_handle_coin_search,
         on_coin_refresh=_handle_coin_refresh,
+        on_exchange_select=_handle_exchange_select,
     )
 
     page.add(
@@ -592,6 +632,10 @@ def main(page: ft.Page):
                     engine,
                     page,
                     navigate,
+                    coin_search_query=coin_search["query"],
+                    on_coin_search=_handle_coin_search,
+                    on_coin_refresh=_handle_coin_refresh,
+                    on_exchange_select=_handle_exchange_select,
                 )
                 content_area.update()
             except Exception:
